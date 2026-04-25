@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: thelmic
+Version: 0.1.0
+Summary: An instrument you ride, not configure.
+Requires-Python: >=3.11
+Requires-Dist: python-rtmidi>=1.5
+Requires-Dist: fastapi>=0.115
+Requires-Dist: uvicorn[standard]>=0.30
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

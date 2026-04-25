@@ -1,0 +1,2 @@
+[console_scripts]
+thelmic = thelmic.server:main

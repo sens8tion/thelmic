@@ -28,7 +28,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 32px 16px;
+      padding: 32px 24px;
       gap: 28px;
     }
 
@@ -139,26 +139,36 @@
     .force-grid {
       width: 100%;
       max-width: 640px;
-      display: grid;
-      grid-template-columns: 160px 1fr 48px;
-      row-gap: 10px;
-      column-gap: 12px;
-      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .force-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .force-row-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
     }
 
     .force-label {
       color: var(--dim);
       font-size: 11px;
       letter-spacing: 0.08em;
-      text-align: right;
     }
 
     .force-bar-track {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 2px;
-      height: 14px;
+      height: 10px;
       overflow: hidden;
+      width: 100%;
     }
 
     .force-bar-fill {
@@ -171,7 +181,6 @@
     .force-value {
       color: var(--dim);
       font-size: 11px;
-      text-align: right;
     }
 
     /* ── Controls ── */
@@ -195,8 +204,8 @@
 
     .control-row {
       display: grid;
-      grid-template-columns: 160px 1fr 48px;
-      gap: 12px;
+      grid-template-columns: minmax(60px, 120px) 1fr 40px;
+      gap: 6px;
       align-items: center;
     }
 
@@ -245,6 +254,8 @@
       display: flex;
       gap: 12px;
       align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
     }
 
     button {
@@ -304,6 +315,106 @@
       font-size: 11px;
       letter-spacing: 0.08em;
     }
+
+    /* ── Sequencer ── */
+    .seq-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .seq-heading {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+      font-weight: normal;
+      text-transform: uppercase;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .seq-legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .seq-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+    }
+
+    .seq-legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 1px;
+    }
+
+    .seq-scroll {
+      overflow-x: auto;
+      width: 100%;
+    }
+
+    .seq-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 480px;
+    }
+
+    .seq-lane {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .seq-lane-label {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding-bottom: 1px;
+    }
+
+    .seq-lane-row {
+      display: grid;
+      /* 16 bars × 16 steps = 256 cells */
+      grid-template-columns: repeat(256, 1fr);
+      height: 18px;
+      gap: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .seq-cell {
+      height: 100%;
+      border-right: 1px solid transparent;
+    }
+
+    /* Bar dividers (every 16 steps) */
+    .seq-cell.bar-start {
+      border-left: 1px solid #333;
+    }
+
+    /* Phrase dividers (every 64 steps) */
+    .seq-cell.phrase-start {
+      border-left: 1px solid #555;
+    }
+
+    /* Role colours */
+    .seq-cell.role-anchor              { background: #c0a060; }
+    .seq-cell.role-ghost               { background: #444; }
+    .seq-cell.role-disruption          { background: #8b3a8b; }
+    .seq-cell.role-impact              { background: #e05050; }
+    .seq-cell.role-withheld_resolution { background: #2a5a8a; }
   </style>
 </head>
 <body>
@@ -329,29 +440,30 @@
 
   <!-- Force state -->
   <div class="force-grid">
-    <div class="force-label">anticipation</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-anticipation" style="width:0%"></div></div>
-    <div class="force-value" id="val-anticipation">0.00</div>
-
-    <div class="force-label">release pressure</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-release_pressure" style="width:0%"></div></div>
-    <div class="force-value" id="val-release_pressure">0.00</div>
-
-    <div class="force-label">instability</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-instability" style="width:0%"></div></div>
-    <div class="force-value" id="val-instability">0.00</div>
-
-    <div class="force-label">density</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-density" style="width:0%"></div></div>
-    <div class="force-value" id="val-density">0.00</div>
-
-    <div class="force-label">control / chaos</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-control_vs_chaos" style="width:0%"></div></div>
-    <div class="force-value" id="val-control_vs_chaos">0.00</div>
-
-    <div class="force-label">resolution likelihood</div>
-    <div class="force-bar-track"><div class="force-bar-fill" id="bar-resolution_likelihood" style="width:0%;background:#5a8a7a"></div></div>
-    <div class="force-value" id="val-resolution_likelihood">0.00</div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">anticipation</span><span class="force-value" id="val-anticipation">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-anticipation" style="width:0%"></div></div>
+    </div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">release pressure</span><span class="force-value" id="val-release_pressure">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-release_pressure" style="width:0%"></div></div>
+    </div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">instability</span><span class="force-value" id="val-instability">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-instability" style="width:0%"></div></div>
+    </div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">density</span><span class="force-value" id="val-density">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-density" style="width:0%"></div></div>
+    </div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">control / chaos</span><span class="force-value" id="val-control_vs_chaos">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-control_vs_chaos" style="width:0%"></div></div>
+    </div>
+    <div class="force-row">
+      <div class="force-row-header"><span class="force-label">resolution likelihood</span><span class="force-value" id="val-resolution_likelihood">0.00</span></div>
+      <div class="force-bar-track"><div class="force-bar-fill" id="bar-resolution_likelihood" style="width:0%;background:#5a8a7a"></div></div>
+    </div>
   </div>
 
   <!-- Controls -->
@@ -394,6 +506,15 @@
              onchange="sendBpm()" onblur="sendBpm()">
     </div>
     <div class="bank-count" id="bank-count">banks: 0</div>
+  </div>
+
+  <!-- Sequencer -->
+  <div class="seq-section" id="seq-section">
+    <h2 class="seq-heading">SEQUENCER — bank <span id="seq-bank-num">—</span></h2>
+    <div class="seq-legend" id="seq-legend"></div>
+    <div class="seq-scroll">
+      <div class="seq-grid" id="seq-grid"></div>
+    </div>
   </div>
 
   <div class="status-bar" id="status">connecting…</div>
@@ -511,6 +632,103 @@
 
       // Bank count
       document.getElementById('bank-count').textContent = `banks: ${s.bank_count}`;
+
+      // Sequencer
+      if (s.bank_events !== undefined) {
+        renderSequencer(s.bank_events, s.bank_count);
+      }
+    }
+
+    // ── Sequencer ──
+    const BARS = 16;       // 4 phrases × 4 bars
+    const STEPS = 16;      // 16th-note resolution per bar
+    const TOTAL_STEPS = BARS * STEPS;  // 256
+
+    const ROLE_COLOURS = {
+      anchor:              '#c0a060',
+      ghost:               '#444',
+      disruption:          '#8b3a8b',
+      impact:              '#e05050',
+      withheld_resolution: '#2a5a8a',
+    };
+
+    function timeToStep(timeStr) {
+      // "bar.beat.tick" — bar is 1-indexed within bank, beat 1-4, tick 0-23
+      const [bar, beat, tick] = timeStr.split('.').map(Number);
+      const beatStep = Math.floor((tick / 24) * 4); // tick→16th within beat
+      return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
+    }
+
+    function renderSequencer(events, bankCount) {
+      document.getElementById('seq-bank-num').textContent = bankCount || '—';
+
+      // Collect layers
+      const layers = [...new Set(events.map(e => e.layer))].sort();
+      if (layers.length === 0) {
+        document.getElementById('seq-grid').innerHTML = '<div style="color:#444;font-size:11px;padding:8px 0">no events — press play</div>';
+        document.getElementById('seq-legend').innerHTML = '';
+        return;
+      }
+
+      // Build step maps per layer
+      const stepMap = {};
+      layers.forEach(l => { stepMap[l] = new Array(TOTAL_STEPS).fill(null); });
+      events.forEach(e => {
+        const step = timeToStep(e.time);
+        if (step >= 0 && step < TOTAL_STEPS) {
+          stepMap[e.layer][step] = e;
+        }
+      });
+
+      // Render lanes
+      const grid = document.getElementById('seq-grid');
+      grid.innerHTML = '';
+      layers.forEach(layer => {
+        const lane = document.createElement('div');
+        lane.className = 'seq-lane';
+
+        const label = document.createElement('div');
+        label.className = 'seq-lane-label';
+        label.textContent = layer;
+        lane.appendChild(label);
+
+        const row = document.createElement('div');
+        row.className = 'seq-lane-row';
+
+        for (let s = 0; s < TOTAL_STEPS; s++) {
+          const cell = document.createElement('div');
+          cell.className = 'seq-cell';
+          if (s % (STEPS * 4) === 0) cell.classList.add('phrase-start');
+          else if (s % STEPS === 0) cell.classList.add('bar-start');
+
+          const ev = stepMap[layer][s];
+          if (ev) {
+            cell.classList.add(`role-${ev.role}`);
+            const alpha = 0.4 + ev.emphasis * 0.6;
+            cell.style.opacity = alpha.toFixed(2);
+            cell.title = `${ev.role} vel:${ev.velocity}`;
+          }
+          row.appendChild(cell);
+        }
+        lane.appendChild(row);
+        grid.appendChild(lane);
+      });
+
+      // Legend
+      const legend = document.getElementById('seq-legend');
+      legend.innerHTML = '';
+      Object.entries(ROLE_COLOURS).forEach(([role, colour]) => {
+        const item = document.createElement('div');
+        item.className = 'seq-legend-item';
+        const dot = document.createElement('div');
+        dot.className = 'seq-legend-dot';
+        dot.style.background = colour;
+        const name = document.createElement('span');
+        name.textContent = role.replace('_', ' ');
+        item.appendChild(dot);
+        item.appendChild(name);
+        legend.appendChild(item);
+      });
     }
 
     function setStatus(msg, cls) {

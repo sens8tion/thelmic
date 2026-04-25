@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,10 +34,6 @@ import pathlib
 
 _STATIC = pathlib.Path(__file__).parent / "static"
 
-app = FastAPI(title="thelmic")
-app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
-
-
 # ---------------------------------------------------------------------------
 # Engine singleton (module-level, shared across WS connections)
 # ---------------------------------------------------------------------------
@@ -47,6 +44,7 @@ _intent: Optional[IntentInput] = None
 _generator: Optional[BankGenerator] = None
 _midi: Optional[MIDIOut] = None
 _bpm: float = 174.0
+_current_bank = None   # Bank | None
 
 _playing: bool = False
 _play_thread: Optional[threading.Thread] = None
@@ -65,6 +63,21 @@ def _init_engine() -> None:
     _midi = MIDIOut()
 
 
+def _bank_events_list(bank) -> list:
+    if bank is None:
+        return []
+    events = []
+    for event in bank.all_events():
+        events.append({
+            "time": event.time,
+            "layer": event.layer,
+            "role": event.role,
+            "velocity": event.velocity,
+            "emphasis": round(event.emphasis, 2),
+        })
+    return events
+
+
 def _force_state_dict() -> dict:
     fs = _engine.force_state
     pos = _engine.landscape_position
@@ -80,6 +93,7 @@ def _force_state_dict() -> dict:
         "bank_count": len(_engine.bank_history),
         "playing": _playing,
         "bpm": _bpm,
+        "bank_events": _bank_events_list(_current_bank),
     }
 
 
@@ -96,12 +110,12 @@ async def _broadcast(msg: dict) -> None:
 
 
 def _playback_loop() -> None:
-    global _playing
+    global _playing, _current_bank
     bank_idx = 0
     while _playing:
         snapshot = _engine.begin_bank()
         bank = _generator.generate(_engine.force_state, bank_idx)
-        # Schedule the broadcast on the event loop (non-blocking from thread)
+        _current_bank = bank
         try:
             loop = _get_loop()
             asyncio.run_coroutine_threadsafe(
@@ -120,6 +134,26 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 def _get_loop() -> asyncio.AbstractEventLoop:
     return _event_loop
+
+
+# ---------------------------------------------------------------------------
+# App (lifespan defined here so all globals are in scope)
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(fastapi_app: FastAPI):
+    global _event_loop
+    _event_loop = asyncio.get_event_loop()
+    _init_engine()
+    yield
+    global _playing
+    _playing = False
+    if _midi:
+        _midi.close()
+
+
+app = FastAPI(title="thelmic", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 
 
 # ---------------------------------------------------------------------------
@@ -186,25 +220,6 @@ async def _handle_message(msg: dict) -> None:
         if key and hasattr(_controls, key):
             setattr(_controls, key, value)
         await _broadcast({"type": "state", **_force_state_dict()})
-
-
-# ---------------------------------------------------------------------------
-# Startup / shutdown
-# ---------------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup():
-    global _event_loop
-    _event_loop = asyncio.get_event_loop()
-    _init_engine()
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    global _playing
-    _playing = False
-    if _midi:
-        _midi.close()
 
 
 # ---------------------------------------------------------------------------
