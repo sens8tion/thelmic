@@ -9,6 +9,13 @@ import rtmidi
 
 from thelmic.bank_generator import Bank, TICKS_PER_BEAT, BEATS_PER_BAR
 
+# MIDI channel per instrument layer (0-indexed, i.e. ch 1–3 in DAW)
+LAYER_CHANNELS: dict[str, int] = {
+    "kick":  0,
+    "snare": 1,
+    "hat":   2,
+}
+
 
 def list_output_ports() -> list[str]:
     """Return names of all available MIDI output ports."""
@@ -80,8 +87,11 @@ class MIDIOut:
         if self._port_open:
             self._midiout.send_message([0x80 | (channel & 0xF), note & 0x7F, 0])
 
-    def play_bank_blocking(self, bank: Bank, bpm: float = 174.0, channel: int = 0) -> None:
-        """Play a bank synchronously, blocking until complete."""
+    def play_bank_blocking(self, bank: Bank, bpm: float = 174.0) -> None:
+        """Play a bank synchronously, blocking until complete.
+
+        Each layer is routed to its own MIDI channel (see LAYER_CHANNELS).
+        """
         seconds_per_tick = 60.0 / (bpm * TICKS_PER_BEAT)
         events = sorted(bank.all_events(), key=lambda e: event_to_abs_tick(e.time))
 
@@ -93,9 +103,10 @@ class MIDIOut:
             if target_time > now:
                 time.sleep(target_time - now)
             if event.velocity > 0:   # velocity 0 = withheld_resolution, display only
-                self.send_note_on(channel, event.note, event.velocity)
+                ch = LAYER_CHANNELS.get(event.layer, 0)
+                self.send_note_on(ch, event.note, event.velocity)
                 time.sleep(event.duration)
-                self.send_note_off(channel, event.note)
+                self.send_note_off(ch, event.note)
 
     def close(self) -> None:
         if self._port_open:
