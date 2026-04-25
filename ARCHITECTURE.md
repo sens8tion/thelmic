@@ -178,6 +178,40 @@ class Transport:
 - Ableton (or any DAW) receives it as a standard MIDI input
 - No DAW API calls; no tight integration
 
+### 6. Web UI
+
+- Server: FastAPI + uvicorn (`thelmic/server.py`)
+- Frontend: single-page HTML/JS, no framework (`thelmic/static/index.html`)
+- Real-time: WebSocket at `/ws` — bidirectional state sync
+- Start: `python -m thelmic.server` or `thelmic` (after `pip install -e .`)
+- Open: `http://localhost:8000`
+
+**UI controls:**
+- Axis slider (Oak → Chaos → Nott) — sends `{ type: "axis", value: 0.0–1.0 }`
+- Force state bars — live readout of all five dimensions + resolution_likelihood
+- Play / Stop — starts/stops the MIDI playback loop in a background thread
+- BPM input — updates playback speed
+- Controls section — all five `Controls` fields as sliders
+
+**WebSocket message protocol:**
+
+Client → Server:
+```json
+{ "type": "axis",    "value": 0.5 }
+{ "type": "play" }
+{ "type": "stop" }
+{ "type": "bpm",     "value": 174 }
+{ "type": "control", "key": "groove_lock", "value": 0.8 }
+```
+
+Server → Client:
+```json
+{ "type": "state", "landscape_position": 0.5, "territory": "chaos",
+  "anticipation": 0.7, "release_pressure": 0.6, "instability": 0.8,
+  "density": 0.75, "control_vs_chaos": 0.8, "resolution_likelihood": 0.3,
+  "bank_count": 4, "playing": true, "bpm": 174 }
+```
+
 ---
 
 ## Repository Structure
@@ -197,7 +231,10 @@ thelmic/
 │   ├── transport.py         ← Transport, clock integration
 │   ├── midi_out.py          ← rtmidi wrapper, virtual port management
 │   ├── intent.py            ← axis input, optional text intent parsing (stub)
-│   └── landscape.py         ← territory definitions, axis → force mappings
+│   ├── landscape.py         ← territory definitions, axis → force mappings
+│   ├── server.py            ← FastAPI app, WebSocket, playback loop
+│   └── static/
+│       └── index.html       ← single-page web UI
 │
 ├── tests/
 │   ├── test_force_engine.py
@@ -216,7 +253,13 @@ thelmic/
 
 ## Build Order
 
-### Phase 1 — Force engine + kick (first working output)
+### Phase UI — Web interface (complete)
+- FastAPI server with WebSocket at `/ws`
+- Single-page HTML/JS UI: axis slider, force state bars, transport, controls
+- Playback runs in background thread; axis updates are live
+- Run: `python -m thelmic.server` → open `http://localhost:8000`
+
+### Phase 1 — Force engine + kick (complete)
 - Implement `ForceState`, `ForceEngine` with landscape_position input
 - Implement `Controls` with defaults
 - Implement `BankGenerator` for kick only
@@ -320,9 +363,10 @@ Each of these is one session, possibly two if something is genuinely complex:
 
 | Phase | Target |
 |-------|--------|
-| 1a | Implement `ForceState`, `ForceEngine`, `Controls`, `landscape.py` |
-| 1b | Implement `BankGenerator` (kick only) + `MIDIEvent` |
-| 1c | Implement `MIDIOut`, wire `kick_only.py`, verify MIDI output |
+| UI | ~~FastAPI server + HTML/JS UI~~ **done** |
+| 1a | ~~ForceState, ForceEngine, Controls, landscape.py~~ **done** |
+| 1b | ~~BankGenerator (kick only) + MIDIEvent~~ **done** |
+| 1c | Verify MIDI output sounds correct; tune force profiles by ear |
 | 1d | Write `test_force_engine.py` and `test_bank_generator.py` |
 | 2  | Implement `Transport` with queue and interrupt |
 | 3  | Extend `BankGenerator` for snare/hat, no inter-instrument logic |
