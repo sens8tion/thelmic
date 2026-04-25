@@ -1,16 +1,13 @@
-"""Rhythmic archetypes — probability distributions and expectation maps for kick placement.
+"""Rhythmic archetypes — probability distributions and expectation maps for kick, snare, hat.
 
-Each archetype encodes two things:
+Each archetype encodes six 16-float arrays:
 
-  kick_probs   — 16 floats (0.0–1.0): probability of a kick on each 16th-note slot per bar.
-                 These are BASE probabilities, scaled by density before use.
+  kick_probs / expectation  — kick drum probability and listener expectation per slot
+  snare_probs / snare_exp   — snare drum probability and expectation
+  hat_probs / hat_exp       — hi-hat probability and expectation
+                              (note selection: slot%4==2 → open hat; else closed hat)
 
-  expectation  — 16 floats (0.0–1.0): how strongly a listener familiar with this genre
-                 expects a kick on each slot. Drives role assignment:
-                   - hit on high-expectation slot  → anchor / impact
-                   - hit on low-expectation slot   → ghost / disruption
-                   - NO hit on high-expectation slot under high anticipation
-                                                   → withheld_resolution
+BASE probabilities are scaled by density and force before use.
 
 Slot index reference (0-indexed, 4/4 at 16th-note resolution):
   0  = beat 1 (downbeat)        8  = beat 3
@@ -29,6 +26,7 @@ Kick archetypes deliberately avoid or approach these slots as part of their iden
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 
 @dataclass(frozen=True)
@@ -36,10 +34,24 @@ class RhythmArchetype:
     name: str
     genre: str
     description: str
-    kick_probs: tuple[float, ...]   # 16 values
-    expectation: tuple[float, ...]  # 16 values
-    density_index: float            # 0.0=sparse → 1.0=dense; used for archetype ordering
-    grid_conformity: float          # 0.0=loose → 1.0=rigid; how locked to the grid
+    kick_probs: tuple[float, ...]    # 16 values — kick placement probability
+    expectation: tuple[float, ...]   # 16 values — kick listener expectation
+    snare_probs: tuple[float, ...]   # 16 values — snare placement probability
+    snare_exp: tuple[float, ...]     # 16 values — snare listener expectation
+    hat_probs: tuple[float, ...]     # 16 values — hat placement probability
+    hat_exp: tuple[float, ...]       # 16 values — hat listener expectation
+    density_index: float             # 0.0=sparse → 1.0=dense; used for archetype ordering
+    grid_conformity: float           # 0.0=loose → 1.0=rigid
+
+
+class DrumBlend(NamedTuple):
+    """Complete drum pattern blend returned by select_blend()."""
+    kick_probs:  list[float]   # 16 values
+    kick_exp:    list[float]
+    snare_probs: list[float]
+    snare_exp:   list[float]
+    hat_probs:   list[float]
+    hat_exp:     list[float]
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +77,30 @@ TWO_STEP = RhythmArchetype(
         0.1,  0.0,  0.1,  0.0,
         0.0,  0.0,  0.0,  0.0,
     ),
+    snare_probs=(
+        0.0,  0.0,  0.25, 0.05,  # ghost before beat 2
+        0.95, 0.0,  0.1,  0.2,   # beat 2 backbone + ghost after
+        0.0,  0.0,  0.25, 0.05,  # ghost before beat 4
+        0.95, 0.0,  0.1,  0.2,   # beat 4 backbone + ghost after
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.15, 0.0,
+        1.0,  0.0,  0.0,  0.1,
+        0.0,  0.0,  0.15, 0.0,
+        1.0,  0.0,  0.0,  0.1,
+    ),
+    hat_probs=(
+        0.75, 0.2,  0.85, 0.1,   # 8ths strong, light 16th fill
+        0.65, 0.15, 0.9,  0.1,   # 2-and very active (open hat feel)
+        0.75, 0.2,  0.85, 0.1,
+        0.65, 0.15, 0.9,  0.1,
+    ),
+    hat_exp=(
+        0.6,  0.1,  0.8,  0.0,
+        0.5,  0.1,  0.9,  0.0,
+        0.6,  0.1,  0.8,  0.0,
+        0.5,  0.1,  0.9,  0.0,
+    ),
     density_index=0.35,
     grid_conformity=0.75,
 )
@@ -87,6 +123,30 @@ ROLLING = RhythmArchetype(
         0.0,  0.8,  0.0,  0.0,
         0.8,  0.0,  0.0,  0.3,
     ),
+    snare_probs=(
+        0.0,  0.0,  0.3,  0.1,
+        0.95, 0.0,  0.15, 0.25,
+        0.0,  0.0,  0.3,  0.1,
+        0.95, 0.0,  0.15, 0.25,
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.2,  0.0,
+        1.0,  0.0,  0.0,  0.15,
+        0.0,  0.0,  0.2,  0.0,
+        1.0,  0.0,  0.0,  0.15,
+    ),
+    hat_probs=(
+        0.8,  0.3,  0.9,  0.2,   # busy 16th feel to match rolling kick
+        0.7,  0.25, 0.9,  0.2,
+        0.8,  0.3,  0.9,  0.2,
+        0.7,  0.25, 0.9,  0.2,
+    ),
+    hat_exp=(
+        0.7,  0.2,  0.8,  0.1,
+        0.6,  0.15, 0.9,  0.1,
+        0.7,  0.2,  0.8,  0.1,
+        0.6,  0.15, 0.9,  0.1,
+    ),
     density_index=0.6,
     grid_conformity=0.7,
 )
@@ -108,6 +168,30 @@ HALF_STEP = RhythmArchetype(
         0.0,  0.0,  0.0,  0.0,
         0.3,  0.0,  0.0,  0.0,
         0.0,  0.0,  0.0,  0.0,
+    ),
+    snare_probs=(
+        0.0,  0.0,  0.05, 0.0,   # very minimal ghosts
+        0.95, 0.0,  0.0,  0.05,  # tight beat 2
+        0.0,  0.0,  0.05, 0.0,
+        0.95, 0.0,  0.0,  0.05,  # tight beat 4
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.0,  0.0,
+        1.0,  0.0,  0.0,  0.0,
+        0.0,  0.0,  0.0,  0.0,
+        1.0,  0.0,  0.0,  0.0,
+    ),
+    hat_probs=(
+        0.3,  0.0,  0.55, 0.0,   # sparse — just upbeats
+        0.3,  0.0,  0.55, 0.0,
+        0.3,  0.0,  0.55, 0.0,
+        0.3,  0.0,  0.55, 0.0,
+    ),
+    hat_exp=(
+        0.2,  0.0,  0.5,  0.0,
+        0.2,  0.0,  0.5,  0.0,
+        0.2,  0.0,  0.5,  0.0,
+        0.2,  0.0,  0.5,  0.0,
     ),
     density_index=0.1,
     grid_conformity=0.9,
@@ -132,6 +216,30 @@ SHUFFLED_TWO_STEP = RhythmArchetype(
         0.3,  0.0,  0.1,  0.0,
         0.0,  0.0,  0.1,  0.0,
     ),
+    snare_probs=(
+        0.0,  0.0,  0.2,  0.3,   # jungle swing ghost before beat 2
+        0.9,  0.05, 0.15, 0.35,  # beat 2 + ghost after
+        0.0,  0.0,  0.2,  0.3,   # jungle swing ghost before beat 4
+        0.9,  0.05, 0.15, 0.35,  # beat 4 + ghost after
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.1,  0.2,
+        1.0,  0.0,  0.0,  0.2,
+        0.0,  0.0,  0.1,  0.2,
+        1.0,  0.0,  0.0,  0.2,
+    ),
+    hat_probs=(
+        0.6,  0.3,  0.75, 0.35,  # swing: energy on "ah" positions
+        0.5,  0.25, 0.8,  0.35,
+        0.6,  0.3,  0.75, 0.35,
+        0.5,  0.25, 0.8,  0.35,
+    ),
+    hat_exp=(
+        0.5,  0.2,  0.7,  0.2,
+        0.4,  0.15, 0.8,  0.2,
+        0.5,  0.2,  0.7,  0.2,
+        0.4,  0.15, 0.8,  0.2,
+    ),
     density_index=0.45,
     grid_conformity=0.5,
 )
@@ -154,6 +262,30 @@ AMEN = RhythmArchetype(
         0.6,  0.0,  0.2,  0.0,
         0.9,  0.0,  0.4,  0.0,
         0.1,  0.0,  0.0,  0.0,
+    ),
+    snare_probs=(
+        0.25, 0.0,  0.35, 0.1,   # break-derived ghost on beat 1
+        0.9,  0.05, 0.25, 0.3,   # beat 2 backbone + fills
+        0.25, 0.0,  0.35, 0.15,  # break-derived ghost on beat 3
+        0.9,  0.1,  0.25, 0.3,   # beat 4 backbone + complex
+    ),
+    snare_exp=(
+        0.15, 0.0,  0.2,  0.0,
+        0.9,  0.0,  0.1,  0.2,
+        0.2,  0.0,  0.2,  0.0,
+        0.9,  0.0,  0.1,  0.2,
+    ),
+    hat_probs=(
+        0.7,  0.4,  0.8,  0.45,  # near 16th feel — very complex
+        0.6,  0.35, 0.85, 0.4,
+        0.7,  0.4,  0.8,  0.45,
+        0.6,  0.35, 0.85, 0.35,
+    ),
+    hat_exp=(
+        0.6,  0.3,  0.7,  0.25,
+        0.5,  0.2,  0.8,  0.25,
+        0.6,  0.3,  0.7,  0.25,
+        0.5,  0.2,  0.8,  0.25,
     ),
     density_index=0.7,
     grid_conformity=0.4,
@@ -178,6 +310,30 @@ STUTTER = RhythmArchetype(
         0.8,  0.6,  0.0,  0.0,
         0.0,  0.0,  0.0,  0.0,
     ),
+    snare_probs=(
+        0.0,  0.0,  0.15, 0.0,
+        0.95, 0.5,  0.0,  0.1,   # stutter on the snare too
+        0.0,  0.0,  0.15, 0.0,
+        0.95, 0.5,  0.0,  0.1,
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.0,  0.0,
+        1.0,  0.4,  0.0,  0.0,
+        0.0,  0.0,  0.0,  0.0,
+        1.0,  0.4,  0.0,  0.0,
+    ),
+    hat_probs=(
+        0.8,  0.1,  0.5,  0.1,   # heavy on downbeats, sparse elsewhere
+        0.8,  0.1,  0.5,  0.1,
+        0.8,  0.1,  0.5,  0.1,
+        0.8,  0.1,  0.5,  0.1,
+    ),
+    hat_exp=(
+        0.7,  0.0,  0.3,  0.0,
+        0.7,  0.0,  0.3,  0.0,
+        0.7,  0.0,  0.3,  0.0,
+        0.7,  0.0,  0.3,  0.0,
+    ),
     density_index=0.5,
     grid_conformity=0.85,
 )
@@ -200,6 +356,30 @@ FOUR_ON_THE_FLOOR = RhythmArchetype(
         1.0,  0.0,  0.0,  0.0,
         1.0,  0.0,  0.0,  0.0,
         1.0,  0.0,  0.0,  0.0,
+    ),
+    snare_probs=(
+        0.0,  0.0,  0.15, 0.05,
+        0.95, 0.0,  0.1,  0.1,
+        0.0,  0.0,  0.15, 0.05,
+        0.95, 0.0,  0.1,  0.1,
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.1,  0.0,
+        1.0,  0.0,  0.0,  0.05,
+        0.0,  0.0,  0.1,  0.0,
+        1.0,  0.0,  0.0,  0.05,
+    ),
+    hat_probs=(
+        0.85, 0.1,  0.85, 0.1,   # straight 8ths, very regular
+        0.85, 0.1,  0.85, 0.1,
+        0.85, 0.1,  0.85, 0.1,
+        0.85, 0.1,  0.85, 0.1,
+    ),
+    hat_exp=(
+        0.8,  0.0,  0.8,  0.0,
+        0.8,  0.0,  0.8,  0.0,
+        0.8,  0.0,  0.8,  0.0,
+        0.8,  0.0,  0.8,  0.0,
     ),
     density_index=0.75,
     grid_conformity=1.0,
@@ -224,6 +404,30 @@ BREAKBEAT_HARDCORE = RhythmArchetype(
         0.9,  0.0,  0.2,  0.0,
         0.2,  0.0,  0.4,  0.0,
     ),
+    snare_probs=(
+        0.15, 0.0,  0.25, 0.1,
+        0.95, 0.0,  0.2,  0.25,
+        0.2,  0.0,  0.3,  0.1,
+        0.95, 0.0,  0.2,  0.25,
+    ),
+    snare_exp=(
+        0.1,  0.0,  0.15, 0.0,
+        1.0,  0.0,  0.1,  0.15,
+        0.15, 0.0,  0.2,  0.0,
+        1.0,  0.0,  0.1,  0.15,
+    ),
+    hat_probs=(
+        0.75, 0.25, 0.8,  0.2,
+        0.65, 0.2,  0.85, 0.25,
+        0.75, 0.25, 0.8,  0.2,
+        0.65, 0.2,  0.85, 0.25,
+    ),
+    hat_exp=(
+        0.6,  0.15, 0.7,  0.1,
+        0.5,  0.1,  0.8,  0.15,
+        0.6,  0.15, 0.7,  0.1,
+        0.5,  0.1,  0.8,  0.15,
+    ),
     density_index=0.55,
     grid_conformity=0.55,
 )
@@ -247,6 +451,30 @@ HAPPY_HARDCORE = RhythmArchetype(
         1.0,  0.0,  0.3,  0.0,
         1.0,  0.0,  0.4,  0.0,
     ),
+    snare_probs=(
+        0.0,  0.0,  0.3,  0.1,
+        0.95, 0.0,  0.25, 0.2,
+        0.0,  0.0,  0.3,  0.1,
+        0.95, 0.0,  0.35, 0.2,
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.2,  0.0,
+        1.0,  0.0,  0.15, 0.1,
+        0.0,  0.0,  0.2,  0.0,
+        1.0,  0.0,  0.2,  0.1,
+    ),
+    hat_probs=(
+        0.9,  0.5,  0.9,  0.45,  # very busy bouncy 16ths
+        0.85, 0.45, 0.95, 0.5,
+        0.9,  0.5,  0.9,  0.45,
+        0.85, 0.45, 0.95, 0.5,
+    ),
+    hat_exp=(
+        0.8,  0.35, 0.8,  0.3,
+        0.75, 0.3,  0.9,  0.35,
+        0.8,  0.35, 0.8,  0.3,
+        0.75, 0.3,  0.9,  0.35,
+    ),
     density_index=0.85,
     grid_conformity=0.9,
 )
@@ -269,6 +497,30 @@ GABBER = RhythmArchetype(
         1.0,  0.2,  0.2,  0.2,
         1.0,  0.2,  0.2,  0.2,
         1.0,  0.2,  0.2,  0.2,
+    ),
+    snare_probs=(
+        0.0,  0.0,  0.1,  0.0,
+        0.7,  0.0,  0.05, 0.05,  # backbone weakened; kick dominates
+        0.0,  0.0,  0.1,  0.0,
+        0.7,  0.0,  0.05, 0.05,
+    ),
+    snare_exp=(
+        0.0,  0.0,  0.0,  0.0,
+        0.8,  0.0,  0.0,  0.0,
+        0.0,  0.0,  0.0,  0.0,
+        0.8,  0.0,  0.0,  0.0,
+    ),
+    hat_probs=(
+        0.4,  0.15, 0.4,  0.1,   # sparse — kick fills the texture
+        0.4,  0.1,  0.4,  0.1,
+        0.4,  0.15, 0.4,  0.1,
+        0.4,  0.1,  0.4,  0.1,
+    ),
+    hat_exp=(
+        0.3,  0.0,  0.3,  0.0,
+        0.3,  0.0,  0.3,  0.0,
+        0.3,  0.0,  0.3,  0.0,
+        0.3,  0.0,  0.3,  0.0,
     ),
     density_index=1.0,
     grid_conformity=0.95,
@@ -299,35 +551,30 @@ def select_blend(
     density: float,
     instability: float,
     landscape_position: float,
-) -> tuple[list[float], list[float]]:
-    """Return (kick_probs, expectation) blended from archetypes for the given force state.
+) -> DrumBlend:
+    """Return a DrumBlend (kick, snare, hat probs + expectations) for the given force state.
 
     Selection logic:
       - landscape_position determines the territory (Oak / Chaos / Nott)
       - density selects the base archetype within that territory
-      - instability blends toward the territory's disruption archetype
+      - instability blends toward the territory's disruption archetype (capped 65%)
 
-    Returns lists of 16 floats ready to use in generation.
+    All six arrays are 16 floats ready for use in generation.
     """
     # --- Primary archetype by territory and density ---
 
     if landscape_position > 0.67:
         # Nott: dark and sparse. Half-step regardless of density.
-        # Deep into Nott, blend from two-step toward pure half-step.
         nott_depth = (landscape_position - 0.67) / 0.33  # 0→1
-        base_probs = _lerp_probs(TWO_STEP.kick_probs, HALF_STEP.kick_probs, nott_depth * 0.85)
-        base_exp   = _lerp_probs(TWO_STEP.expectation, HALF_STEP.expectation, nott_depth * 0.85)
-        disrupt_arch = STUTTER  # jagged dark interruptions
+        t = nott_depth * 0.85
+        primary, secondary = TWO_STEP, HALF_STEP
+        disrupt_arch = STUTTER
 
     elif landscape_position > 0.33:
         # Chaos: principled complexity. Blends between shuffled two-step and amen.
         chaos_depth = (landscape_position - 0.33) / 0.34  # 0→1
-        base_probs = _lerp_probs(
-            SHUFFLED_TWO_STEP.kick_probs, AMEN.kick_probs, density * chaos_depth
-        )
-        base_exp = _lerp_probs(
-            SHUFFLED_TWO_STEP.expectation, AMEN.expectation, density * chaos_depth
-        )
+        t = density * chaos_depth
+        primary, secondary = SHUFFLED_TWO_STEP, AMEN
         disrupt_arch = GABBER if density > 0.65 else STUTTER
 
     else:
@@ -344,17 +591,27 @@ def select_blend(
         else:
             primary, secondary = FOUR_ON_THE_FLOOR, HAPPY_HARDCORE
             t = (density - 0.72) / 0.28
-        base_probs = _lerp_probs(primary.kick_probs, secondary.kick_probs, t)
-        base_exp   = _lerp_probs(primary.expectation, secondary.expectation, t)
         disrupt_arch = BREAKBEAT_HARDCORE
 
-    # --- Instability blends toward the disruption archetype ---
-    # Cap at 65% so base archetype is always audible.
-    inst_t = min(instability * 0.65, 0.65)
-    final_probs = _lerp_probs(base_probs, disrupt_arch.kick_probs, inst_t)
-    final_exp   = _lerp_probs(base_exp,   disrupt_arch.expectation,  inst_t)
+    # --- Base blend ---
+    base_kick_probs  = _lerp_probs(primary.kick_probs,   secondary.kick_probs,   t)
+    base_kick_exp    = _lerp_probs(primary.expectation,   secondary.expectation,   t)
+    base_snare_probs = _lerp_probs(primary.snare_probs,  secondary.snare_probs,  t)
+    base_snare_exp   = _lerp_probs(primary.snare_exp,    secondary.snare_exp,    t)
+    base_hat_probs   = _lerp_probs(primary.hat_probs,    secondary.hat_probs,    t)
+    base_hat_exp     = _lerp_probs(primary.hat_exp,      secondary.hat_exp,      t)
 
-    return final_probs, final_exp
+    # --- Instability blends toward the disruption archetype (capped 65%) ---
+    inst_t = min(instability * 0.65, 0.65)
+
+    return DrumBlend(
+        kick_probs  = _lerp_probs(base_kick_probs,  disrupt_arch.kick_probs,  inst_t),
+        kick_exp    = _lerp_probs(base_kick_exp,    disrupt_arch.expectation,  inst_t),
+        snare_probs = _lerp_probs(base_snare_probs, disrupt_arch.snare_probs, inst_t),
+        snare_exp   = _lerp_probs(base_snare_exp,   disrupt_arch.snare_exp,   inst_t),
+        hat_probs   = _lerp_probs(base_hat_probs,   disrupt_arch.hat_probs,   inst_t),
+        hat_exp     = _lerp_probs(base_hat_exp,     disrupt_arch.hat_exp,     inst_t),
+    )
 
 
 def archetype_name_at(

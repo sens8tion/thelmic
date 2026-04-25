@@ -6,7 +6,8 @@ from thelmic.controls import Controls
 from thelmic.force_engine import ForceState
 from thelmic.landscape import OAK_PROFILE, CHAOS_PROFILE, NOTT_PROFILE
 
-VALID_ROLES = {"anchor", "ghost", "disruption", "impact", "withheld_resolution"}
+VALID_ROLES  = {"anchor", "ghost", "disruption", "impact", "withheld_resolution"}
+VALID_LAYERS = {"kick", "snare", "hat"}
 
 
 def _gen(force: ForceState, pos: float = 0.0, seed: int = 42) -> "Bank":
@@ -20,9 +21,9 @@ class TestBankStructure:
     def test_bank_has_events(self):
         assert len(_gen(OAK_PROFILE).all_events()) > 0
 
-    def test_all_events_are_kick(self):
+    def test_all_events_have_valid_layer(self):
         for e in _gen(OAK_PROFILE).all_events():
-            assert e.layer == "kick"
+            assert e.layer in VALID_LAYERS
 
     def test_all_roles_valid(self):
         for e in _gen(CHAOS_PROFILE, pos=0.5).all_events():
@@ -50,8 +51,8 @@ class TestArchetypeDrivenDensity:
             instability=0.2, density=0.2, control_vs_chaos=0.3,
         )
         bank = _gen(sparse, pos=0.9)
-        events_per_bar = len([e for e in bank.all_events() if e.velocity > 0]) / (PHRASES_PER_BANK * BARS_PER_PHRASE)
-        assert events_per_bar <= 2.5, f"Expected sparse half-step, got {events_per_bar:.1f} hits/bar"
+        kick_per_bar = len([e for e in bank.all_events() if e.layer == "kick" and e.velocity > 0]) / (PHRASES_PER_BANK * BARS_PER_PHRASE)
+        assert kick_per_bar <= 2.5, f"Expected sparse kick in half-step, got {kick_per_bar:.1f} kicks/bar"
 
     def test_four_on_floor_denser_than_two_step(self):
         two_step = ForceState(
