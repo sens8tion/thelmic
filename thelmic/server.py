@@ -27,7 +27,7 @@ from thelmic.controls import Controls
 from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
 from thelmic.landscape import territory_at
-from thelmic.midi_out import MIDIOut
+from thelmic.midi_out import MIDIOut, list_output_ports
 
 import importlib.resources as _res
 import pathlib
@@ -60,7 +60,17 @@ def _init_engine() -> None:
     _controls = Controls()
     _intent = IntentInput(_engine)
     _generator = BankGenerator(controls=_controls)
-    _midi = MIDIOut()
+    # MIDI init is deferred — no port selected yet
+    _midi = None
+
+
+def _open_midi_port(port_name: Optional[str]) -> str:
+    """Open (or switch to) a MIDI port. Returns the connected port name."""
+    global _midi
+    if _midi is not None:
+        _midi.close()
+    _midi = MIDIOut(port_name=port_name)
+    return _midi.port_name
 
 
 def _bank_events_list(bank) -> list:
@@ -94,6 +104,7 @@ def _force_state_dict() -> dict:
         "playing": _playing,
         "bpm": _bpm,
         "bank_events": _bank_events_list(_current_bank),
+        "midi_port": _midi.port_name if _midi else None,
     }
 
 
@@ -123,6 +134,9 @@ def _playback_loop() -> None:
             )
         except Exception:
             pass
+        if _midi is None:
+            _playing = False
+            break
         _midi.play_bank_blocking(bank, bpm=_bpm)
         _engine.commit_bank(snapshot)
         bank_idx += 1
@@ -199,6 +213,9 @@ async def _handle_message(msg: dict) -> None:
 
     elif kind == "play":
         global _playing, _play_thread
+        if _midi is None:
+            await _broadcast({"type": "error", "message": "No MIDI port selected. Choose a port first."})
+            return
         with _play_lock:
             if not _playing:
                 _playing = True
@@ -220,6 +237,19 @@ async def _handle_message(msg: dict) -> None:
         if key and hasattr(_controls, key):
             setattr(_controls, key, value)
         await _broadcast({"type": "state", **_force_state_dict()})
+
+    elif kind == "midi_port":
+        port_name = msg.get("value")
+        try:
+            connected = _open_midi_port(port_name)
+            await _broadcast({"type": "state", **_force_state_dict()})
+        except RuntimeError as e:
+            await _broadcast({"type": "error", "message": str(e)})
+
+
+@app.get("/api/midi-ports")
+async def get_midi_ports():
+    return {"ports": list_output_ports()}
 
 
 # ---------------------------------------------------------------------------

@@ -316,6 +316,51 @@
       letter-spacing: 0.08em;
     }
 
+    /* ── MIDI section ── */
+    .midi-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .midi-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #midi-port-select {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 2px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .midi-refresh-btn {
+      padding: 6px 10px;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .midi-status {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+    }
+
+    .midi-status.connected { color: var(--oak); }
+    .midi-status.error     { color: #a04040; }
+
     /* ── Sequencer ── */
     .seq-section {
       width: 100%;
@@ -497,6 +542,18 @@
     </div>
   </div>
 
+  <!-- MIDI port selector -->
+  <div class="midi-section">
+    <h2 class="seq-heading" style="border-top:none;padding-top:0">MIDI OUT</h2>
+    <div class="midi-row">
+      <select id="midi-port-select" onchange="selectMidiPort()">
+        <option value="">— select port —</option>
+      </select>
+      <button class="midi-refresh-btn" onclick="refreshPorts()" title="Refresh ports">⟳</button>
+      <div class="midi-status" id="midi-status">not connected</div>
+    </div>
+  </div>
+
   <!-- Transport -->
   <div class="transport">
     <button id="play-btn" onclick="togglePlay()">PLAY</button>
@@ -530,6 +587,7 @@
       ws.onopen = () => {
         setStatus('connected', 'ok');
         clearTimeout(reconnectTimer);
+        onConnected();
       };
 
       ws.onclose = () => {
@@ -544,6 +602,7 @@
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'state') applyState(msg);
+        else if (msg.type === 'error') setStatus(msg.message, 'err');
       };
     }
 
@@ -633,10 +692,50 @@
       // Bank count
       document.getElementById('bank-count').textContent = `banks: ${s.bank_count}`;
 
+      // MIDI port status
+      const midiStatus = document.getElementById('midi-status');
+      if (s.midi_port) {
+        midiStatus.textContent = s.midi_port;
+        midiStatus.className = 'midi-status connected';
+      } else {
+        midiStatus.textContent = 'not connected';
+        midiStatus.className = 'midi-status';
+      }
+
       // Sequencer
       if (s.bank_events !== undefined) {
         renderSequencer(s.bank_events, s.bank_count);
       }
+    }
+
+    // ── MIDI ports ──
+    async function refreshPorts() {
+      try {
+        const res = await fetch('/api/midi-ports');
+        const data = await res.json();
+        const sel = document.getElementById('midi-port-select');
+        const current = sel.value;
+        sel.innerHTML = '<option value="">— select port —</option>';
+        data.ports.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          if (p === current) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        setStatus('failed to list MIDI ports', 'err');
+      }
+    }
+
+    function selectMidiPort() {
+      const val = document.getElementById('midi-port-select').value;
+      if (val) send({ type: 'midi_port', value: val });
+    }
+
+    // Load ports on connect
+    function onConnected() {
+      refreshPorts();
     }
 
     // ── Sequencer ──
