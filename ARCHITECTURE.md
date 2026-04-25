@@ -150,6 +150,73 @@ class MIDIEvent:
 5. Expression layer (CC automation)
 6. Voice/sample layer
 
+### 3a. Rhythmic Archetype System
+
+Kick placement is driven by **probability distributions and expectation maps** derived
+from dance music genre conventions (`thelmic/archetypes.py`), not uniform random sampling.
+
+**Slot index reference** (0-indexed, 4/4 at 16th-note resolution):
+
+```
+0  = beat 1 (downbeat)     8  = beat 3
+1  = "1-e"                 9  = "3-e"
+2  = "1-and"               10 = "3-and"
+3  = "1-ah"                11 = "3-ah"
+4  = beat 2                12 = beat 4
+5  = "2-e"                 13 = "4-e"
+6  = "2-and"               14 = "4-and"
+7  = "2-ah"                15 = "4-ah"
+```
+
+Beats 2 and 4 (slots 4 and 12) are snare territory in all DnB archetypes — kick
+archetypes deliberately avoid or approach these slots as part of their identity.
+
+**The 10 archetypes:**
+
+| Name | Genre | Key slots | Density |
+|------|-------|-----------|---------|
+| `half_step` | Neurofunk / dark DnB | 0 only | 0.10 |
+| `two_step` | DnB signature | 0, 6 | 0.35 |
+| `shuffled_two_step` | Jungle | 0, 6 + swing fills | 0.45 |
+| `stutter` | DnB / hardcore | 0–1, 8–9 double-hits | 0.50 |
+| `rolling` | Liquid / tech-step | 0, 3, 6, 9, 12 (every 3rd) | 0.60 |
+| `breakbeat_hardcore` | Early UK rave | 0, 6, 8, 14 complex | 0.55 |
+| `four_on_the_floor` | House / hardcore / techno | 0, 4, 8, 12 | 0.75 |
+| `happy_hardcore` | Bouncy hardcore | 0, 2, 4, 6, 8, 10, 12, 14 | 0.85 |
+| `amen` | Jungle / DnB break | Multi-hit: 0, 2, 4, 6, 8, 10 | 0.70 |
+| `gabber` | Industrial hardcore | Near-continuous | 1.00 |
+
+**Archetype selection** (`select_blend(density, instability, landscape_position)`):
+
+```
+Oak  (pos < 0.33):  density selects along half_step → two_step → rolling
+                    → four_on_the_floor → happy_hardcore
+                    Disruption archetype: breakbeat_hardcore
+
+Chaos (0.33–0.67):  blends shuffled_two_step → amen, weighted by (density × chaos_depth)
+                    Disruption archetype: gabber (density > 0.65) or stutter
+
+Nott (pos > 0.67):  blends two_step → half_step with increasing nott_depth
+                    Disruption archetype: stutter
+```
+
+In all territories, `instability` blends the base archetype toward the disruption
+archetype (capped at 65% so the base is always audible).
+
+**Role assignment** uses the expectation map of the selected blend:
+
+```
+slot expectation ≥ 0.7  →  anchor (or impact if release_pressure > 0.6 on final phrase)
+slot expectation < 0.25 + high instability  →  disruption (probabilistic)
+slot expectation < 0.25  →  ghost
+slot fired on any other mid-expectation slot  →  anchor
+unfired slot with expectation ≥ 0.7 (last bar, high anticipation)  →  withheld_resolution
+```
+
+`withheld_resolution` events have `velocity=0` and are display-only — they mark expected
+hits that were deliberately withheld. They appear in the sequencer grid as blue blocks
+but produce no MIDI output.
+
 ### 4. Transport
 
 ```
@@ -209,8 +276,21 @@ Server → Client:
 { "type": "state", "landscape_position": 0.5, "territory": "chaos",
   "anticipation": 0.7, "release_pressure": 0.6, "instability": 0.8,
   "density": 0.75, "control_vs_chaos": 0.8, "resolution_likelihood": 0.3,
-  "bank_count": 4, "playing": true, "bpm": 174 }
+  "bank_count": 4, "playing": true, "bpm": 174,
+  "archetype": "amen+disruption", "midi_port": "poodle 0",
+  "bank_events": [{ "time": "1.1.0", "layer": "kick", "role": "anchor",
+                    "velocity": 100, "emphasis": 0.8 }, ...] }
 ```
+
+`midi_port` is `null` until a port is selected. `bank_events` is the full event list
+for the current bank (including velocity-0 `withheld_resolution` display events).
+
+**MIDI port selection** (WebSocket):
+```json
+{ "type": "midi_port", "value": "poodle" }
+```
+Server opens the named loopMIDI port (case-insensitive substring match). REST endpoint
+`GET /api/midi-ports` returns the current list of available output ports.
 
 ---
 
@@ -227,6 +307,7 @@ thelmic/
 │   ├── __init__.py
 │   ├── force_engine.py      ← ForceState, ForceEngine, BankSnapshot, TransitionEvent
 │   ├── controls.py          ← Controls dataclass
+│   ├── archetypes.py        ← 10 rhythm archetypes, select_blend(), archetype_name_at()
 │   ├── bank_generator.py    ← Bank, Phrase, MIDIEvent, BankGenerator
 │   ├── transport.py         ← Transport, clock integration
 │   ├── midi_out.py          ← rtmidi wrapper, virtual port management
@@ -366,8 +447,9 @@ Each of these is one session, possibly two if something is genuinely complex:
 | UI | ~~FastAPI server + HTML/JS UI~~ **done** |
 | 1a | ~~ForceState, ForceEngine, Controls, landscape.py~~ **done** |
 | 1b | ~~BankGenerator (kick only) + MIDIEvent~~ **done** |
-| 1c | Verify MIDI output sounds correct; tune force profiles by ear |
-| 1d | Write `test_force_engine.py` and `test_bank_generator.py` |
+| 1c | ~~Archetype system (10 archetypes, expectation maps, role assignment)~~ **done** |
+| 1d | ~~Write `test_force_engine.py` and `test_bank_generator.py`~~ **done** |
+| 1e | Verify MIDI output sounds correct; tune force profiles by ear |
 | 2  | Implement `Transport` with queue and interrupt |
 | 3  | Extend `BankGenerator` for snare/hat, no inter-instrument logic |
 | 4  | Inter-instrument roles in force engine and generator |

@@ -92,9 +92,10 @@ class MIDIOut:
             now = time.perf_counter()
             if target_time > now:
                 time.sleep(target_time - now)
-            self.send_note_on(channel, event.note, event.velocity)
-            time.sleep(event.duration)
-            self.send_note_off(channel, event.note)
+            if event.velocity > 0:   # velocity 0 = withheld_resolution, display only
+                self.send_note_on(channel, event.note, event.velocity)
+                time.sleep(event.duration)
+                self.send_note_off(channel, event.note)
 
     def close(self) -> None:
         if self._port_open:

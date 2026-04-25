@@ -27,6 +27,7 @@ from thelmic.controls import Controls
 from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
 from thelmic.landscape import territory_at
+from thelmic.archetypes import archetype_name_at
 from thelmic.midi_out import MIDIOut, list_output_ports
 
 import importlib.resources as _res
@@ -105,6 +106,11 @@ def _force_state_dict() -> dict:
         "bpm": _bpm,
         "bank_events": _bank_events_list(_current_bank),
         "midi_port": _midi.port_name if _midi else None,
+        "archetype": archetype_name_at(
+            density=_engine.force_state.density,
+            instability=_engine.force_state.instability,
+            landscape_position=_engine.landscape_position,
+        ),
     }
 
 
@@ -125,7 +131,7 @@ def _playback_loop() -> None:
     bank_idx = 0
     while _playing:
         snapshot = _engine.begin_bank()
-        bank = _generator.generate(_engine.force_state, bank_idx)
+        bank = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
         _current_bank = bank
         try:
             loop = _get_loop()

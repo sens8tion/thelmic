@@ -1,4 +1,4 @@
-"""Bank generator — Phase 1: kick only."""
+"""Bank generator — Phase 1: kick only, archetype-driven."""
 
 from __future__ import annotations
 
@@ -6,23 +6,29 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
+from thelmic.archetypes import select_blend
 from thelmic.controls import Controls
 from thelmic.force_engine import ForceState, _clamp
 
 BARS_PER_PHRASE = 4
 PHRASES_PER_BANK = 4
-TICKS_PER_BEAT = 24   # MIDI standard
+TICKS_PER_BEAT = 24
 BEATS_PER_BAR = 4
+SIXTEENTH = TICKS_PER_BEAT // 4   # 6 ticks per 16th note
 
-KICK_NOTE = 36        # GM kick
+KICK_NOTE = 36   # GM kick
+
+# Expectation threshold above which a slot is considered "strongly expected"
+EXPECTATION_ANCHOR_THRESHOLD = 0.7
+EXPECTATION_GHOST_THRESHOLD  = 0.25
 
 
 @dataclass
 class MIDIEvent:
-    time: str              # "bar.beat.tick" (1-indexed bar within bank)
+    time: str              # "bar.beat.tick" — bar is 1-indexed within bank
     note: int
-    velocity: int
-    duration: float        # seconds
+    velocity: int          # 0 = withheld (display only, no MIDI output)
+    duration: float
     layer: str
     role: str              # anchor | ghost | disruption | impact | withheld_resolution
     emphasis: float
@@ -33,7 +39,7 @@ class MIDIEvent:
 
 @dataclass
 class Phrase:
-    phrase_index: int      # 0–3 within bank
+    phrase_index: int
     events: list[MIDIEvent] = field(default_factory=list)
 
 
@@ -50,14 +56,21 @@ class BankGenerator:
     """Generates a Bank from a ForceState and Controls.
 
     Phase 1: kick drum only.
+
+    Kick placement is driven by archetype probability distributions (see archetypes.py)
+    rather than uniform random sampling. The expectation map from the selected archetype
+    determines role assignment: hitting an expected slot is anchor/impact; hitting an
+    unexpected slot is disruption; leaving a highly expected slot empty under high
+    anticipation is withheld_resolution.
     """
 
     def __init__(self, controls: Optional[Controls] = None, seed: Optional[int] = None) -> None:
         self.controls = controls or Controls()
         self._rng = random.Random(seed)
 
-    def generate(self, force: ForceState, bank_index: int) -> Bank:
-        # Apply control ceilings before generation
+    def generate(
+        self, force: ForceState, bank_index: int, landscape_position: float = 0.0
+    ) -> Bank:
         effective = ForceState(
             anticipation=force.anticipation,
             release_pressure=force.release_pressure,
@@ -66,117 +79,173 @@ class BankGenerator:
             control_vs_chaos=force.control_vs_chaos,
         )
 
+        # Select archetype blend once per bank so all phrases share the same feel
+        kick_probs, expectation = select_blend(
+            density=effective.density,
+            instability=effective.instability,
+            landscape_position=landscape_position,
+        )
+
         bank = Bank(bank_index=bank_index)
         for phrase_idx in range(PHRASES_PER_BANK):
-            phrase = self._generate_phrase(effective, bank_index, phrase_idx)
+            phrase = self._generate_phrase(
+                effective, bank_index, phrase_idx, kick_probs, expectation
+            )
             bank.phrases.append(phrase)
         return bank
 
+    # ------------------------------------------------------------------
+
     def _generate_phrase(
-        self, force: ForceState, bank_index: int, phrase_idx: int
+        self,
+        force: ForceState,
+        bank_index: int,
+        phrase_idx: int,
+        kick_probs: list[float],
+        expectation: list[float],
     ) -> Phrase:
         phrase = Phrase(phrase_index=phrase_idx)
-        bar_offset = phrase_idx * BARS_PER_PHRASE  # bars are 1-indexed in the bank
+        bar_offset = phrase_idx * BARS_PER_PHRASE
 
         for bar in range(BARS_PER_PHRASE):
-            abs_bar = bar_offset + bar + 1  # 1-indexed
-            events = self._generate_kick_bar(force, abs_bar, bar, phrase_idx)
+            abs_bar = bar_offset + bar + 1
+            events = self._generate_kick_bar(
+                force, abs_bar, bar, phrase_idx, kick_probs, expectation
+            )
             phrase.events.extend(events)
         return phrase
 
     def _generate_kick_bar(
-        self, force: ForceState, abs_bar: int, bar_in_phrase: int, phrase_idx: int
+        self,
+        force: ForceState,
+        abs_bar: int,
+        bar_in_phrase: int,
+        phrase_idx: int,
+        kick_probs: list[float],
+        expectation: list[float],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
-        # Density drives how many kick hits per bar (base range: 2–8 per bar at 4/4)
-        base_hits = 2 + int(force.density * 6)
-        # Instability allows deviation from grid
+        # Density scales the overall fire probability for all slots.
+        # groove_lock dampens the jitter added under low control.
+        density_scale = 0.5 + force.density * 0.5
         groove = self.controls.groove_lock * (1.0 - force.instability * 0.4)
 
-        # Generate candidate beat positions (quantised to 16th notes = beat * 6 ticks)
-        sixteenth = TICKS_PER_BEAT // 4   # 6 ticks per 16th note
-        grid_positions = [b * sixteenth for b in range(BEATS_PER_BAR * 4)]  # 16 slots
+        fired_slots: set[int] = set()
 
-        chosen = self._rng.sample(grid_positions, min(base_hits, len(grid_positions)))
-        chosen.sort()
+        # --- Decide which slots fire ---
+        for slot in range(16):
+            p = kick_probs[slot] * density_scale
+            if self._rng.random() < p:
+                fired_slots.add(slot)
 
-        for tick_pos in chosen:
-            beat = tick_pos // TICKS_PER_BEAT + 1
-            tick = tick_pos % TICKS_PER_BEAT
+        # --- Build events for fired slots ---
+        for slot in sorted(fired_slots):
+            beat = slot // 4 + 1          # 1-indexed beat (1–4)
+            sub  = slot % 4               # 0–3 within the beat
 
-            # Jitter if groove is loose
-            if groove < 0.9:
-                jitter_range = int((1.0 - groove) * 4)
+            tick = sub * SIXTEENTH
+
+            # Jitter: only applied to non-downbeat slots when groove is loose
+            if groove < 0.9 and slot % 4 != 0:
+                jitter_range = int((1.0 - groove) * 3)
                 tick = max(0, tick + self._rng.randint(-jitter_range, jitter_range))
 
             time_str = f"{abs_bar}.{beat}.{tick}"
+            exp = expectation[slot]
 
-            # Assign role
-            role = self._assign_role(force, beat, bar_in_phrase, phrase_idx)
-
-            # Velocity shaped by role and force
+            role = self._assign_role(
+                exp, force, slot, bar_in_phrase, phrase_idx
+            )
             velocity = self._velocity(force, role)
 
             events.append(MIDIEvent(
                 time=time_str,
                 note=KICK_NOTE,
                 velocity=velocity,
-                duration=0.1,
+                duration=0.08,
                 layer="kick",
                 role=role,
-                emphasis=self._emphasis(force, role),
+                emphasis=self._emphasis(role),
                 openness=1.0 - force.density * 0.3,
-                expected_weight=1.0 if beat == 1 else 0.5,
-                should_resolve=(force.release_pressure > 0.6 and bar_in_phrase == 3),
+                expected_weight=exp,
+                should_resolve=(
+                    force.release_pressure > 0.6 and bar_in_phrase == BARS_PER_PHRASE - 1
+                ),
             ))
+
+        # --- Withheld resolutions: high-expectation slots deliberately left empty ---
+        # Only in the last bar of a phrase, under high anticipation.
+        if force.anticipation > 0.55 and bar_in_phrase == BARS_PER_PHRASE - 1:
+            for slot in range(16):
+                if slot in fired_slots:
+                    continue
+                exp = expectation[slot]
+                if exp >= EXPECTATION_ANCHOR_THRESHOLD:
+                    if self._rng.random() < force.anticipation * 0.5:
+                        beat = slot // 4 + 1
+                        tick = (slot % 4) * SIXTEENTH
+                        events.append(MIDIEvent(
+                            time=f"{abs_bar}.{beat}.{tick}",
+                            note=KICK_NOTE,
+                            velocity=0,    # silent — display only
+                            duration=0.0,
+                            layer="kick",
+                            role="withheld_resolution",
+                            emphasis=0.3,
+                            openness=1.0,
+                            expected_weight=exp,
+                            should_resolve=True,
+                        ))
 
         return events
 
+    # ------------------------------------------------------------------
+
     def _assign_role(
-        self, force: ForceState, beat: int, bar_in_phrase: int, phrase_idx: int
+        self,
+        exp: float,
+        force: ForceState,
+        slot: int,
+        bar_in_phrase: int,
+        phrase_idx: int,
     ) -> str:
-        # Beat 1 of bar 1 of a phrase is always an anchor
-        if beat == 1 and bar_in_phrase == 0:
+        # High-expectation slot → anchor (or impact on the final phrase)
+        if exp >= EXPECTATION_ANCHOR_THRESHOLD:
+            if force.release_pressure > 0.6 and phrase_idx == PHRASES_PER_BANK - 1:
+                return "impact"
             return "anchor"
 
-        # High anticipation + last bar of phrase → withheld_resolution
-        if force.anticipation > 0.65 and bar_in_phrase == BARS_PER_PHRASE - 1:
-            if self._rng.random() < force.anticipation * 0.4:
-                return "withheld_resolution"
-
-        # Instability drives disruptions
-        if force.instability > 0.5:
-            if self._rng.random() < force.instability * 0.3:
+        # Low-expectation slot under instability → disruption
+        if exp < EXPECTATION_GHOST_THRESHOLD and force.instability > 0.4:
+            if self._rng.random() < force.instability * 0.55:
                 return "disruption"
 
-        # High release + last phrase → impact
-        if force.release_pressure > 0.6 and phrase_idx == PHRASES_PER_BANK - 1:
-            if beat in (1, 3):
-                return "impact"
-
-        # Default
-        if self._rng.random() < 0.25:
+        # Low-expectation slot → ghost
+        if exp < EXPECTATION_GHOST_THRESHOLD:
             return "ghost"
+
+        # Mid-expectation slot → anchor by default
         return "anchor"
 
     def _velocity(self, force: ForceState, role: str) -> int:
         base = {
-            "anchor": 100,
-            "ghost": 55,
-            "disruption": 110,
-            "impact": 127,
-            "withheld_resolution": 40,
+            "anchor":              100,
+            "ghost":               52,
+            "disruption":          112,
+            "impact":              127,
+            "withheld_resolution": 0,
         }.get(role, 90)
-        # Scale slightly by density
+        if base == 0:
+            return 0
         vel = int(base * (0.8 + force.density * 0.2))
         return max(1, min(127, vel))
 
-    def _emphasis(self, force: ForceState, role: str) -> float:
+    def _emphasis(self, role: str) -> float:
         return {
-            "anchor": 0.8,
-            "ghost": 0.2,
-            "disruption": 0.9,
-            "impact": 1.0,
+            "anchor":              0.8,
+            "ghost":               0.2,
+            "disruption":          0.9,
+            "impact":              1.0,
             "withheld_resolution": 0.3,
         }.get(role, 0.6)
