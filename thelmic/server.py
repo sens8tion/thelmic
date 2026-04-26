@@ -407,7 +407,6 @@ async def _handle_message(msg: dict) -> None:
         await _apply_and_preview()
 
     elif kind == "play":
-        global _playing, _play_thread
         if _midi is None:
             await _broadcast({"type": "error", "message": "No MIDI port selected. Choose a port first."})
             return
