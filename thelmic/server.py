@@ -29,6 +29,7 @@ from thelmic.intent import IntentInput
 from thelmic.landscape import territory_at
 from thelmic.archetypes import archetype_name_at
 from thelmic.midi_out import MIDIOut, list_output_ports
+from thelmic.archetypes import ARCHETYPE_BY_NAME
 
 import importlib.resources as _res
 import pathlib
@@ -111,6 +112,7 @@ def _force_state_dict() -> dict:
             instability=_engine.force_state.instability,
             landscape_position=_engine.landscape_position,
         ),
+        "locked_archetype": _generator.locked_archetype,
     }
 
 
@@ -244,6 +246,11 @@ async def _handle_message(msg: dict) -> None:
             setattr(_controls, key, value)
         await _broadcast({"type": "state", **_force_state_dict()})
 
+    elif kind == "lock_archetype":
+        name = msg.get("value")  # None or archetype name string
+        _generator.locked_archetype = name if (name and name in ARCHETYPE_BY_NAME) else None
+        await _broadcast({"type": "state", **_force_state_dict()})
+
     elif kind == "midi_port":
         port_name = msg.get("value")
         try:
@@ -256,6 +263,11 @@ async def _handle_message(msg: dict) -> None:
 @app.get("/api/midi-ports")
 async def get_midi_ports():
     return {"ports": list_output_ports()}
+
+
+@app.get("/api/archetypes")
+async def get_archetypes():
+    return {"archetypes": list(ARCHETYPE_BY_NAME.keys())}
 
 
 # ---------------------------------------------------------------------------

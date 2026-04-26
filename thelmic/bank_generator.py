@@ -69,6 +69,7 @@ class BankGenerator:
     def __init__(self, controls: Optional[Controls] = None, seed: Optional[int] = None) -> None:
         self.controls = controls or Controls()
         self._rng = random.Random(seed)
+        self.locked_archetype: Optional[str] = None
 
     def generate(
         self, force: ForceState, bank_index: int, landscape_position: float = 0.0
@@ -86,6 +87,7 @@ class BankGenerator:
             density=effective.density,
             instability=effective.instability,
             landscape_position=landscape_position,
+            locked_archetype=self.locked_archetype,
         )
 
         bank = Bank(bank_index=bank_index)

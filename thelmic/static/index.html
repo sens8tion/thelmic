@@ -316,6 +316,44 @@
       letter-spacing: 0.08em;
     }
 
+    /* ── Archetype lock ── */
+    .archetype-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .archetype-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #archetype-select {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 2px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .archetype-current {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+    }
+
+    .archetype-current.locked { color: #e0a030; }
+
     /* ── MIDI section ── */
     .midi-section {
       width: 100%;
@@ -542,6 +580,17 @@
     </div>
   </div>
 
+  <!-- Archetype lock -->
+  <div class="archetype-section">
+    <h2 class="seq-heading" style="border-top:none;padding-top:0">ARCHETYPE</h2>
+    <div class="archetype-row">
+      <select id="archetype-select" onchange="setArchetypeLock()">
+        <option value="">— auto —</option>
+      </select>
+      <div class="archetype-current" id="archetype-current">auto</div>
+    </div>
+  </div>
+
   <!-- MIDI port selector -->
   <div class="midi-section">
     <h2 class="seq-heading" style="border-top:none;padding-top:0">MIDI OUT</h2>
@@ -692,6 +741,9 @@
       // Bank count
       document.getElementById('bank-count').textContent = `banks: ${s.bank_count}`;
 
+      // Archetype lock
+      updateArchetypeDisplay(s.locked_archetype, s.archetype);
+
       // MIDI port status
       const midiStatus = document.getElementById('midi-status');
       if (s.midi_port) {
@@ -736,6 +788,43 @@
     // Load ports on connect
     function onConnected() {
       refreshPorts();
+      loadArchetypes();
+    }
+
+    // ── Archetype lock ──
+    async function loadArchetypes() {
+      try {
+        const res = await fetch('/api/archetypes');
+        const data = await res.json();
+        const sel = document.getElementById('archetype-select');
+        sel.innerHTML = '<option value="">— auto —</option>';
+        data.archetypes.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name.replace(/_/g, ' ');
+          sel.appendChild(opt);
+        });
+      } catch (e) {}
+    }
+
+    function setArchetypeLock() {
+      const val = document.getElementById('archetype-select').value || null;
+      send({ type: 'lock_archetype', value: val });
+    }
+
+    function updateArchetypeDisplay(locked, current) {
+      const sel = document.getElementById('archetype-select');
+      const label = document.getElementById('archetype-current');
+      if (document.activeElement !== sel) {
+        sel.value = locked || '';
+      }
+      if (locked) {
+        label.textContent = locked.replace(/_/g, ' ') + ' 🔒';
+        label.className = 'archetype-current locked';
+      } else {
+        label.textContent = (current || 'auto').replace(/_/g, ' ');
+        label.className = 'archetype-current';
+      }
     }
 
     // ── Sequencer ──

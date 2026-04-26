@@ -535,6 +535,9 @@ ALL_ARCHETYPES: list[RhythmArchetype] = sorted(
     key=lambda a: a.density_index,
 )
 
+# Lookup by name — used for archetype lock
+ARCHETYPE_BY_NAME: dict[str, RhythmArchetype] = {a.name: a for a in ALL_ARCHETYPES}
+
 
 # ---------------------------------------------------------------------------
 # Blending and selection
@@ -551,16 +554,32 @@ def select_blend(
     density: float,
     instability: float,
     landscape_position: float,
+    locked_archetype: str | None = None,
 ) -> DrumBlend:
     """Return a DrumBlend (kick, snare, hat probs + expectations) for the given force state.
 
-    Selection logic:
+    If locked_archetype is set (a key in ARCHETYPE_BY_NAME), that archetype's arrays
+    are returned directly — no territory logic, no instability blending.
+
+    Otherwise, selection logic:
       - landscape_position determines the territory (Oak / Chaos / Nott)
       - density selects the base archetype within that territory
-      - instability blends toward the territory's disruption archetype (capped 65%)
-
-    All six arrays are 16 floats ready for use in generation.
+      - instability blends toward the territory's disruption archetype (capped 65%),
+        but at pure Oak (pos=0.0) instability has zero blending power; it scales
+        linearly to full influence at the Chaos boundary (pos=0.33)
     """
+    # --- Archetype lock: return raw archetype, no blending ---
+    if locked_archetype and locked_archetype in ARCHETYPE_BY_NAME:
+        a = ARCHETYPE_BY_NAME[locked_archetype]
+        return DrumBlend(
+            kick_probs  = list(a.kick_probs),
+            kick_exp    = list(a.expectation),
+            snare_probs = list(a.snare_probs),
+            snare_exp   = list(a.snare_exp),
+            hat_probs   = list(a.hat_probs),
+            hat_exp     = list(a.hat_exp),
+        )
+
     # --- Primary archetype by territory and density ---
 
     if landscape_position > 0.67:
@@ -602,7 +621,10 @@ def select_blend(
     base_hat_exp     = _lerp_probs(primary.hat_exp,      secondary.hat_exp,      t)
 
     # --- Instability blends toward the disruption archetype (capped 65%) ---
-    inst_t = min(instability * 0.65, 0.65)
+    # At pure Oak (pos=0.0) instability has zero blending power — total archetype
+    # compliance. Influence grows linearly to full at the Chaos boundary (pos=0.33).
+    oak_scale = min(1.0, landscape_position / 0.33) if landscape_position < 0.33 else 1.0
+    inst_t = min(instability * 0.65, 0.65) * oak_scale
 
     return DrumBlend(
         kick_probs  = _lerp_probs(base_kick_probs,  disrupt_arch.kick_probs,  inst_t),
