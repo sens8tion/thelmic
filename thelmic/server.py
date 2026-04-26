@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
+from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.controls import Controls
 from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
@@ -86,6 +87,7 @@ def _bank_events_list(bank) -> list:
             "role": event.role,
             "velocity": event.velocity,
             "emphasis": round(event.emphasis, 2),
+            "deformation": {k: round(v, 3) for k, v in event.deformation.items()},
         })
     return events
 
@@ -109,6 +111,7 @@ def _force_state_dict() -> dict:
         "midi_port": _midi.port_name if _midi else None,
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
+        "deformation_colours": DEFORMATION_COLOURS,
     }
 
 

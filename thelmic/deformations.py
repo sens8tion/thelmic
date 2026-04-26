@@ -9,35 +9,75 @@ Each deformation is an independently-coded pure function with this signature:
         anchors:   Anchors,
         force:     ForceState,
         intensity: float,          # 0.0–1.0, supplied by the pipeline
-    ) -> DrumBlend:
+    ) -> tuple[DrumBlend, DeformationMap]:
 
 Rules every deformation must follow:
   1. Anchor slots (anchors.kick / .snare / .hat) must survive at full probability.
      Never reduce a probability at an anchor slot.
   2. Return a new DrumBlend — do not mutate the input.
   3. Clamp all output probabilities to [0.0, 1.0].
-  4. intensity=0.0 must be a no-op (identity).
+  4. intensity=0.0 must be a no-op (identity), returning a zeroed DeformationMap.
+  5. DeformationMap values represent how far each slot was moved from baseline:
+     0.0 = unchanged, 1.0 = maximally deformed. Used for visualisation.
 
 The pipeline
 ------------
 apply_deformations() is the single entry point called by the bank generator.
-It decides which deformations are active based on landscape_position and force
-state, then folds them in sequence over the blend.
+It returns (DrumBlend, DeformationMap) — the modified pattern and a per-slot
+record of how much each position was altered. The map drives:
+  - A strip above the sequencer showing deformation intensity over time
+  - Per-event colouring in the grid (blended toward a deformation colour)
 
 Landscape position roles:
-  Oak  (0.0 – 0.33) — minimal or no deformation; archetype plays close to pure
+  Oak   (0.0 – 0.33) — minimal or no deformation; archetype plays close to pure
   Chaos (0.33 – 0.67) — complexity / density pressure deformations
   Nott  (0.67 – 1.0)  — tension / anticipation / withhold deformations
-
-Deformations are added to this module as separate named functions and registered
-in the _DEFORMATION_SCHEDULE table inside apply_deformations(). The stub below
-returns the blend unchanged until algorithms are developed on feature branches.
 """
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from thelmic.archetypes import Anchors, DrumBlend
 from thelmic.force_engine import ForceState
+
+# ---------------------------------------------------------------------------
+# Per-deformation colour palette (hex strings, used by server and UI)
+# ---------------------------------------------------------------------------
+
+DEFORMATION_COLOURS: dict[str, str] = {
+    "ghost_inject": "#50a0dc",   # cool blue — ghost notes
+    # "stutter_pre":  "#d4804a",   # warm amber — stutter fills  (future)
+    # "syncopate":    "#7cc47c",   # green — off-grid lean        (future)
+    # "density_fill": "#b87ccc",   # purple — density fill        (future)
+}
+
+
+# ---------------------------------------------------------------------------
+# DeformationMap — per-slot record of deformation intensity
+# ---------------------------------------------------------------------------
+
+class DeformationMap(NamedTuple):
+    """Per-slot deformation intensity for all three layers.
+
+    Values are 0.0 (slot unchanged from archetype) → 1.0 (maximally deformed).
+    Produced by apply_deformations() and attached to each MIDIEvent for rendering.
+    """
+    kick:  list[float]   # 16 values
+    snare: list[float]   # 16 values
+    hat:   list[float]   # 16 values
+
+    @classmethod
+    def zero(cls) -> "DeformationMap":
+        return cls(kick=[0.0]*16, snare=[0.0]*16, hat=[0.0]*16)
+
+    def merge(self, other: "DeformationMap") -> "DeformationMap":
+        """Combine two maps by taking the max at each slot (for sequential deformations)."""
+        return DeformationMap(
+            kick  = [max(a, b) for a, b in zip(self.kick,  other.kick)],
+            snare = [max(a, b) for a, b in zip(self.snare, other.snare)],
+            hat   = [max(a, b) for a, b in zip(self.hat,   other.hat)],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -56,36 +96,98 @@ def _clamp_blend(blend: DrumBlend) -> DrumBlend:
     )
 
 
+def _prob_delta_to_intensity(before: list[float], after: list[float]) -> list[float]:
+    """Convert per-slot probability deltas to a normalised 0→1 intensity.
+
+    A slot that moved by 1.0 (full swing) scores 1.0; unchanged scores 0.0.
+    """
+    return [min(1.0, abs(a - b)) for a, b in zip(before, after)]
+
+
 # ---------------------------------------------------------------------------
-# Deformation functions (stubs — algorithms developed on feature branches)
+# Deformation: ghost_inject
 # ---------------------------------------------------------------------------
 
-# Each function below will be a complete, independently-coded pressure algorithm.
-# Stubs return the blend unchanged (identity at any intensity).
+# Maximum probability a ghost slot can reach. Must be above the 0.5 firing
+# threshold so ghosts actually appear, but below typical anchor values (0.8+)
+# so they never compete rhythmically with the anchor.
+_GHOST_CEILING = 0.72
 
-# def deform_ghost_inject(blend, anchors, force, intensity) -> DrumBlend:
-#     """Add low-velocity ghost hits in the 16ths surrounding anchor slots.
-#     Increases felt anticipation without displacing the anchor."""
+
+def deform_ghost_inject(
+    blend: DrumBlend,
+    anchors: Anchors,
+    force: ForceState,
+    intensity: float,
+) -> tuple[DrumBlend, DeformationMap]:
+    """Raise probability on the 16th-note slots immediately surrounding each
+    anchor hit, adding ghost notes that set up and shadow the anchor.
+
+    Mechanics:
+    - For each anchor slot, the slots at (anchor-1)%16 and (anchor+1)%16 are
+      candidates, provided they are not themselves anchors.
+    - Candidate probability is raised by intensity × _GHOST_CEILING, capped at
+      _GHOST_CEILING (0.72). At intensity ≥ ~0.70 the ghost crosses the 0.5
+      firing threshold and appears in the pattern.
+    - Anchor slots are never touched (anchor constraint satisfied by construction).
+    - intensity=0 → no change, zeroed DeformationMap (identity).
+
+    Deformation map: each affected slot records how far it moved relative to
+    the ghost ceiling, normalised to 0→1.
+    """
+    if intensity <= 0.0:
+        return blend, DeformationMap.zero()
+
+    def _inject_layer(
+        probs: list[float],
+        anchor_slots: frozenset[int],
+    ) -> tuple[list[float], list[float]]:
+        out = list(probs)
+        dmap = [0.0] * 16
+        for anchor in anchor_slots:
+            for neighbor in ((anchor - 1) % 16, (anchor + 1) % 16):
+                if neighbor in anchor_slots:
+                    continue  # never touch another anchor
+                addition = intensity * _GHOST_CEILING
+                before   = out[neighbor]
+                out[neighbor] = min(_GHOST_CEILING, before + addition)
+                delta = out[neighbor] - before
+                dmap[neighbor] = min(1.0, dmap[neighbor] + delta / _GHOST_CEILING)
+        return out, dmap
+
+    kick_probs,  dk = _inject_layer(blend.kick_probs,  anchors.kick)
+    snare_probs, ds = _inject_layer(blend.snare_probs, anchors.snare)
+    hat_probs,   dh = _inject_layer(blend.hat_probs,   anchors.hat)
+
+    new_blend = DrumBlend(
+        kick_probs  = kick_probs,
+        kick_exp    = list(blend.kick_exp),
+        snare_probs = snare_probs,
+        snare_exp   = list(blend.snare_exp),
+        hat_probs   = hat_probs,
+        hat_exp     = list(blend.hat_exp),
+    )
+    return new_blend, DeformationMap(kick=dk, snare=ds, hat=dh)
+
+
+# ---------------------------------------------------------------------------
+# Deformation stubs (algorithms on future feature branches)
+# ---------------------------------------------------------------------------
+
+# def deform_stutter_pre(blend, anchors, force, intensity) -> tuple[DrumBlend, DeformationMap]:
+#     """Tight 16th-note double-hit immediately before kick anchor slots."""
 #     ...
 
-# def deform_stutter_pre(blend, anchors, force, intensity) -> DrumBlend:
-#     """Insert a tight 16th-note double-hit immediately before kick anchor slots.
-#     Creates urgency while preserving the landing beat."""
+# def deform_syncopate(blend, anchors, force, intensity) -> tuple[DrumBlend, DeformationMap]:
+#     """Raise probability on off-grid 16th positions to create rhythmic lean."""
 #     ...
 
-# def deform_syncopate(blend, anchors, force, intensity) -> DrumBlend:
-#     """Raise probability on 16th-note off-positions (slots 1, 3, 5, 7, 9, 11, 13, 15).
-#     Pushes non-anchor hits earlier or later, creating rhythmic lean."""
+# def deform_anticipation_withhold(blend, anchors, force, intensity) -> tuple[DrumBlend, DeformationMap]:
+#     """Suppress a high-expectation non-anchor slot — tension through absence."""
 #     ...
 
-# def deform_anticipation_withhold(blend, anchors, force, intensity) -> DrumBlend:
-#     """Suppress a high-expectation non-anchor slot. The absence is heard as tension
-#     because the listener expected a hit that didn't arrive."""
-#     ...
-
-# def deform_density_fill(blend, anchors, force, intensity) -> DrumBlend:
-#     """Uniformly raise probability of currently-quiet slots. Adds density
-#     without disturbing existing hits or anchor positions."""
+# def deform_density_fill(blend, anchors, force, intensity) -> tuple[DrumBlend, DeformationMap]:
+#     """Raise probability of quiet slots without disturbing anchors."""
 #     ...
 
 
@@ -98,35 +200,41 @@ def apply_deformations(
     anchors: Anchors,
     force: ForceState,
     landscape_position: float,
-) -> DrumBlend:
-    """Apply the active deformation pipeline to blend and return the result.
+) -> tuple[DrumBlend, dict[str, DeformationMap]]:
+    """Apply the active deformation pipeline and return (blend, named_maps).
 
-    Currently a stub — returns blend unchanged. As deformation algorithms are
-    implemented on feature branches they are registered in _active() below and
-    folded over the blend in sequence.
+    Returns:
+        blend   — the modified DrumBlend after all deformations
+        maps    — dict keyed by deformation name (e.g. "ghost_inject") mapping
+                  to a DeformationMap for that deformation only.  Keys are only
+                  present when that deformation actually ran (intensity > 0).
+                  Used by the UI to render one colour-coded strip per type.
 
-    Contract: no deformation registered here may reduce the probability of any
-    slot in anchors.kick, anchors.snare, or anchors.hat.
+    Contract: no deformation may reduce the probability of any slot in
+    anchors.kick, anchors.snare, or anchors.hat.
     """
 
-    def _active() -> list[tuple]:
-        """Return list of (deform_fn, intensity) pairs to apply, in order.
+    def _active() -> list[tuple[str, object, float]]:
+        """Return ordered list of (name, deform_fn, intensity) triples.
 
-        Landscape position and force state determine which deformations are
-        active and at what intensity. Oak = sparse/none; Chaos/Nott = various.
+        Territory and force state determine which deformations are active.
+        Ghost inject is driven by instability across all territories.
+        Oak (pos < 0.33): scaled down so pure Oak stays clean.
         """
-        # TODO: populate as algorithms are developed
-        # Example structure (not active):
-        #   steps = []
-        #   if landscape_position > 0.33:
-        #       steps.append((deform_ghost_inject, force.instability))
-        #   if landscape_position > 0.67:
-        #       steps.append((deform_anticipation_withhold, force.anticipation * 0.8))
-        #   return steps
-        return []
+        steps: list[tuple[str, object, float]] = []
+        # Ghost inject: instability drives ghost density; attenuated in Oak
+        oak_scale = min(1.0, landscape_position / 0.33) if landscape_position < 0.33 else 1.0
+        ghost_intensity = force.instability * oak_scale
+        if ghost_intensity > 0.0:
+            steps.append(("ghost_inject", deform_ghost_inject, ghost_intensity))
+        return steps
 
     result = blend
-    for deform_fn, intensity in _active():
-        result = deform_fn(result, anchors, force, intensity)
-        result = _clamp_blend(result)   # enforce bounds after each step
-    return result
+    named_maps: dict[str, DeformationMap] = {}
+
+    for name, deform_fn, intensity in _active():
+        deformed, step_map = deform_fn(result, anchors, force, intensity)
+        result = _clamp_blend(deformed)
+        named_maps[name] = step_map
+
+    return result, named_maps

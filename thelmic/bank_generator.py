@@ -44,6 +44,7 @@ class MIDIEvent:
     openness: float
     expected_weight: float
     should_resolve: bool
+    deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
 
 
 @dataclass
@@ -101,14 +102,22 @@ class BankGenerator:
             hat=archetype.hat_anchors,
         )
 
-        # 3. Convert to blend and run deformation pipeline (currently no-op)
-        blend = apply_deformations(
+        # 3. Convert to blend and run deformation pipeline
+        blend, named_maps = apply_deformations(
             to_blend(archetype), anchors, effective, landscape_position
         )
 
+        # Build per-layer named deform arrays: {name: [16 floats]} for each layer
+        kick_deforms:  dict[str, list[float]] = {n: m.kick  for n, m in named_maps.items()}
+        snare_deforms: dict[str, list[float]] = {n: m.snare for n, m in named_maps.items()}
+        hat_deforms:   dict[str, list[float]] = {n: m.hat   for n, m in named_maps.items()}
+
         bank = Bank(bank_index=bank_index)
         for phrase_idx in range(PHRASES_PER_BANK):
-            phrase = self._generate_phrase(effective, bank_index, phrase_idx, blend)
+            phrase = self._generate_phrase(
+                effective, bank_index, phrase_idx, blend,
+                kick_deforms, snare_deforms, hat_deforms,
+            )
             bank.phrases.append(phrase)
         return bank
 
@@ -124,6 +133,9 @@ class BankGenerator:
         bank_index: int,
         phrase_idx: int,
         blend: DrumBlend,
+        kick_deforms:  dict[str, list[float]],
+        snare_deforms: dict[str, list[float]],
+        hat_deforms:   dict[str, list[float]],
     ) -> Phrase:
         phrase = Phrase(phrase_index=phrase_idx)
         bar_offset = phrase_idx * BARS_PER_PHRASE
@@ -135,13 +147,13 @@ class BankGenerator:
         for bar in range(BARS_PER_PHRASE):
             abs_bar = bar_offset + bar + 1
             phrase.events.extend(self._generate_kick_bar(
-                force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp
+                force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp, kick_deforms
             ))
             phrase.events.extend(self._generate_snare_bar(
-                force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp
+                force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp, snare_deforms
             ))
             phrase.events.extend(self._generate_hat_bar(
-                force, abs_bar, hat_fired, blend.hat_exp
+                force, abs_bar, hat_fired, blend.hat_exp, hat_deforms
             ))
         return phrase
 
@@ -156,6 +168,7 @@ class BankGenerator:
         phrase_idx: int,
         fired_slots: set[int],
         expectation: list[float],
+        deform_by_name: dict[str, list[float]],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
@@ -164,6 +177,7 @@ class BankGenerator:
             tick = (slot % 4) * SIXTEENTH
             exp = expectation[slot]
             role = self._assign_role(exp, force, phrase_idx)
+            slot_deform = {n: slots[slot] for n, slots in deform_by_name.items() if slots[slot] > 0}
 
             events.append(MIDIEvent(
                 time=f"{abs_bar}.{beat}.{tick}",
@@ -178,6 +192,7 @@ class BankGenerator:
                 should_resolve=(
                     force.release_pressure > 0.6 and bar_in_phrase == BARS_PER_PHRASE - 1
                 ),
+                deformation=slot_deform,
             ))
 
         return events
@@ -193,6 +208,7 @@ class BankGenerator:
         phrase_idx: int,
         fired_slots: set[int],
         snare_exp: list[float],
+        deform_by_name: dict[str, list[float]],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
@@ -201,6 +217,7 @@ class BankGenerator:
             tick = (slot % 4) * SIXTEENTH
             exp = snare_exp[slot]
             role = self._assign_role(exp, force, phrase_idx)
+            slot_deform = {n: slots[slot] for n, slots in deform_by_name.items() if slots[slot] > 0}
             events.append(MIDIEvent(
                 time=f"{abs_bar}.{beat}.{tick}",
                 note=SNARE_NOTE,
@@ -212,6 +229,7 @@ class BankGenerator:
                 openness=1.0 - force.density * 0.2,
                 expected_weight=exp,
                 should_resolve=False,
+                deformation=slot_deform,
             ))
 
         return events
@@ -225,6 +243,7 @@ class BankGenerator:
         abs_bar: int,
         fired_slots: set[int],
         hat_exp: list[float],
+        deform_by_name: dict[str, list[float]],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
@@ -234,6 +253,7 @@ class BankGenerator:
             exp = hat_exp[slot]
             note = OPEN_HAT_NOTE if slot % 4 == 2 else CLOSED_HAT_NOTE
             role = "anchor" if exp >= 0.5 else "ghost"
+            slot_deform = {n: slots[slot] for n, slots in deform_by_name.items() if slots[slot] > 0}
             events.append(MIDIEvent(
                 time=f"{abs_bar}.{beat}.{tick}",
                 note=note,
@@ -245,6 +265,7 @@ class BankGenerator:
                 openness=1.0,
                 expected_weight=exp,
                 should_resolve=False,
+                deformation=slot_deform,
             ))
 
         return events
