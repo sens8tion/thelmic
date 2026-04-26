@@ -181,13 +181,21 @@ def _bank_events_list(bank) -> list:
     return events
 
 
-def _force_state_dict() -> dict:
+def _force_state_dict(include_bank: bool = True) -> dict:
+    """Build the WebSocket state payload.
+
+    include_bank=True  — full state including bank_events (sent at quantize
+                         boundaries when the grid has actually changed)
+    include_bank=False — live state: force dimensions, transition, territory
+                         (sent every bar so the UI tracks the journey in real
+                         time without waiting for a quantize boundary)
+    """
     fs = _engine.force_state
     pos = _engine.landscape_position
     pressure_curves = _curve_engine.state_dict()
     pressure_curves["pending_ids"] = sorted(_pending_curve_starts)
     bank_slot = len(_engine.bank_history) % 4 + 1
-    return {
+    d = {
         "landscape_position": round(pos, 3),
         "territory": territory_at(pos),
         "anticipation": round(fs.anticipation, 3),
@@ -201,7 +209,6 @@ def _force_state_dict() -> dict:
         "bank_total": 4,
         "playing": _playing,
         "bpm": _bpm,
-        "bank_events": _bank_events_list(_current_bank),
         "midi_port": _midi.port_name if _midi else None,
         "midi_cc_port": _midi_cc.port_name if _midi_cc else None,
         "archetype": archetype_name_at(density=_engine.force_state.density),
@@ -215,6 +222,9 @@ def _force_state_dict() -> dict:
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
     }
+    if include_bank:
+        d["bank_events"] = _bank_events_list(_current_bank)
+    return d
 
 
 def _start_pending_curves() -> bool:
@@ -266,8 +276,9 @@ def _playback_loop() -> None:
         global _bank_started_at_ms
         _bank_started_at_ms = time.time() * 1000
         try:
+            # Full state at bank start — grid needs to render the new bank
             asyncio.run_coroutine_threadsafe(
-                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
+                _broadcast({"type": "state", **_force_state_dict(include_bank=True)}), _get_loop()
             )
         except Exception:
             pass
@@ -288,11 +299,11 @@ def _playback_loop() -> None:
                 )
 
                 # Advance transition first — landscape position updates before
-                # curves read it, so deformations see the correct position
+                # curves read it, so deformations see the correct position.
                 if _transition_engine:
                     _transition_engine.advance(bars=1)
 
-                # Advance curve engine 1 bar; send CC outputs on the CC port
+                # Advance curve engine 1 bar; send CC outputs on the CC port.
                 cc_messages = _curve_engine.advance(bars=1)
                 if _midi_cc:
                     for cc_target, cc_num, val in cc_messages:
@@ -300,9 +311,20 @@ def _playback_loop() -> None:
                         ch = int(parts[1]) if len(parts) >= 3 else 0
                         _midi_cc.send_cc(ch, cc_num, val)
 
-                # Quantize boundary — fires every _quantize_bars bars.
-                # Pending curves are started and upcoming phrases are regenerated
-                # so both MIDI and the grid catch up to the current state.
+                # Live state broadcast — every bar, without bank_events.
+                # Keeps force dimensions, territory, and transition graph
+                # in sync with the playback clock regardless of quantize setting.
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        _broadcast({"type": "state", **_force_state_dict(include_bank=False)}),
+                        _get_loop(),
+                    )
+                except Exception:
+                    pass
+
+                # Quantize boundary — grid regeneration only.
+                # Upcoming phrases are recomputed from current force state;
+                # full state (with bank_events) is broadcast so the grid updates.
                 abs_bar = phrase.phrase_index * BARS_PER_PHRASE + bar_in_phrase + 1
                 if abs_bar % max(1, _quantize_bars) == 0:
                     injected_curve = _start_pending_curves()
@@ -320,7 +342,8 @@ def _playback_loop() -> None:
                     if injected_curve or regenerated:
                         try:
                             asyncio.run_coroutine_threadsafe(
-                                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
+                                _broadcast({"type": "state", **_force_state_dict(include_bank=True)}),
+                                _get_loop(),
                             )
                         except Exception:
                             pass
