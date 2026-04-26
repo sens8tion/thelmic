@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from thelmic.bank_generator import BankGenerator
 from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.pressure_curves import CurveEngine
+from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
 DIMENSION_ROLES: dict[str, str] = {
@@ -64,6 +65,7 @@ _STATIC = pathlib.Path(__file__).parent / "static"
 # ---------------------------------------------------------------------------
 
 _engine: Optional[ForceEngine] = None
+_transition_engine: Optional[TransitionEngine] = None
 _controls: Optional[Controls] = None
 _intent: Optional[IntentInput] = None
 _generator: Optional[BankGenerator] = None
@@ -129,10 +131,11 @@ async def _apply_and_preview() -> None:
 
 
 def _init_engine() -> None:
-    global _engine, _controls, _intent, _generator, _midi
+    global _engine, _transition_engine, _controls, _intent, _generator, _midi
     _engine = ForceEngine(landscape_position=0.0)
+    _transition_engine = TransitionEngine(_engine)
     _controls = Controls()
-    _intent = IntentInput(_engine)
+    _intent = IntentInput(_engine, _transition_engine)
     _generator = BankGenerator(controls=_controls)
     # MIDI init is deferred — no port selected yet
     _midi = None
@@ -204,6 +207,7 @@ def _force_state_dict() -> dict:
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
+        "transition": _transition_engine.state_dict() if _transition_engine else {},
     }
 
 
@@ -276,6 +280,11 @@ def _playback_loop() -> None:
                 bar_end = _midi.play_bar_in_phrase_blocking(
                     phrase, bar_in_phrase, bpm=_bpm, bank_start=bank_start,
                 )
+
+                # Advance transition first — landscape position updates before
+                # curves read it, so deformations see the correct position
+                if _transition_engine:
+                    _transition_engine.advance(bars=1)
 
                 # Advance curve engine 1 bar; send CC outputs on the CC port
                 cc_messages = _curve_engine.advance(bars=1)
@@ -382,7 +391,13 @@ async def _handle_message(msg: dict) -> None:
     kind = msg.get("type")
 
     if kind == "axis":
-        _intent.set_axis(float(msg.get("value", 0.0)))
+        value = float(msg.get("value", 0.0))
+        if _playing:
+            # Set transition target — engine performs the journey over time
+            _intent.set_axis(value)
+        else:
+            # Stopped: preview position immediately, no transition
+            _intent.set_axis_immediate(value)
         await _apply_and_preview()
 
     elif kind == "play":
