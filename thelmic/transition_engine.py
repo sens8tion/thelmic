@@ -146,7 +146,7 @@ class TransitionEngine:
         t = self._transition
         t.elapsed_bars += bars
 
-        frac = _clamp(t.elapsed_bars / max(1.0, t.duration_bars))
+        frac = _clamp(t.elapsed_bars / max(1e-6, t.duration_bars))
         new_pos = t.start_position + (t.target_position - t.start_position) * frac
         t.current_position = new_pos
         self._engine.set_landscape_position(new_pos)

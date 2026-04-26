@@ -222,6 +222,20 @@ class TestTransitionEngine:
                     "duration_bars", "elapsed_bars"):
             assert key in d, f"missing key: {key}"
 
+    def test_sub_bar_duration_completes_correctly(self):
+        """Duration < 1 bar must not be clamped to 1 bar (fixes max(1.0) bug)."""
+        fe, te = self._engine(0.0)
+        te.set_target(1.0, duration_bars=0.5)
+        te.advance(bars=0.5)
+        assert not te.is_active
+        assert fe.landscape_position == pytest.approx(1.0)
+
+    def test_sub_bar_duration_velocity_is_accurate(self):
+        fe, te = self._engine(0.0)
+        te.set_target(0.5, duration_bars=0.25)
+        # velocity = distance / duration = 0.5 / 0.25 = 2.0 → clamped to 1.0
+        assert te.transition.velocity == pytest.approx(1.0)
+
     # default duration constant
     def test_default_duration_used_when_none_given(self):
         fe, te = self._engine(0.0)
