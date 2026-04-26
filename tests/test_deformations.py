@@ -94,6 +94,18 @@ class TestPipeline:
         # No deformations should have run — maps dict should be empty
         assert named_maps == {}
 
+    def test_curve_override_scales_instability(self):
+        force = ForceState(instability=0.5, density=0.5)
+        arch = select_archetype(0.5, "two_step")
+        anchors = Anchors(kick=arch.kick_anchors, snare=arch.snare_anchors, hat=arch.hat_anchors)
+        blend = to_blend(arch)
+        _, named_maps = apply_deformations(
+            blend, anchors, force, landscape_position=0.5,
+            curve_overrides={"ghost_inject": 1.0},
+        )
+        dmap = named_maps["ghost_inject"]
+        assert max(dmap.kick) == pytest.approx(0.5)
+
     def test_deformation_colours_exported(self):
         from thelmic.deformations import DEFORMATION_COLOURS
         assert "ghost_inject" in DEFORMATION_COLOURS

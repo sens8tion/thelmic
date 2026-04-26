@@ -42,6 +42,10 @@ DIMENSION_ROLES: dict[str, str] = {
     "variation_rate":        "unused",
     "kick_dominance":        "unused",
 }
+
+DEFORMATION_MODEL_DIMENSIONS: dict[str, str] = {
+    "ghost_inject": "instability",
+}
 from thelmic.controls import Controls
 from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
@@ -67,17 +71,24 @@ _midi: Optional[MIDIOut] = None
 _bpm: float = 174.0
 _current_bank = None   # Bank | None
 _curve_engine: CurveEngine = CurveEngine()
+_pending_curve_starts: set[int] = set()
 
 _playing: bool = False
 _play_thread: Optional[threading.Thread] = None
 _play_lock = threading.Lock()
 _bank_started_at_ms: float = 0.0   # wall-clock ms when current bank began playing
 
-_quantize_bars: int = 2   # bars before playback catches up to the displayed state
+_quantize_bars: int = 4   # phrase-sized boundary; generator/playback swap 4 bars at a time
 _preview_lock = threading.Lock()  # guards _current_bank writes from handler vs loop
 
 _clients: set[WebSocket] = set()
 _clients_lock = asyncio.Lock()
+
+
+def _generation_curve_overrides() -> dict[str, float]:
+    from thelmic.bank_generator import BARS_PER_PHRASE
+
+    return _curve_engine.projected_overrides(BARS_PER_PHRASE)
 
 
 async def _apply_and_preview() -> None:
@@ -106,7 +117,7 @@ async def _apply_and_preview() -> None:
     with _preview_lock:
         fresh = _generator.generate(
             _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
-            curve_overrides=_curve_engine.overrides(),
+            curve_overrides=_generation_curve_overrides(),
         )
         # Splice: keep up-to-and-including current phrase, replace the rest
         for i, phrase in enumerate(fresh.phrases):
@@ -154,6 +165,9 @@ def _bank_events_list(bank) -> list:
 def _force_state_dict() -> dict:
     fs = _engine.force_state
     pos = _engine.landscape_position
+    pressure_curves = _curve_engine.state_dict()
+    pressure_curves["pending_ids"] = sorted(_pending_curve_starts)
+    bank_slot = len(_engine.bank_history) % 4 + 1
     return {
         "landscape_position": round(pos, 3),
         "territory": territory_at(pos),
@@ -164,6 +178,8 @@ def _force_state_dict() -> dict:
         "control_vs_chaos": round(fs.control_vs_chaos, 3),
         "resolution_likelihood": round(_engine.resolution_likelihood, 3),
         "bank_count": len(_engine.bank_history),
+        "bank_slot": bank_slot,
+        "bank_total": 4,
         "playing": _playing,
         "bpm": _bpm,
         "bank_events": _bank_events_list(_current_bank),
@@ -171,12 +187,26 @@ def _force_state_dict() -> dict:
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
         "deformation_colours": DEFORMATION_COLOURS,
+        "deformation_model_dimensions": DEFORMATION_MODEL_DIMENSIONS,
         "dimension_roles": DIMENSION_ROLES,
-        "pressure_curves": _curve_engine.state_dict(),
+        "pressure_curves": pressure_curves,
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
     }
+
+
+def _start_pending_curves() -> bool:
+    """Start armed pressure curves at a quantization boundary.
+
+    Returns True if any curve was injected into the next generated material.
+    """
+    if not _pending_curve_starts:
+        return False
+    for curve_id in sorted(_pending_curve_starts):
+        _curve_engine.start(curve_id)
+    _pending_curve_starts.clear()
+    return True
 
 
 async def _broadcast(msg: dict) -> None:
@@ -197,19 +227,13 @@ def _playback_loop() -> None:
     bank_start: float | None = None   # absolute start of current bank (prevents drift)
     while _playing:
 
+        _start_pending_curves()
         snapshot = _engine.begin_bank()
         bank = _generator.generate(
             _engine.force_state, bank_idx, _engine.landscape_position,
-            curve_overrides=_curve_engine.overrides(),
+            curve_overrides=_generation_curve_overrides(),
         )
         _current_bank = bank
-
-        try:
-            asyncio.run_coroutine_threadsafe(
-                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
-            )
-        except Exception:
-            pass
 
         if _midi is None:
             _playing = False
@@ -220,7 +244,6 @@ def _playback_loop() -> None:
 
         global _bank_started_at_ms
         _bank_started_at_ms = time.time() * 1000
-        # Re-broadcast now that bank_started_at is set
         try:
             asyncio.run_coroutine_threadsafe(
                 _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
@@ -252,16 +275,26 @@ def _playback_loop() -> None:
 
             bars_done = (phrase.phrase_index + 1) * 4
             if bars_done % max(1, _quantize_bars) == 0:
+                injected_curve = _start_pending_curves()
+                regenerated = False
                 # Regenerate remaining phrases from current (already-updated) state
                 next_idx = phrase.phrase_index + 1
                 if next_idx < len(bank.phrases):
                     with _preview_lock:
                         fresh = _generator.generate(
                             _engine.force_state, bank_idx, _engine.landscape_position,
-                            curve_overrides=_curve_engine.overrides(),
+                            curve_overrides=_generation_curve_overrides(),
                         )
                         bank.phrases[next_idx:] = fresh.phrases[next_idx:]
                         _current_bank = bank
+                        regenerated = True
+                if injected_curve or regenerated:
+                    try:
+                        asyncio.run_coroutine_threadsafe(
+                            _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
+                        )
+                    except Exception:
+                        pass
 
         _engine.commit_bank(snapshot)
         bank_start = phrase_end   # chain next bank from here (no drift)
@@ -365,7 +398,7 @@ async def _handle_message(msg: dict) -> None:
 
     elif kind == "quantize_bars":
         global _quantize_bars
-        _quantize_bars = max(1, int(msg.get("value", 2)))
+        _quantize_bars = max(4, int(msg.get("value", 4)))
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "set_archetype":
@@ -386,15 +419,22 @@ async def _handle_message(msg: dict) -> None:
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "curve_start":
-        _curve_engine.start(int(msg.get("id", 0)))
-        await _apply_and_preview()
+        curve_id = int(msg.get("id", 0))
+        _pending_curve_starts.add(curve_id)
+        await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "curve_stop":
-        _curve_engine.stop(msg.get("target", ""))
+        target = msg.get("target", "")
+        _curve_engine.stop(target)
+        for curve_id, curve in list(_curve_engine._curves.items()):
+            if curve.target == target:
+                _pending_curve_starts.discard(curve_id)
         await _apply_and_preview()
 
     elif kind == "curve_remove":
-        _curve_engine.remove(int(msg.get("id", 0)))
+        curve_id = int(msg.get("id", 0))
+        _pending_curve_starts.discard(curve_id)
+        _curve_engine.remove(curve_id)
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "midi_port":

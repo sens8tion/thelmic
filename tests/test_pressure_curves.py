@@ -100,12 +100,27 @@ class TestCurveEngine:
 
     def test_chain(self):
         eng = CurveEngine()
-        cid2 = eng.add("linear", 4, 0.5, 1.0, "ghost_inject")
-        cid1 = eng.add("linear", 4, 0.0, 0.5, "ghost_inject", next_id=cid2)
+        cid2 = eng.add("linear", 4, 0.5, 1.0, "cc:0:74")
+        cid1 = eng.add("linear", 4, 0.0, 0.5, "cc:0:74", next_id=cid2)
         eng.start(cid1)
         eng.advance(bars=4)   # first curve completes → second starts
         # Second curve just started → value = from_value of second = 0.5
-        assert eng.current_value("ghost_inject") == pytest.approx(0.5, abs=0.05)
+        assert eng.current_value("cc:0:74") == pytest.approx(0.5, abs=0.05)
+
+    def test_deformer_target_allows_only_one_curve(self):
+        eng = CurveEngine()
+        first = eng.add("linear", 8, 0.0, 1.0, "ghost_inject")
+        second = eng.add("step", 2, 1.0, 0.0, "ghost_inject")
+        state = eng.state_dict()
+        curves_for_target = [c for c in state["curves"] if c["target"] == "ghost_inject"]
+        assert second == first
+        assert len(curves_for_target) == 1
+
+    def test_cc_target_allows_multiple_curves(self):
+        eng = CurveEngine()
+        first = eng.add("linear", 8, 0.0, 1.0, "cc:0:74")
+        second = eng.add("step", 2, 1.0, 0.0, "cc:0:74")
+        assert second != first
 
     def test_overrides_returns_active(self):
         eng = CurveEngine()
@@ -114,6 +129,14 @@ class TestCurveEngine:
         overrides = eng.overrides()
         assert "ghost_inject" in overrides
         assert 0.3 <= overrides["ghost_inject"] <= 0.7
+
+    def test_projected_overrides_look_ahead_without_advancing(self):
+        eng = CurveEngine()
+        cid = eng.add("linear", 8, 0.0, 1.0, "ghost_inject")
+        eng.start(cid)
+        assert eng.overrides()["ghost_inject"] == pytest.approx(0.0)
+        assert eng.projected_overrides(4)["ghost_inject"] == pytest.approx(0.5)
+        assert eng.overrides()["ghost_inject"] == pytest.approx(0.0)
 
     def test_remove_stops_curve(self):
         eng = CurveEngine()

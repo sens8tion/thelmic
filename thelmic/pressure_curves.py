@@ -150,7 +150,15 @@ class CurveEngine:
 
     def add(self, shape: str, bars: int, from_value: float, to_value: float,
             target: str, next_id: Optional[int] = None, loop: bool = False) -> int:
-        """Register a new curve and return its ID."""
+        """Register a new curve and return its ID.
+
+        Deformation targets are single-slot: a deformer can have at most one
+        registered pressure curve. CC targets may still have multiple curves.
+        """
+        existing_id = self._curve_id_for_deformer(target)
+        if existing_id is not None:
+            return existing_id
+
         curve_id = self._next_id
         self._next_id += 1
         self._curves[curve_id] = PressureCurve(
@@ -159,6 +167,14 @@ class CurveEngine:
             target=target, next_id=next_id, loop=loop,
         )
         return curve_id
+
+    def _curve_id_for_deformer(self, target: str) -> Optional[int]:
+        if target.startswith("cc:"):
+            return None
+        for curve_id, curve in self._curves.items():
+            if curve.target == target:
+                return curve_id
+        return None
 
     def remove(self, curve_id: int) -> None:
         self._curves.pop(curve_id, None)
@@ -233,6 +249,20 @@ class CurveEngine:
             target: self.current_value(target)
             for target in self._active
         }
+
+    def projected_overrides(self, bars_ahead: float) -> dict[str, float]:
+        """Return active curve values projected `bars_ahead` into the future.
+
+        Generation happens ahead of playback at quantized phrase boundaries. Using
+        the projected value lets the next generated block contain the deformation
+        that will be reached during that block, instead of an empty curve-start
+        value of 0.0.
+        """
+        out: dict[str, float] = {}
+        for target, slot in self._active.items():
+            t = min(1.0, (slot.bars_elapsed + bars_ahead) / max(1, slot.curve.bars))
+            out[target] = evaluate(slot.curve, t)
+        return out
 
     # ------------------------------------------------------------------
     # Serialisation
