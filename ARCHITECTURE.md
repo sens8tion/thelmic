@@ -763,3 +763,169 @@ They should become embedded musical behaviours driven by transition intent.
 The performer should ride the system at the level of intent.
 
 The engine should handle the pressure mechanics.
+
+---
+
+## Amendments to Phases 1–3 Implementation Plan
+
+These amendments refine the proposed implementation to ensure correct architectural separation, predictable behaviour, and clean extensibility. They should be applied before implementation proceeds.
+
+---
+
+### 1. Keep Transition State Separate from ForceEngine
+
+**Do not place `Transition` in `force_engine.py`.**
+
+Instead:
+
+```
+thelmic/transition_engine.py
+  - Transition
+  - TransitionEngine
+```
+
+**Reason:**
+Transition state represents **traversal / intent**, not **force / landscape state**.
+
+Maintain clean dependency direction:
+
+```
+TransitionEngine → ForceEngine → Deformations
+```
+
+Not:
+
+```
+ForceEngine owns Transition
+```
+
+---
+
+### 2. Manual Override Merge Must Be Per-Target
+
+Manual pressure curves should override **only the targets they explicitly control**.
+
+Do NOT treat "manual active" as disabling all behaviour hooks.
+
+Correct merge rule:
+
+```python
+result = dict(hook_overrides)
+result.update(manual_overrides)
+```
+
+Meaning:
+
+- Manual overrides win for the same key
+- Behaviour hooks still fill any missing targets
+
+Example:
+
+```yaml
+manual:
+  cc.filter_cutoff: 0.8
+
+hooks:
+  ghost_inject: 0.6
+```
+
+Final result:
+
+```yaml
+cc.filter_cutoff: 0.8
+ghost_inject: 0.6
+```
+
+---
+
+### 3. Slider Behaviour: Separate Play vs Stop
+
+Avoid mixing target-setting and time advancement during UI drag.
+
+#### When playing:
+- Slider sets `target_position`
+- `TransitionEngine` performs the journey over time
+
+#### When stopped:
+- Slider directly previews position (immediate, no advance_fractional)
+- Do NOT implicitly call `advance_fractional()` on every drag
+
+Optional later enhancement: explicit "preview transition" mode.
+
+---
+
+### 4. Transition Duration Must Be Configurable
+
+Add a constant immediately:
+
+```python
+DEFAULT_TRANSITION_BARS = 8.0
+```
+
+This should be easily adjustable during auditory testing.
+
+---
+
+### 5. Behaviour Hooks Must Use Named Targets
+
+Hooks should return values using the same key structure as curve overrides.
+
+Initial form:
+
+```python
+{
+  "ghost_inject": 0.63
+}
+```
+
+Future-safe form (when CC targets are added):
+
+```python
+{
+  "deformations.ghost_inject.intensity": 0.63,
+  "cc.filter_cutoff": 0.72
+}
+```
+
+Start simple with the existing override key format. Align with it, do not invent a new one.
+
+---
+
+### 6. Expose Transition State via WebSocket Immediately
+
+Add full transition visibility to the state broadcast from day one:
+
+```yaml
+transition:
+  active: true/false
+  start_position: float
+  current_position: float
+  target_position: float
+  progress: 0.0–1.0
+  remaining: 0.0–1.0
+  direction: toward_nott | toward_oak | none
+  velocity: 0.0–1.0
+```
+
+**This is critical for auditory validation.** The audible result cannot be verified without visible state.
+
+---
+
+## Amended Implementation Summary
+
+| # | Change |
+|---|---|
+| 1 | `Transition` lives in `transition_engine.py`, not `force_engine.py` |
+| 2 | Hook/manual merge is per-target: hooks first, manual overwrites specific keys only |
+| 3 | Stopped slider = immediate position preview; playing slider = sets target only |
+| 4 | `DEFAULT_TRANSITION_BARS = 8.0` as a named constant from the start |
+| 5 | Hook return keys match existing override format (`"ghost_inject"` etc.) |
+| 6 | Full transition state broadcast on every WS state push |
+
+---
+
+## Core Principle
+
+> The performer sets intent (destination).  
+> The system performs the journey.  
+> Behaviour hooks supply pressure automatically unless explicitly overridden.
