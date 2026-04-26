@@ -521,3 +521,245 @@ Each of these is one session, possibly two if something is genuinely complex:
 - No LLM calls at runtime. The intent layer at this stage is just axis position.
 - Python 3.11+. Use `pyproject.toml` with `[project]` table.
 - rtmidi via `python-rtmidi`. Virtual port name: `thelmic`.
+
+## Behaviour-First Development Direction
+
+The current system has working pressure curves, deformation modulation, MIDI CC output, and a live Oak → Chaos → Nott slider. The next phase should not simplify the UI yet, and should not add more pressure curve shapes for their own sake.
+
+The priority is to stabilise the behavioural core so the system can be observed, debugged, and heard as it changes over time.
+
+### Current Problem
+
+The system can currently:
+
+- move through the Thelmic landscape using the slider
+- trigger pressure curves
+- affect beat structure through deformation modules
+- affect filters/gates/effects through outbound MIDI CC
+
+But pressure curves are still mostly user-triggered behaviours.
+
+What is missing is an internal transition system where movement through the landscape automatically creates appropriate pressure behaviour.
+
+### Core Concept: Transition / Intent Vector
+
+A slider movement should not directly set the live landscape position.
+
+Instead, dragging from one point to another should create an active transition object:
+
+```yaml
+transition:
+  start_position: 0.32
+  target_position: 0.78
+  current_position: 0.41
+  remaining_distance: 0.37
+  duration_bars: 8
+  elapsed_bars: 2
+  direction: toward_nott
+  active: true
+```
+
+This transition is the engine's current intent.
+
+The UI should render this as a horizontal bar from the current position to the target position on the Oak → Chaos → Nott axis. As the system travels, the bar shortens until the destination is reached.
+
+### Transition Behaviour
+
+The transition should:
+
+1. Capture the current landscape position as `start_position`
+2. Capture the user's selected destination as `target_position`
+3. Move the actual landscape state toward the target over musical time
+4. Expose transition progress, remaining distance, direction, velocity, and phase
+5. Trigger or modulate internal pressure behaviours automatically
+6. Update visual state so the performer can see where the system is going
+
+The key idea:
+
+```text
+user sets destination
+system performs the journey
+```
+
+not:
+
+```text
+user manually triggers every pressure curve
+```
+
+### Pressure Curves Become Internal Behaviour
+
+Pressure curves should remain available, but they should increasingly behave as internal modulation timelines attached to transitions.
+
+They should not be thought of primarily as user-facing controls.
+
+Example:
+
+```yaml
+on_transition:
+  from: oak
+  to: chaos
+  behaviours:
+    - increase ghost injection
+    - tighten gate
+    - reduce stability
+    - avoid full release
+
+on_transition:
+  from: chaos
+  to: nott
+  behaviours:
+    - decay ghost pressure
+    - open filter or collapse it
+    - increase impact behaviour
+    - resolve or discharge accumulated tension
+```
+
+### Required State to Expose
+
+Add a visible/debuggable state model that includes:
+
+```yaml
+thelmic_state:
+  position: 0.0-1.0
+  target_position: 0.0-1.0
+  direction: left | right | none
+  transition_active: true/false
+  transition_progress: 0.0-1.0
+  transition_remaining: 0.0-1.0
+  unresolved_tension: 0.0-1.0
+  phrase_phase: 0.0-1.0
+  last_impact_time: bar.beat
+  recent_intensity: 0.0-1.0
+```
+
+This state should be inspectable in the UI/log/debug output so we can verify whether the engine's internal state matches what we hear.
+
+### Why This Matters
+
+The current system can make pressure happen, but the performer still has to manually coordinate too much of it.
+
+The next goal is for the system to understand:
+
+```text
+where we are
+where we are going
+how far remains
+what pressure has been built
+what has not yet resolved
+```
+
+Then deformation modules and CC outputs can respond musically to the journey.
+
+### Behaviour Before UI Simplification
+
+Do not collapse the interface into the final "tension trackpad" yet.
+
+First, the behaviour model must prove itself using the existing UI/debug visibility.
+
+The correct order is:
+
+1. Add transition/intention state
+2. Make pressure curves respond to transitions
+3. Expose state visually and in logs
+4. Confirm the audible result
+5. Only then simplify the UI into a tension trackpad
+
+### Future UI Direction: 2D Tension Trackpad
+
+Eventually the main control may become a 2D gesture surface.
+
+Horizontal movement:
+
+```text
+Oak → Chaos → Nott
+```
+
+Vertical movement:
+
+```text
+up   = intensify / strain / lift / accelerate
+down = drain / hollow / restrain / collapse
+```
+
+But this should be implemented only after transition behaviour is musically convincing.
+
+### Development Plan
+
+#### Phase 1: Transition State
+
+Implement a `Transition` model:
+
+```python
+@dataclass
+class Transition:
+    start_position: float
+    target_position: float
+    current_position: float
+    duration_bars: float
+    elapsed_bars: float
+    active: bool
+```
+
+Add derived values:
+
+```python
+progress
+remaining
+direction
+velocity
+```
+
+#### Phase 2: Transition Engine
+
+Add a transition engine that updates current landscape position over musical time.
+
+The slider should set a target, not instantly overwrite the live position.
+
+#### Phase 3: Pressure Behaviour Hooks
+
+Allow pressure curves and deformation modules to respond to transition state.
+
+Example inputs to modules:
+
+```python
+transition_progress
+transition_remaining
+transition_direction
+unresolved_tension
+phrase_phase
+```
+
+#### Phase 4: Debug/Visual State
+
+Render:
+
+- current position on Oak → Chaos → Nott axis
+- target position
+- shrinking transition bar
+- transition direction
+- active pressure behaviours
+- current deformation intensities
+- current outbound CC values
+
+#### Phase 5: Auditory Validation
+
+Test whether movement through the landscape now creates audible, expected pressure changes without manually launching curves.
+
+Expected result:
+
+```text
+Moving toward Chaos should create structured tension.
+Moving toward Nott should discharge, collapse, or impact.
+Returning toward Oak should stabilise without becoming dead.
+```
+
+### Design Principle
+
+Pressure curves and deformations should not be extra controls the performer must manually operate.
+
+They should become embedded musical behaviours driven by transition intent.
+
+The performer should ride the system at the level of intent.
+
+The engine should handle the pressure mechanics.
