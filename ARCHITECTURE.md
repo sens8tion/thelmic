@@ -362,8 +362,41 @@ thelmic/
 - Anchor/ghost/call-response relationships between layers
 - Force engine coordinates roles across instruments
 
-### Phase 5 — Expression layer
-- CC automation output driven by force state
+### Phase 5 — Pressure Curves
+
+A **pressure curve** is a time-varying 0→1 function spanning a defined number of bars.
+Curves are chainable in sequence and serve two roles:
+
+1. **Deformation modulator** — replaces or scales the direct force→intensity mapping
+   for a specific deformation (e.g. ghost inject intensity follows a decelerating curve
+   into Chaos rather than tracking instability linearly)
+
+2. **MIDI CC output** — drives a CC value directly (brightness, filter, reverb send etc.)
+   to a DAW controller, independent of any deformation
+
+**Curve shapes** (defined by behaviour of the first differential):
+- `linear`       — constant 1st differential; steady ramp up or down
+- `accelerating` — increasing 1st differential; slow start, fast finish
+- `decelerating` — decreasing 1st differential; fast start, slow finish
+- `sinusoidal`   — smooth oscillation; full or partial cycle over N bars
+- `step`         — holds then jumps; constant until final bar
+
+Each curve has:
+- `shape: str`
+- `bars: int`          — duration in bars
+- `from_value: float`  — starting value (0.0–1.0)
+- `to_value: float`    — ending value (0.0–1.0)
+- `target: str`        — deformation name (e.g. `"ghost_inject"`) or `"cc:<n>"` for MIDI CC
+
+Curves chain by linking `to_value` of one to `from_value` of the next.
+The chain loops or holds at end unless explicitly stopped.
+
+**UI representation:** each active curve is depicted as a small sparkline next to
+its associated deformation strip row (if targeting a deformation) or in a dedicated
+CC lane (if targeting MIDI CC output).
+
+### Phase 5a — Expression layer (CC automation)
+- CC automation output driven by force state and/or pressure curves
 - Brightness, saturation, spatial width etc. as MIDI CC
 
 ### Phase 6 — Intent text parsing
@@ -453,7 +486,8 @@ Each of these is one session, possibly two if something is genuinely complex:
 | 2  | Implement `Transport` with queue and interrupt |
 | 3  | Extend `BankGenerator` for snare/hat, no inter-instrument logic |
 | 4  | Inter-instrument roles in force engine and generator |
-| 5  | Expression layer (CC automation) |
+| 5  | Pressure curves — chainable 0→1 time functions; deformation modulator + MIDI CC output |
+| 5a | Expression layer (CC automation via pressure curves) |
 | 6  | Intent text parsing |
 | 7  | Voice/sample layer |
 
