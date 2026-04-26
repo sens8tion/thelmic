@@ -67,7 +67,8 @@ _engine: Optional[ForceEngine] = None
 _controls: Optional[Controls] = None
 _intent: Optional[IntentInput] = None
 _generator: Optional[BankGenerator] = None
-_midi: Optional[MIDIOut] = None
+_midi: Optional[MIDIOut] = None      # drum notes port
+_midi_cc: Optional[MIDIOut] = None  # CC automation port (separate)
 _bpm: float = 174.0
 _current_bank = None   # Bank | None
 _curve_engine: CurveEngine = CurveEngine()
@@ -78,7 +79,7 @@ _play_thread: Optional[threading.Thread] = None
 _play_lock = threading.Lock()
 _bank_started_at_ms: float = 0.0   # wall-clock ms when current bank began playing
 
-_quantize_bars: int = 4   # phrase-sized boundary; generator/playback swap 4 bars at a time
+_quantize_bars: int = 2   # bars between quantize boundaries (1 = every bar)
 _preview_lock = threading.Lock()  # guards _current_bank writes from handler vs loop
 
 _clients: set[WebSocket] = set()
@@ -138,12 +139,21 @@ def _init_engine() -> None:
 
 
 def _open_midi_port(port_name: Optional[str]) -> str:
-    """Open (or switch to) a MIDI port. Returns the connected port name."""
+    """Open (or switch to) the notes MIDI port. Returns the connected port name."""
     global _midi
     if _midi is not None:
         _midi.close()
     _midi = MIDIOut(port_name=port_name)
     return _midi.port_name
+
+
+def _open_midi_cc_port(port_name: Optional[str]) -> str:
+    """Open (or switch to) the CC MIDI port. Returns the connected port name."""
+    global _midi_cc
+    if _midi_cc is not None:
+        _midi_cc.close()
+    _midi_cc = MIDIOut(port_name=port_name)
+    return _midi_cc.port_name
 
 
 def _bank_events_list(bank) -> list:
@@ -184,6 +194,7 @@ def _force_state_dict() -> dict:
         "bpm": _bpm,
         "bank_events": _bank_events_list(_current_bank),
         "midi_port": _midi.port_name if _midi else None,
+        "midi_cc_port": _midi_cc.port_name if _midi_cc else None,
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
         "deformation_colours": DEFORMATION_COLOURS,
@@ -251,53 +262,56 @@ def _playback_loop() -> None:
         except Exception:
             pass
 
-        # Play phrase by phrase; at quantize boundaries apply pending + regenerate
-        # the remaining phrases so changes are heard immediately after the boundary.
-        phrase_end = bank_start
+        # Play bar by bar — advances the curve engine once per bar so CC output
+        # fires at bar resolution rather than phrase resolution (4× finer).
+        # Quantize boundaries can now fire on any bar, not just phrase ends.
+        from thelmic.bank_generator import BARS_PER_PHRASE
+        bar_end = bank_start
         for phrase in bank.phrases:
             if not _playing:
                 break
-            phrase_end = _midi.play_phrase_blocking(phrase, bpm=_bpm, bank_start=bank_start)
+            for bar_in_phrase in range(BARS_PER_PHRASE):
+                if not _playing:
+                    break
+                bar_end = _midi.play_bar_in_phrase_blocking(
+                    phrase, bar_in_phrase, bpm=_bpm, bank_start=bank_start,
+                )
 
-            # Advance curve engine by the phrase's bar count; collect CC outputs
-            from thelmic.bank_generator import BARS_PER_PHRASE
-            cc_messages = _curve_engine.advance(bars=BARS_PER_PHRASE)
-            for _target, cc_num, val in cc_messages:
-                ch = 0  # default channel; CC targets can specify channel in target string
-                parts = _target.split(":")
-                if len(parts) >= 2:
-                    try:
-                        ch = int(parts[1])
-                    except ValueError:
-                        pass
-                if _midi:
-                    _midi._midiout.send_message([0xB0 | (ch & 0xF), cc_num & 0x7F, int(val * 127)])
+                # Advance curve engine 1 bar; send CC outputs on the CC port
+                cc_messages = _curve_engine.advance(bars=1)
+                if _midi_cc:
+                    for cc_target, cc_num, val in cc_messages:
+                        parts = cc_target.split(":")
+                        ch = int(parts[1]) if len(parts) >= 3 else 0
+                        _midi_cc.send_cc(ch, cc_num, val)
 
-            bars_done = (phrase.phrase_index + 1) * 4
-            if bars_done % max(1, _quantize_bars) == 0:
-                injected_curve = _start_pending_curves()
-                regenerated = False
-                # Regenerate remaining phrases from current (already-updated) state
-                next_idx = phrase.phrase_index + 1
-                if next_idx < len(bank.phrases):
-                    with _preview_lock:
-                        fresh = _generator.generate(
-                            _engine.force_state, bank_idx, _engine.landscape_position,
-                            curve_overrides=_generation_curve_overrides(),
-                        )
-                        bank.phrases[next_idx:] = fresh.phrases[next_idx:]
-                        _current_bank = bank
-                        regenerated = True
-                if injected_curve or regenerated:
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
-                        )
-                    except Exception:
-                        pass
+                # Quantize boundary — fires every _quantize_bars bars.
+                # Pending curves are started and upcoming phrases are regenerated
+                # so both MIDI and the grid catch up to the current state.
+                abs_bar = phrase.phrase_index * BARS_PER_PHRASE + bar_in_phrase + 1
+                if abs_bar % max(1, _quantize_bars) == 0:
+                    injected_curve = _start_pending_curves()
+                    next_idx = phrase.phrase_index + 1
+                    regenerated = False
+                    if next_idx < len(bank.phrases):
+                        with _preview_lock:
+                            fresh = _generator.generate(
+                                _engine.force_state, bank_idx, _engine.landscape_position,
+                                curve_overrides=_generation_curve_overrides(),
+                            )
+                            bank.phrases[next_idx:] = fresh.phrases[next_idx:]
+                            _current_bank = bank
+                            regenerated = True
+                    if injected_curve or regenerated:
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
+                            )
+                        except Exception:
+                            pass
 
         _engine.commit_bank(snapshot)
-        bank_start = phrase_end   # chain next bank from here (no drift)
+        bank_start = bar_end   # chain next bank from bar end (no drift)
         bank_idx += 1
     _playing = False
 
@@ -323,6 +337,8 @@ async def lifespan(fastapi_app: FastAPI):
     _playing = False
     if _midi:
         _midi.close()
+    if _midi_cc:
+        _midi_cc.close()
 
 
 app = FastAPI(title="thelmic", lifespan=lifespan)
@@ -398,7 +414,7 @@ async def _handle_message(msg: dict) -> None:
 
     elif kind == "quantize_bars":
         global _quantize_bars
-        _quantize_bars = max(4, int(msg.get("value", 4)))
+        _quantize_bars = max(1, int(msg.get("value", 2)))
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "set_archetype":
@@ -440,7 +456,15 @@ async def _handle_message(msg: dict) -> None:
     elif kind == "midi_port":
         port_name = msg.get("value")
         try:
-            connected = _open_midi_port(port_name)
+            _open_midi_port(port_name)
+            await _broadcast({"type": "state", **_force_state_dict()})
+        except RuntimeError as e:
+            await _broadcast({"type": "error", "message": str(e)})
+
+    elif kind == "midi_cc_port":
+        port_name = msg.get("value")
+        try:
+            _open_midi_cc_port(port_name)
             await _broadcast({"type": "state", **_force_state_dict()})
         except RuntimeError as e:
             await _broadcast({"type": "error", "message": str(e)})

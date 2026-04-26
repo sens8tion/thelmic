@@ -383,7 +383,7 @@
       flex-wrap: wrap;
     }
 
-    #midi-port-select {
+    #midi-port-select, #midi-cc-port-select {
       font-family: 'Courier New', monospace;
       font-size: 12px;
       background: var(--surface);
@@ -393,6 +393,13 @@
       border-radius: 2px;
       flex: 1;
       min-width: 0;
+    }
+
+    .midi-label {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+      min-width: 32px;
     }
 
     .midi-refresh-btn {
@@ -671,6 +678,10 @@
     }
 
     .curve-add-form input[type=number] { width: 52px; }
+    .curve-cc-fields { display: none; align-items: center; gap: 4px; }
+    .curve-cc-fields.visible { display: flex; }
+    .curve-cc-fields input[type=number] { width: 44px; }
+    .curve-cc-label { font-size: 10px; color: var(--dim); }
   </style>
 </head>
 <body>
@@ -788,10 +799,19 @@
       <input type="number" id="curve-from" value="0" min="0" max="1" step="0.05" title="from">
       <span style="color:var(--dim);font-size:10px">→</span>
       <input type="number" id="curve-to" value="1" min="0" max="1" step="0.05" title="to">
-      <select id="curve-target">
-        <option value="ghost_inject">ghost inject</option>
-        <option value="cc:0:74">cc 0:74</option>
+      <select id="curve-target-type" onchange="updateCurveTargetMode()">
+        <option value="deformer">deformer</option>
+        <option value="cc">cc</option>
       </select>
+      <select id="curve-deformer-name">
+        <option value="ghost_inject">ghost inject</option>
+      </select>
+      <span class="curve-cc-fields" id="curve-cc-fields">
+        <span class="curve-cc-label">ch</span>
+        <input type="number" id="curve-cc-ch" value="0" min="0" max="15" title="MIDI channel (0–15)">
+        <span class="curve-cc-label">cc</span>
+        <input type="number" id="curve-cc-num" value="74" min="0" max="127" title="CC number (0–127)">
+      </span>
       <label style="font-size:10px;color:var(--dim);display:flex;align-items:center;gap:3px">
         <input type="checkbox" id="curve-loop"> loop
       </label>
@@ -814,11 +834,19 @@
   <div class="midi-section">
     <h2 class="seq-heading" style="border-top:none;padding-top:0">MIDI OUT</h2>
     <div class="midi-row">
+      <span class="midi-label">notes</span>
       <select id="midi-port-select" onchange="selectMidiPort()">
         <option value="">— select port —</option>
       </select>
       <button class="midi-refresh-btn" onclick="refreshPorts()" title="Refresh ports">⟳</button>
       <div class="midi-status" id="midi-status">not connected</div>
+    </div>
+    <div class="midi-row">
+      <span class="midi-label">cc</span>
+      <select id="midi-cc-port-select" onchange="selectMidiCCPort()">
+        <option value="">— select port —</option>
+      </select>
+      <div class="midi-status" id="midi-cc-status">not connected</div>
     </div>
   </div>
 
@@ -986,6 +1014,14 @@
         midiStatus.textContent = 'not connected';
         midiStatus.className = 'midi-status';
       }
+      const midiCCStatus = document.getElementById('midi-cc-status');
+      if (s.midi_cc_port) {
+        midiCCStatus.textContent = s.midi_cc_port;
+        midiCCStatus.className = 'midi-status connected';
+      } else {
+        midiCCStatus.textContent = 'not connected';
+        midiCCStatus.className = 'midi-status';
+      }
 
       // Playhead timing
       if (s.bank_started_at) bankStartedAt = s.bank_started_at;
@@ -1027,15 +1063,16 @@
       try {
         const res = await fetch('/api/midi-ports');
         const data = await res.json();
-        const sel = document.getElementById('midi-port-select');
-        const current = sel.value;
-        sel.innerHTML = '<option value="">— select port —</option>';
-        data.ports.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p;
-          opt.textContent = p;
-          if (p === current) opt.selected = true;
-          sel.appendChild(opt);
+        ['midi-port-select', 'midi-cc-port-select'].forEach(id => {
+          const sel = document.getElementById(id);
+          const current = sel.value;
+          sel.innerHTML = '<option value="">— select port —</option>';
+          data.ports.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p; opt.textContent = p;
+            if (p === current) opt.selected = true;
+            sel.appendChild(opt);
+          });
         });
       } catch (e) {
         setStatus('failed to list MIDI ports', 'err');
@@ -1045,6 +1082,11 @@
     function selectMidiPort() {
       const val = document.getElementById('midi-port-select').value;
       if (val) send({ type: 'midi_port', value: val });
+    }
+
+    function selectMidiCCPort() {
+      const val = document.getElementById('midi-cc-port-select').value;
+      if (val) send({ type: 'midi_cc_port', value: val });
     }
 
     // Load ports on connect
@@ -1355,13 +1397,17 @@
     }
 
     function effectiveCurveValue(curve, rawCurveValue) {
-      if (!isDeformerTarget(curve.target)) return rawCurveValue;
+      if (!isDeformerTarget(curve.target)) return rawCurveValue;  // CC: pass through
       const dim = deformationModelDimensions[curve.target];
       const modelValue = dim ? (latestModelDimensions[dim] ?? 0) : 1;
       return rawCurveValue * modelValue;
     }
 
     function displayCurveValue(curve, rawCurveValue) {
+      if (!isDeformerTarget(curve.target)) {
+        // CC target — show as MIDI 0–127 integer
+        return Math.round(rawCurveValue * 127).toString();
+      }
       return effectiveCurveValue(curve, rawCurveValue).toFixed(2);
     }
 
@@ -1428,18 +1474,35 @@
       }
     }
 
-    let _curveTargetOptions = ['ghost_inject'];
     let existingDeformerCurveTargets = new Set();
 
     function isDeformerTarget(target) {
       return target && !target.startsWith('cc:');
     }
 
+    function updateCurveTargetMode() {
+      const type = document.getElementById('curve-target-type').value;
+      const deformerSel = document.getElementById('curve-deformer-name');
+      const ccFields    = document.getElementById('curve-cc-fields');
+      deformerSel.style.display = (type === 'deformer') ? '' : 'none';
+      ccFields.classList.toggle('visible', type === 'cc');
+      updateCurveAddButton();
+    }
+
+    function getCurveTarget() {
+      const type = document.getElementById('curve-target-type').value;
+      if (type === 'cc') {
+        const ch  = parseInt(document.getElementById('curve-cc-ch').value)  ?? 0;
+        const num = parseInt(document.getElementById('curve-cc-num').value) ?? 74;
+        return `cc:${ch}:${num}`;
+      }
+      return document.getElementById('curve-deformer-name').value;
+    }
+
     function updateCurveAddButton() {
-      const targetSel = document.getElementById('curve-target');
       const addBtn = document.getElementById('curve-add-btn');
-      if (!targetSel || !addBtn) return;
-      const target = targetSel.value;
+      if (!addBtn) return;
+      const target  = getCurveTarget();
       const hasCurve = isDeformerTarget(target) && existingDeformerCurveTargets.has(target);
       addBtn.disabled = hasCurve;
       addBtn.textContent = hasCurve ? 'added' : '+ add';
@@ -1456,18 +1519,18 @@
         curves.filter(c => isDeformerTarget(c.target)).map(c => c.target)
       );
 
-      // Update target dropdown with known deformation colours
-      const sel = document.getElementById('curve-target');
-      if (sel) {
-        const existing = Array.from(sel.options).map(o => o.value);
+      // Populate deformer-name dropdown with known deformation targets
+      const deformerSel = document.getElementById('curve-deformer-name');
+      if (deformerSel) {
+        const existing = Array.from(deformerSel.options).map(o => o.value);
         Object.keys(deformationColours).forEach(name => {
           if (!existing.includes(name)) {
             const opt = document.createElement('option');
             opt.value = name; opt.textContent = name.replace(/_/g, ' ');
-            sel.insertBefore(opt, sel.firstChild);
+            deformerSel.insertBefore(opt, deformerSel.firstChild);
           }
         });
-        sel.onchange = updateCurveAddButton;
+        deformerSel.onchange = updateCurveAddButton;
       }
 
       curves.forEach(c => {
@@ -1530,7 +1593,7 @@
     }
 
     function addCurve() {
-      const target = document.getElementById('curve-target').value;
+      const target = getCurveTarget();
       if (isDeformerTarget(target) && existingDeformerCurveTargets.has(target)) return;
       send({
         type:       'curve_add',

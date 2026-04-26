@@ -82,6 +82,67 @@ class MIDIOut:
         if self._port_open:
             self._midiout.send_message([0x80 | (channel & 0xF), note & 0x7F, 0])
 
+    def send_cc(self, channel: int, cc_num: int, value: float) -> None:
+        """Send a MIDI CC message. value in [0.0, 1.0] — scaled to 0–127."""
+        if self._port_open:
+            self._midiout.send_message([
+                0xB0 | (channel & 0xF),
+                cc_num & 0x7F,
+                max(0, min(127, int(value * 127))),
+            ])
+
+    def play_bar_in_phrase_blocking(
+        self,
+        phrase: Phrase,
+        bar_in_phrase: int,
+        bpm: float,
+        bank_start: float,
+    ) -> float:
+        """Play one bar from a phrase, blocking until the bar ends.
+
+        bar_in_phrase: 0-indexed bar within the phrase (0..BARS_PER_PHRASE-1).
+        bank_start:    perf_counter time the bank began.
+
+        Returns the expected bar-end time (= bank_start + bar_end_tick * spt).
+        """
+        seconds_per_tick = 60.0 / (bpm * TICKS_PER_BEAT)
+        ticks_per_bar    = TICKS_PER_BEAT * BEATS_PER_BAR
+
+        abs_bar_idx    = phrase.phrase_index * BARS_PER_PHRASE + bar_in_phrase
+        bar_start_tick = abs_bar_idx * ticks_per_bar
+        bar_end_tick   = bar_start_tick + ticks_per_bar
+
+        timeline: list[tuple[float, str, int, int, int]] = []
+        for event in phrase.events:
+            if event.velocity == 0:
+                continue
+            t_tick = event_to_abs_tick(event.time)
+            if bar_start_tick <= t_tick < bar_end_tick:
+                t_on  = t_tick * seconds_per_tick
+                t_off = t_on + event.duration
+                ch    = LAYER_CHANNELS.get(event.layer, 0)
+                timeline.append((t_on,  "on",  ch, event.note, event.velocity))
+                timeline.append((t_off, "off", ch, event.note, 0))
+
+        timeline.sort(key=lambda x: x[0])
+
+        for t_rel, action, ch, note, vel in timeline:
+            target_time = bank_start + t_rel
+            now = time.perf_counter()
+            if target_time > now:
+                time.sleep(target_time - now)
+            if action == "on":
+                self.send_note_on(ch, note, vel)
+            else:
+                self.send_note_off(ch, note)
+
+        bar_end_abs = bank_start + bar_end_tick * seconds_per_tick
+        remaining   = bar_end_abs - time.perf_counter()
+        if remaining > 0:
+            time.sleep(remaining)
+
+        return bar_end_abs
+
     def play_bank_blocking(
         self,
         bank: Bank,
