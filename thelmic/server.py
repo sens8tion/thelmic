@@ -52,9 +52,48 @@ _current_bank = None   # Bank | None
 _playing: bool = False
 _play_thread: Optional[threading.Thread] = None
 _play_lock = threading.Lock()
+_bank_started_at_ms: float = 0.0   # wall-clock ms when current bank began playing
+
+_quantize_bars: int = 2   # bars before playback catches up to the displayed state
+_preview_lock = threading.Lock()  # guards _current_bank writes from handler vs loop
 
 _clients: set[WebSocket] = set()
 _clients_lock = asyncio.Lock()
+
+
+async def _apply_and_preview() -> None:
+    """Update the display bank ahead of the current playhead, broadcast immediately.
+
+    Phrases already played (behind the playhead) keep their original content.
+    Only phrases strictly ahead of the current playhead are regenerated from
+    the new state, so the grid shows what's coming without rewriting history.
+    The playback loop will regenerate those same phrases at the next quantize
+    boundary so MIDI catches up.
+    """
+    global _current_bank
+    if not (_generator and _engine and _current_bank):
+        await _broadcast({"type": "state", **_force_state_dict()})
+        return
+
+    # Work out which phrase the playhead is currently inside
+    if _bank_started_at_ms > 0 and _playing:
+        elapsed_ms = time.time() * 1000 - _bank_started_at_ms
+        from thelmic.bank_generator import BARS_PER_PHRASE, BEATS_PER_BAR
+        ms_per_phrase = BARS_PER_PHRASE * BEATS_PER_BAR * (60000.0 / _bpm)
+        current_phrase_idx = min(int(elapsed_ms / ms_per_phrase), len(_current_bank.phrases) - 1)
+    else:
+        current_phrase_idx = -1   # not playing — regenerate everything
+
+    with _preview_lock:
+        fresh = _generator.generate(
+            _engine.force_state, _current_bank.bank_index, _engine.landscape_position
+        )
+        # Splice: keep up-to-and-including current phrase, replace the rest
+        for i, phrase in enumerate(fresh.phrases):
+            if i > current_phrase_idx:
+                _current_bank.phrases[i] = phrase
+
+    await _broadcast({"type": "state", **_force_state_dict()})
 
 
 def _init_engine() -> None:
@@ -112,6 +151,9 @@ def _force_state_dict() -> dict:
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
         "deformation_colours": DEFORMATION_COLOURS,
+        "quantize_bars": _quantize_bars,
+        "bank_started_at": _bank_started_at_ms,
+        "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
     }
 
 
@@ -129,27 +171,57 @@ async def _broadcast(msg: dict) -> None:
 
 def _playback_loop() -> None:
     global _playing, _current_bank
-    import time as _time
     bank_idx = 0
-    next_bank_start: float | None = None   # tracks expected start to prevent drift
+    bank_start: float | None = None   # absolute start of current bank (prevents drift)
     while _playing:
+
         snapshot = _engine.begin_bank()
         bank = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
         _current_bank = bank
+
         try:
-            loop = _get_loop()
             asyncio.run_coroutine_threadsafe(
-                _broadcast({"type": "state", **_force_state_dict()}), loop
+                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
             )
         except Exception:
             pass
+
         if _midi is None:
             _playing = False
             break
-        next_bank_start = _midi.play_bank_blocking(
-            bank, bpm=_bpm, start_time=next_bank_start
-        )
+
+        if bank_start is None:
+            bank_start = time.perf_counter()
+
+        global _bank_started_at_ms
+        _bank_started_at_ms = time.time() * 1000
+        # Re-broadcast now that bank_started_at is set
+        try:
+            asyncio.run_coroutine_threadsafe(
+                _broadcast({"type": "state", **_force_state_dict()}), _get_loop()
+            )
+        except Exception:
+            pass
+
+        # Play phrase by phrase; at quantize boundaries apply pending + regenerate
+        # the remaining phrases so changes are heard immediately after the boundary.
+        phrase_end = bank_start
+        for phrase in bank.phrases:
+            if not _playing:
+                break
+            phrase_end = _midi.play_phrase_blocking(phrase, bpm=_bpm, bank_start=bank_start)
+            bars_done = (phrase.phrase_index + 1) * 4
+            if bars_done % max(1, _quantize_bars) == 0:
+                # Regenerate remaining phrases from current (already-updated) state
+                next_idx = phrase.phrase_index + 1
+                if next_idx < len(bank.phrases):
+                    with _preview_lock:
+                        fresh = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
+                        bank.phrases[next_idx:] = fresh.phrases[next_idx:]
+                        _current_bank = bank
+
         _engine.commit_bank(snapshot)
+        bank_start = phrase_end   # chain next bank from here (no drift)
         bank_idx += 1
     _playing = False
 
@@ -218,9 +290,8 @@ async def _handle_message(msg: dict) -> None:
     kind = msg.get("type")
 
     if kind == "axis":
-        position = float(msg.get("value", 0.0))
-        _intent.set_axis(position)
-        await _broadcast({"type": "state", **_force_state_dict()})
+        _intent.set_axis(float(msg.get("value", 0.0)))
+        await _apply_and_preview()
 
     elif kind == "play":
         global _playing, _play_thread
@@ -240,19 +311,24 @@ async def _handle_message(msg: dict) -> None:
 
     elif kind == "bpm":
         _bpm = max(60.0, min(300.0, float(msg.get("value", 174.0))))
-        await _broadcast({"type": "state", **_force_state_dict()})
+        await _apply_and_preview()
 
     elif kind == "control":
         key = msg.get("key")
         value = float(msg.get("value", 0.5))
         if key and hasattr(_controls, key):
             setattr(_controls, key, value)
+        await _apply_and_preview()
+
+    elif kind == "quantize_bars":
+        global _quantize_bars
+        _quantize_bars = max(1, int(msg.get("value", 2)))
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "set_archetype":
-        name = msg.get("value")  # None or archetype name string
+        name = msg.get("value")
         _generator.selected_archetype = name if (name and name in ARCHETYPE_BY_NAME) else None
-        await _broadcast({"type": "state", **_force_state_dict()})
+        await _apply_and_preview()
 
     elif kind == "midi_port":
         port_name = msg.get("value")

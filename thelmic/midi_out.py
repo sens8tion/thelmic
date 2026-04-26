@@ -7,7 +7,7 @@ from typing import Optional
 
 import rtmidi
 
-from thelmic.bank_generator import Bank, TICKS_PER_BEAT, BEATS_PER_BAR
+from thelmic.bank_generator import Bank, Phrase, TICKS_PER_BEAT, BEATS_PER_BAR, BARS_PER_PHRASE
 
 # MIDI channel per instrument layer (0-indexed, i.e. ch 1–3 in DAW)
 LAYER_CHANNELS: dict[str, int] = {
@@ -144,6 +144,55 @@ class MIDIOut:
             time.sleep(remaining)
 
         return bank_end
+
+    def play_phrase_blocking(
+        self,
+        phrase: Phrase,
+        bpm: float,
+        bank_start: float,
+    ) -> float:
+        """Play one phrase from a pre-generated bank, blocking until the phrase ends.
+
+        bank_start: perf_counter time the bank began — event times are absolute
+        within the bank so we just offset from here.
+
+        Returns the expected end time of this phrase (= bank_start + phrase_end_s).
+        """
+        seconds_per_tick = 60.0 / (bpm * TICKS_PER_BEAT)
+        ticks_per_bar    = TICKS_PER_BEAT * BEATS_PER_BAR
+
+        # Phrase spans BARS_PER_PHRASE bars; last bar index = phrase_bar_offset + BARS_PER_PHRASE
+        phrase_end_tick = (phrase.phrase_index + 1) * BARS_PER_PHRASE * ticks_per_bar
+        phrase_end_s    = phrase_end_tick * seconds_per_tick
+
+        timeline: list[tuple[float, str, int, int, int]] = []
+        for event in phrase.events:
+            if event.velocity == 0:
+                continue
+            t_on  = event_to_abs_tick(event.time) * seconds_per_tick
+            t_off = t_on + event.duration
+            ch    = LAYER_CHANNELS.get(event.layer, 0)
+            timeline.append((t_on,  "on",  ch, event.note, event.velocity))
+            timeline.append((t_off, "off", ch, event.note, 0))
+
+        timeline.sort(key=lambda x: x[0])
+
+        for t_rel, action, ch, note, vel in timeline:
+            target = bank_start + t_rel
+            now    = time.perf_counter()
+            if target > now:
+                time.sleep(target - now)
+            if action == "on":
+                self.send_note_on(ch, note, vel)
+            else:
+                self.send_note_off(ch, note)
+
+        phrase_end_abs = bank_start + phrase_end_s
+        remaining = phrase_end_abs - time.perf_counter()
+        if remaining > 0:
+            time.sleep(remaining)
+
+        return phrase_end_abs
 
     def close(self) -> None:
         if self._port_open:

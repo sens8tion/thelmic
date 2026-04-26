@@ -444,6 +444,23 @@
       width: 100%;
     }
 
+    .seq-content {
+      position: relative;
+      min-width: 480px;
+    }
+
+    .playhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: rgba(255, 255, 255, 0.45);
+      pointer-events: none;
+      z-index: 10;
+      left: 0;
+      will-change: left;
+    }
+
     .seq-grid {
       display: flex;
       flex-direction: column;
@@ -649,6 +666,12 @@
              onchange="sendBpm()" onblur="sendBpm()">
     </div>
     <div class="bank-count" id="bank-count">banks: 0</div>
+    <div class="bpm-control">
+      <span>change after</span>
+      <input type="number" id="quantize-input" value="2" min="1" max="64"
+             onchange="sendQuantize()" onblur="sendQuantize()" style="width:48px">
+      <span>bars</span>
+    </div>
   </div>
 
   <!-- Sequencer -->
@@ -656,9 +679,12 @@
     <h2 class="seq-heading">SEQUENCER — bank <span id="seq-bank-num">—</span></h2>
     <div class="seq-legend" id="seq-legend"></div>
     <div class="seq-scroll">
-      <!-- Deformation intensity strips — one row per active deformation type -->
-      <div class="deform-strips-wrap" id="deform-strips"></div>
-      <div class="seq-grid" id="seq-grid"></div>
+      <div class="seq-content" id="seq-content">
+        <div class="playhead" id="playhead"></div>
+        <!-- Deformation intensity strips — one row per active deformation type -->
+        <div class="deform-strips-wrap" id="deform-strips"></div>
+        <div class="seq-grid" id="seq-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -748,6 +774,11 @@
       send({ type: 'bpm', value: val });
     }
 
+    function sendQuantize() {
+      const val = Math.max(1, parseInt(document.getElementById('quantize-input').value) || 2);
+      send({ type: 'quantize_bars', value: val });
+    }
+
     // ── State application ──
     function applyState(s) {
       // Axis — only update slider if not currently dragging
@@ -777,6 +808,11 @@
         document.getElementById('bpm-input').value = s.bpm;
       }
 
+      // Quantize
+      if (document.activeElement.id !== 'quantize-input' && s.quantize_bars !== undefined) {
+        document.getElementById('quantize-input').value = s.quantize_bars;
+      }
+
       // Bank count
       document.getElementById('bank-count').textContent = `banks: ${s.bank_count}`;
 
@@ -792,6 +828,10 @@
         midiStatus.textContent = 'not connected';
         midiStatus.className = 'midi-status';
       }
+
+      // Playhead timing
+      if (s.bank_started_at) bankStartedAt = s.bank_started_at;
+      if (s.bank_duration_ms) bankDurationMs = s.bank_duration_ms;
 
       // Deformation colours (keyed by name)
       if (s.deformation_colours) deformationColours = s.deformation_colours;
@@ -1048,6 +1088,24 @@
         legend.appendChild(item);
       });
     }
+
+    // ── Playhead animation ──
+    let bankStartedAt = 0;    // Date.now() ms when current bank began
+    let bankDurationMs = 0;   // total bank duration in ms
+
+    function animatePlayhead() {
+      const el = document.getElementById('playhead');
+      if (el && isPlaying && bankDurationMs > 0) {
+        const elapsed = Date.now() - bankStartedAt;
+        const fraction = Math.min(1, Math.max(0, elapsed / bankDurationMs));
+        el.style.left = (fraction * 100) + '%';
+        el.style.display = 'block';
+      } else if (el) {
+        el.style.display = 'none';
+      }
+      requestAnimationFrame(animatePlayhead);
+    }
+    requestAnimationFrame(animatePlayhead);
 
     function setStatus(msg, cls) {
       const el = document.getElementById('status');
