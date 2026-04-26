@@ -143,8 +143,7 @@ class BankGenerator:
         fired_slots: set[int] = set()
 
         for slot in range(16):
-            p = kick_probs[slot] * density_scale
-            if self._rng.random() < p:
+            if self._should_fire(kick_probs[slot], density_scale):
                 fired_slots.add(slot)
 
         for slot in sorted(fired_slots):
@@ -152,7 +151,7 @@ class BankGenerator:
             sub  = slot % 4
             tick = sub * SIXTEENTH
 
-            if groove < 0.9 and slot % 4 != 0:
+            if not self.locked_archetype and groove < 0.9 and slot % 4 != 0:
                 jitter_range = int((1.0 - groove) * 3)
                 tick = max(0, tick + self._rng.randint(-jitter_range, jitter_range))
 
@@ -219,8 +218,7 @@ class BankGenerator:
         density_scale = 0.4 + force.density * 0.6
 
         for slot in range(16):
-            p = snare_probs[slot] * density_scale
-            if self._rng.random() < p:
+            if self._should_fire(snare_probs[slot], density_scale):
                 beat = slot // 4 + 1
                 tick = (slot % 4) * SIXTEENTH
                 exp = snare_exp[slot]
@@ -256,8 +254,7 @@ class BankGenerator:
         density_scale = 0.35 + force.density * 0.5
 
         for slot in range(16):
-            p = hat_probs[slot] * density_scale
-            if self._rng.random() < p:
+            if self._should_fire(hat_probs[slot], density_scale):
                 beat = slot // 4 + 1
                 tick = (slot % 4) * SIXTEENTH
                 exp = hat_exp[slot]
@@ -281,6 +278,12 @@ class BankGenerator:
 
     # ------------------------------------------------------------------
     # Shared helpers
+
+    def _should_fire(self, prob: float, density_scale: float) -> bool:
+        """Deterministic when locked (prob >= 0.5); probabilistic otherwise."""
+        if self.locked_archetype:
+            return prob >= 0.5
+        return self._rng.random() < prob * density_scale
 
     def _assign_role(
         self,
