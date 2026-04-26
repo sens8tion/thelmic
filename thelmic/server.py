@@ -90,8 +90,14 @@ _clients_lock = asyncio.Lock()
 
 def _generation_curve_overrides() -> dict[str, float]:
     from thelmic.bank_generator import BARS_PER_PHRASE
+    from thelmic.behaviour_hooks import compute_behaviour_overrides
 
-    return _curve_engine.projected_overrides(BARS_PER_PHRASE)
+    manual = _curve_engine.projected_overrides(BARS_PER_PHRASE)
+    transition = _transition_engine.transition if _transition_engine else None
+    force = _engine.force_state if _engine else None
+    if force is None:
+        return manual
+    return compute_behaviour_overrides(transition, force, manual)
 
 
 async def _apply_and_preview() -> None:
