@@ -37,32 +37,59 @@ from thelmic.transition_engine import Transition
 # Hook: ghost_inject
 # ---------------------------------------------------------------------------
 
+# Velocity threshold above which urgency scaling kicks in.
+# velocity is normalised distance-per-bar (clamped 0–1), so 0.15 means
+# "travelling more than 15% of the axis per bar" — a moderately fast move.
+_VELOCITY_URGENCY_THRESHOLD: float = 0.15
+
+# How much velocity can amplify the hook output (additive, then clamped).
+_VELOCITY_URGENCY_SCALE: float = 0.3
+
+
 def _ghost_inject_hook(transition: Transition, force: ForceState) -> float:
     """Modulate ghost injection intensity during landscape traversal.
 
     Toward Nott (increasing position):
-        Half-sine arc over progress — builds through the journey then
-        releases as the destination approaches. Scaled by instability so
-        the hook only fires meaningfully when the force state supports it.
+        Continuous build — p² shape, so tension grows late and hard.
+        Ghosts accumulate as the destination approaches rather than
+        peaking mid-journey and backing off before impact.
 
     Toward Oak (decreasing position):
-        Fast quadratic decay — the return should feel clean and settling.
-        Ghosts fade quickly rather than lingering.
+        Quadratic decay — the return settles quickly. Ghosts clear fast
+        so the landing feels clean rather than lingering.
 
-    At rest (no active transition): returns 0.0, hook is suppressed.
+    Velocity amplification:
+        Fast gestures (velocity > threshold) add urgency on top of the
+        base shape. Slow, deliberate moves stay restrained; panic moves
+        spike immediately.
+
+    Scaling:
+        All shapes are multiplied by force.instability so the hook only
+        fires meaningfully when the current force state supports it.
+        At low instability (Oak) ghosts stay subdued regardless of direction.
     """
     progress  = transition.progress
     direction = transition.direction
+    velocity  = transition.velocity
 
     if direction == "toward_nott":
-        arc = math.sin(math.pi * progress)   # 0 → peak at 0.5 → 0
-        return _clamp(arc * force.instability)
+        # Late continuous build: low early, rising hard toward arrival
+        base = progress ** 2
+        base = _clamp(base * force.instability)
 
-    if direction == "toward_oak":
-        decay = (1.0 - progress) ** 2
-        return _clamp(decay * force.instability * 0.5)
+    elif direction == "toward_oak":
+        # Fast decay: high at start, clears quickly
+        base = _clamp((1.0 - progress) ** 2 * force.instability * 0.5)
 
-    return 0.0
+    else:
+        return 0.0
+
+    # Velocity urgency — fast gestures spike the hook regardless of progress
+    if velocity > _VELOCITY_URGENCY_THRESHOLD:
+        urgency = (velocity - _VELOCITY_URGENCY_THRESHOLD) * _VELOCITY_URGENCY_SCALE
+        base = _clamp(base + urgency)
+
+    return base
 
 
 # ---------------------------------------------------------------------------

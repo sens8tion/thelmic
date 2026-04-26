@@ -36,20 +36,18 @@ class TestGhostInjectHook:
         f = _force(instability=0.0)
         assert _ghost_inject_hook(t, f) == pytest.approx(0.0)
 
-    def test_toward_nott_peaks_near_midpoint(self):
+    def test_toward_nott_rises_continuously(self):
+        """p² shape: later progress must be higher than earlier progress."""
         f = _force(instability=1.0)
-        mid = _transition(start=0.0, target=1.0, current=0.5, elapsed=4.0)
-        at_start = _transition(start=0.0, target=1.0, current=0.0, elapsed=0.1)
-        assert _ghost_inject_hook(mid, f) > _ghost_inject_hook(at_start, f)
+        early = _transition(start=0.0, target=1.0, current=0.0, elapsed=1.0, duration=8.0)
+        mid   = _transition(start=0.0, target=1.0, current=0.5, elapsed=4.0, duration=8.0)
+        late  = _transition(start=0.0, target=1.0, current=0.9, elapsed=7.0, duration=8.0)
+        assert _ghost_inject_hook(early, f) < _ghost_inject_hook(mid, f)
+        assert _ghost_inject_hook(mid, f)   < _ghost_inject_hook(late, f)
 
     def test_toward_nott_is_zero_at_start(self):
         f = _force(instability=1.0)
         t = _transition(start=0.0, target=1.0, elapsed=0.0)
-        assert _ghost_inject_hook(t, f) == pytest.approx(0.0, abs=0.01)
-
-    def test_toward_nott_is_zero_at_end(self):
-        f = _force(instability=1.0)
-        t = _transition(start=0.0, target=1.0, elapsed=8.0, duration=8.0)
         assert _ghost_inject_hook(t, f) == pytest.approx(0.0, abs=0.01)
 
     def test_toward_oak_decays_over_time(self):
@@ -58,15 +56,34 @@ class TestGhostInjectHook:
         late  = _transition(start=1.0, target=0.0, current=0.1, elapsed=6.0)
         assert _ghost_inject_hook(early, f) > _ghost_inject_hook(late, f)
 
-    def test_toward_oak_lower_than_toward_nott_peak(self):
+    def test_toward_nott_late_higher_than_toward_oak_start(self):
+        """p² build: toward_nott at progress 0.9 should exceed toward_oak at start."""
         f = _force(instability=1.0)
-        nott_peak = _transition(start=0.0, target=1.0, current=0.5, elapsed=4.0)
+        nott_late = _transition(start=0.0, target=1.0, current=0.9, elapsed=7.2, duration=8.0)
         oak_start = _transition(start=1.0, target=0.0, current=1.0, elapsed=0.0)
-        assert _ghost_inject_hook(nott_peak, f) > _ghost_inject_hook(oak_start, f)
+        assert _ghost_inject_hook(nott_late, f) > _ghost_inject_hook(oak_start, f)
 
     def test_output_clamped_to_unit_interval(self):
         f = _force(instability=1.0)
         t = _transition(start=0.0, target=1.0, current=0.5, elapsed=4.0)
+        val = _ghost_inject_hook(t, f)
+        assert 0.0 <= val <= 1.0
+
+    def test_fast_velocity_amplifies_output(self):
+        """High velocity should produce more ghost activity than same progress at low velocity."""
+        f = _force(instability=0.5)
+        slow = _transition(start=0.0, target=0.2, current=0.1, elapsed=4.0, duration=8.0)
+        fast = _transition(start=0.0, target=1.0, current=0.5, elapsed=4.0, duration=0.5)
+        assert _ghost_inject_hook(fast, f) >= _ghost_inject_hook(slow, f)
+
+    def test_low_velocity_no_urgency_bonus(self):
+        """Below the threshold, velocity should not add extra intensity."""
+        from thelmic.behaviour_hooks import _VELOCITY_URGENCY_THRESHOLD
+        f = _force(instability=0.5)
+        # velocity = 0.1 / 8.0 = 0.0125 — well below threshold
+        t = _transition(start=0.0, target=0.1, current=0.05, elapsed=4.0, duration=8.0)
+        assert t.velocity < _VELOCITY_URGENCY_THRESHOLD
+        # Just checking it doesn't crash and stays in range
         val = _ghost_inject_hook(t, f)
         assert 0.0 <= val <= 1.0
 
