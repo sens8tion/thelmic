@@ -598,18 +598,21 @@ def select_blend(
 
     else:
         # Oak: clear, archetype-compliant. Density selects along the continuum.
+        # At hard left (pos=0.0) the secondary-blend weight is 0 — pure primary
+        # archetype, total compliance. Blend grows linearly toward the Chaos boundary.
+        oak_blend_scale = min(1.0, landscape_position / 0.33)
         if density < 0.25:
             primary, secondary = HALF_STEP, TWO_STEP
-            t = density / 0.25
+            t = (density / 0.25) * oak_blend_scale
         elif density < 0.5:
             primary, secondary = TWO_STEP, ROLLING
-            t = (density - 0.25) / 0.25
+            t = ((density - 0.25) / 0.25) * oak_blend_scale
         elif density < 0.72:
             primary, secondary = ROLLING, FOUR_ON_THE_FLOOR
-            t = (density - 0.5) / 0.22
+            t = ((density - 0.5) / 0.22) * oak_blend_scale
         else:
             primary, secondary = FOUR_ON_THE_FLOOR, HAPPY_HARDCORE
-            t = (density - 0.72) / 0.28
+            t = ((density - 0.72) / 0.28) * oak_blend_scale
         disrupt_arch = BREAKBEAT_HARDCORE
 
     # --- Base blend ---
