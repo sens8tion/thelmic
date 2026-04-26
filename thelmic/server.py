@@ -107,12 +107,8 @@ def _force_state_dict() -> dict:
         "bpm": _bpm,
         "bank_events": _bank_events_list(_current_bank),
         "midi_port": _midi.port_name if _midi else None,
-        "archetype": archetype_name_at(
-            density=_engine.force_state.density,
-            instability=_engine.force_state.instability,
-            landscape_position=_engine.landscape_position,
-        ),
-        "locked_archetype": _generator.locked_archetype,
+        "archetype": archetype_name_at(density=_engine.force_state.density),
+        "selected_archetype": _generator.selected_archetype,
     }
 
 
@@ -130,7 +126,9 @@ async def _broadcast(msg: dict) -> None:
 
 def _playback_loop() -> None:
     global _playing, _current_bank
+    import time as _time
     bank_idx = 0
+    next_bank_start: float | None = None   # tracks expected start to prevent drift
     while _playing:
         snapshot = _engine.begin_bank()
         bank = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
@@ -145,7 +143,9 @@ def _playback_loop() -> None:
         if _midi is None:
             _playing = False
             break
-        _midi.play_bank_blocking(bank, bpm=_bpm)
+        next_bank_start = _midi.play_bank_blocking(
+            bank, bpm=_bpm, start_time=next_bank_start
+        )
         _engine.commit_bank(snapshot)
         bank_idx += 1
     _playing = False
@@ -246,9 +246,9 @@ async def _handle_message(msg: dict) -> None:
             setattr(_controls, key, value)
         await _broadcast({"type": "state", **_force_state_dict()})
 
-    elif kind == "lock_archetype":
+    elif kind == "set_archetype":
         name = msg.get("value")  # None or archetype name string
-        _generator.locked_archetype = name if (name and name in ARCHETYPE_BY_NAME) else None
+        _generator.selected_archetype = name if (name and name in ARCHETYPE_BY_NAME) else None
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "midi_port":

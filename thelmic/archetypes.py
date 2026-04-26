@@ -21,12 +21,33 @@ Slot index reference (0-indexed, 4/4 at 16th-note resolution):
 
 Beats 2 and 4 (slots 4 and 12) are snare territory in all DnB archetypes.
 Kick archetypes deliberately avoid or approach these slots as part of their identity.
+
+Architecture
+------------
+Archetype selection and deformation are intentionally separate:
+
+  1. select_archetype(density, selected_name) → RhythmArchetype
+       Pure selection. Density-driven (or explicit). Territory-agnostic.
+
+  2. to_blend(archetype) → DrumBlend
+       Identity conversion — archetype arrays become mutable lists ready for deformation.
+
+  3. deformations.apply_deformations(blend, anchors, force, landscape_position) → DrumBlend
+       Pressure algorithms applied on top of the blend. Each deformation is a separate
+       pure function that must not suppress any slot in anchors.kick/snare/hat.
+
+Landscape position (Oak → Chaos → Nott) is a deformation parameter, not an archetype
+selector. The archetype is stable; territory determines how it is pressured.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import NamedTuple
+
+# Slots at or above this expectation value are structural anchors.
+# Deformations must not suppress these — the listener's anchor is the source of felt tension.
+ANCHOR_EXPECTATION_THRESHOLD = 0.7
 
 
 @dataclass(frozen=True)
@@ -43,9 +64,37 @@ class RhythmArchetype:
     density_index: float             # 0.0=sparse → 1.0=dense; used for archetype ordering
     grid_conformity: float           # 0.0=loose → 1.0=rigid
 
+    @property
+    def kick_anchors(self) -> frozenset[int]:
+        """Slots that are structural kick anchors. Deformations must not suppress these."""
+        return frozenset(i for i, e in enumerate(self.expectation) if e >= ANCHOR_EXPECTATION_THRESHOLD)
+
+    @property
+    def snare_anchors(self) -> frozenset[int]:
+        """Slots that are structural snare anchors."""
+        return frozenset(i for i, e in enumerate(self.snare_exp) if e >= ANCHOR_EXPECTATION_THRESHOLD)
+
+    @property
+    def hat_anchors(self) -> frozenset[int]:
+        """Slots that are structural hat anchors."""
+        return frozenset(i for i, e in enumerate(self.hat_exp) if e >= ANCHOR_EXPECTATION_THRESHOLD)
+
+
+@dataclass(frozen=True)
+class Anchors:
+    """Structural anchor slots for all three layers. Passed to every deformation."""
+    kick:  frozenset[int]
+    snare: frozenset[int]
+    hat:   frozenset[int]
+
 
 class DrumBlend(NamedTuple):
-    """Complete drum pattern blend returned by select_blend()."""
+    """Resolved drum probability arrays, ready for the bank generator.
+
+    Produced by converting a RhythmArchetype via to_blend(), then optionally
+    transformed by one or more deformation functions. Anchor slots must survive
+    all deformations at full (≥ archetype) probability.
+    """
     kick_probs:  list[float]   # 16 values
     kick_exp:    list[float]
     snare_probs: list[float]
@@ -540,118 +589,36 @@ ARCHETYPE_BY_NAME: dict[str, RhythmArchetype] = {a.name: a for a in ALL_ARCHETYP
 
 
 # ---------------------------------------------------------------------------
-# Blending and selection
+# Selection and conversion
 # ---------------------------------------------------------------------------
 
-def _lerp_probs(
-    a: tuple[float, ...], b: tuple[float, ...], t: float
-) -> list[float]:
-    t = max(0.0, min(1.0, t))
-    return [a[i] * (1.0 - t) + b[i] * t for i in range(16)]
-
-
-def select_blend(
+def select_archetype(
     density: float,
-    instability: float,
-    landscape_position: float,
-    locked_archetype: str | None = None,
-) -> DrumBlend:
-    """Return a DrumBlend (kick, snare, hat probs + expectations) for the given force state.
+    selected_name: str | None = None,
+) -> RhythmArchetype:
+    """Select the base archetype.
 
-    If locked_archetype is set (a key in ARCHETYPE_BY_NAME), that archetype's arrays
-    are returned directly — no territory logic, no instability blending.
-
-    Otherwise, selection logic:
-      - landscape_position determines the territory (Oak / Chaos / Nott)
-      - density selects the base archetype within that territory
-      - instability blends toward the territory's disruption archetype (capped 65%),
-        but at pure Oak (pos=0.0) instability has zero blending power; it scales
-        linearly to full influence at the Chaos boundary (pos=0.33)
+    If selected_name is provided and valid, it is returned directly.
+    Otherwise the archetype whose density_index is closest to density is chosen.
+    Territory (landscape_position) plays no role here — it is a deformation parameter.
     """
-    # --- Archetype lock: return raw archetype, no blending ---
-    if locked_archetype and locked_archetype in ARCHETYPE_BY_NAME:
-        a = ARCHETYPE_BY_NAME[locked_archetype]
-        return DrumBlend(
-            kick_probs  = list(a.kick_probs),
-            kick_exp    = list(a.expectation),
-            snare_probs = list(a.snare_probs),
-            snare_exp   = list(a.snare_exp),
-            hat_probs   = list(a.hat_probs),
-            hat_exp     = list(a.hat_exp),
-        )
+    if selected_name and selected_name in ARCHETYPE_BY_NAME:
+        return ARCHETYPE_BY_NAME[selected_name]
+    return min(ALL_ARCHETYPES, key=lambda a: abs(a.density_index - density))
 
-    # --- Primary archetype by territory and density ---
 
-    if landscape_position > 0.67:
-        # Nott: dark and sparse. Half-step regardless of density.
-        nott_depth = (landscape_position - 0.67) / 0.33  # 0→1
-        t = nott_depth * 0.85
-        primary, secondary = TWO_STEP, HALF_STEP
-        disrupt_arch = STUTTER
-
-    elif landscape_position > 0.33:
-        # Chaos: principled complexity. Blends between shuffled two-step and amen.
-        chaos_depth = (landscape_position - 0.33) / 0.34  # 0→1
-        t = density * chaos_depth
-        primary, secondary = SHUFFLED_TWO_STEP, AMEN
-        disrupt_arch = GABBER if density > 0.65 else STUTTER
-
-    else:
-        # Oak: clear, archetype-compliant. Density selects along the continuum.
-        # At hard left (pos=0.0) the secondary-blend weight is 0 — pure primary
-        # archetype, total compliance. Blend grows linearly toward the Chaos boundary.
-        oak_blend_scale = min(1.0, landscape_position / 0.33)
-        if density < 0.25:
-            primary, secondary = HALF_STEP, TWO_STEP
-            t = (density / 0.25) * oak_blend_scale
-        elif density < 0.5:
-            primary, secondary = TWO_STEP, ROLLING
-            t = ((density - 0.25) / 0.25) * oak_blend_scale
-        elif density < 0.72:
-            primary, secondary = ROLLING, FOUR_ON_THE_FLOOR
-            t = ((density - 0.5) / 0.22) * oak_blend_scale
-        else:
-            primary, secondary = FOUR_ON_THE_FLOOR, HAPPY_HARDCORE
-            t = ((density - 0.72) / 0.28) * oak_blend_scale
-        disrupt_arch = BREAKBEAT_HARDCORE
-
-    # --- Base blend ---
-    base_kick_probs  = _lerp_probs(primary.kick_probs,   secondary.kick_probs,   t)
-    base_kick_exp    = _lerp_probs(primary.expectation,   secondary.expectation,   t)
-    base_snare_probs = _lerp_probs(primary.snare_probs,  secondary.snare_probs,  t)
-    base_snare_exp   = _lerp_probs(primary.snare_exp,    secondary.snare_exp,    t)
-    base_hat_probs   = _lerp_probs(primary.hat_probs,    secondary.hat_probs,    t)
-    base_hat_exp     = _lerp_probs(primary.hat_exp,      secondary.hat_exp,      t)
-
-    # --- Instability blends toward the disruption archetype (capped 65%) ---
-    # At pure Oak (pos=0.0) instability has zero blending power — total archetype
-    # compliance. Influence grows linearly to full at the Chaos boundary (pos=0.33).
-    oak_scale = min(1.0, landscape_position / 0.33) if landscape_position < 0.33 else 1.0
-    inst_t = min(instability * 0.65, 0.65) * oak_scale
-
+def to_blend(archetype: RhythmArchetype) -> DrumBlend:
+    """Convert an archetype to a DrumBlend with no deformation applied (identity pass)."""
     return DrumBlend(
-        kick_probs  = _lerp_probs(base_kick_probs,  disrupt_arch.kick_probs,  inst_t),
-        kick_exp    = _lerp_probs(base_kick_exp,    disrupt_arch.expectation,  inst_t),
-        snare_probs = _lerp_probs(base_snare_probs, disrupt_arch.snare_probs, inst_t),
-        snare_exp   = _lerp_probs(base_snare_exp,   disrupt_arch.snare_exp,   inst_t),
-        hat_probs   = _lerp_probs(base_hat_probs,   disrupt_arch.hat_probs,   inst_t),
-        hat_exp     = _lerp_probs(base_hat_exp,     disrupt_arch.hat_exp,     inst_t),
+        kick_probs  = list(archetype.kick_probs),
+        kick_exp    = list(archetype.expectation),
+        snare_probs = list(archetype.snare_probs),
+        snare_exp   = list(archetype.snare_exp),
+        hat_probs   = list(archetype.hat_probs),
+        hat_exp     = list(archetype.hat_exp),
     )
 
 
-def archetype_name_at(
-    density: float,
-    instability: float,
-    landscape_position: float,
-) -> str:
-    """Human-readable label for the dominant archetype at these force values."""
-    if landscape_position > 0.67:
-        return "half_step" if density < 0.5 else "half_step→two_step"
-    elif landscape_position > 0.33:
-        base = "shuffled_two_step" if density < 0.5 else "amen"
-        return f"{base}+disruption" if instability > 0.5 else base
-    else:
-        if density < 0.25:   return "half_step"
-        elif density < 0.5:  return "two_step"
-        elif density < 0.72: return "rolling"
-        else:                return "four_on_the_floor"
+def archetype_name_at(density: float, **_kwargs) -> str:
+    """Human-readable name of the archetype that would be selected at this density."""
+    return select_archetype(density).name

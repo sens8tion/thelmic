@@ -6,7 +6,9 @@ from thelmic.controls import Controls
 from thelmic.force_engine import ForceState
 from thelmic.landscape import OAK_PROFILE, CHAOS_PROFILE, NOTT_PROFILE
 
-VALID_ROLES  = {"anchor", "ghost", "disruption", "impact", "withheld_resolution"}
+# Without deformations registered, only these roles are produced deterministically.
+# disruption and withheld_resolution are deformation concerns — tested once implemented.
+VALID_ROLES  = {"anchor", "ghost", "impact"}
 VALID_LAYERS = {"kick", "snare", "hat"}
 
 
@@ -33,26 +35,44 @@ class TestBankStructure:
         for e in _gen(CHAOS_PROFILE, pos=0.5).all_events():
             assert 0 <= e.velocity <= 127
 
-    def test_withheld_events_have_zero_velocity(self):
-        for e in _gen(CHAOS_PROFILE, pos=0.5).all_events():
-            if e.role == "withheld_resolution":
-                assert e.velocity == 0
-
-    def test_non_withheld_events_have_nonzero_velocity(self):
+    def test_all_events_have_nonzero_velocity(self):
+        # No withheld events without deformations — every fired slot plays
         for e in _gen(OAK_PROFILE).all_events():
-            if e.role != "withheld_resolution":
-                assert e.velocity > 0
+            assert e.velocity > 0
+
+    def test_output_is_deterministic(self):
+        # Same inputs must always produce identical output — no hidden RNG
+        bank_a = _gen(CHAOS_PROFILE, pos=0.5, seed=0)
+        bank_b = _gen(CHAOS_PROFILE, pos=0.5, seed=0)
+        times_a = [(e.time, e.layer, e.velocity) for e in bank_a.all_events()]
+        times_b = [(e.time, e.layer, e.velocity) for e in bank_b.all_events()]
+        assert times_a == times_b
+
+    def test_territory_does_not_change_pattern(self):
+        # Territory (landscape_position) is a deformation parameter only.
+        # With no deformations, the same archetype at different positions plays identically.
+        force = ForceState(
+            anticipation=0.3, release_pressure=0.2,
+            instability=0.3, density=0.5, control_vs_chaos=0.3,
+        )
+        bank_oak   = _gen(force, pos=0.0)
+        bank_chaos = _gen(force, pos=0.5)
+        bank_nott  = _gen(force, pos=1.0)
+        events_oak   = [(e.time, e.layer) for e in bank_oak.all_events()]
+        events_chaos = [(e.time, e.layer) for e in bank_chaos.all_events()]
+        events_nott  = [(e.time, e.layer) for e in bank_nott.all_events()]
+        assert events_oak == events_chaos == events_nott
 
 
 class TestArchetypeDrivenDensity:
     def test_half_step_sparse(self):
         sparse = ForceState(
             anticipation=0.1, release_pressure=0.0,
-            instability=0.2, density=0.2, control_vs_chaos=0.3,
+            instability=0.2, density=0.1, control_vs_chaos=0.3,
         )
         bank = _gen(sparse, pos=0.9)
-        kick_per_bar = len([e for e in bank.all_events() if e.layer == "kick" and e.velocity > 0]) / (PHRASES_PER_BANK * BARS_PER_PHRASE)
-        assert kick_per_bar <= 2.5, f"Expected sparse kick in half-step, got {kick_per_bar:.1f} kicks/bar"
+        kick_per_bar = len([e for e in bank.all_events() if e.layer == "kick"]) / (PHRASES_PER_BANK * BARS_PER_PHRASE)
+        assert kick_per_bar <= 2.5, f"Expected sparse kick, got {kick_per_bar:.1f} kicks/bar"
 
     def test_four_on_floor_denser_than_two_step(self):
         two_step = ForceState(
@@ -63,88 +83,40 @@ class TestArchetypeDrivenDensity:
             anticipation=0.2, release_pressure=0.1,
             instability=0.05, density=0.85, control_vs_chaos=0.1,
         )
-        hits_ts  = len([e for e in _gen(two_step, pos=0.1, seed=1).all_events() if e.velocity > 0])
-        hits_4tf = len([e for e in _gen(four_otf, pos=0.1, seed=1).all_events() if e.velocity > 0])
+        hits_ts  = len(_gen(two_step, pos=0.1).all_events())
+        hits_4tf = len(_gen(four_otf, pos=0.1).all_events())
         assert hits_ts <= hits_4tf
 
-    def test_gabber_disruption_denser_kick_in_chaos(self):
-        # GABBER is the disruption archetype for high-density chaos; it makes the
-        # kick near-continuous while snare/hat become sparser (kick dominates).
-        # Test kick layer specifically across seeds for statistical robustness.
-        base_force = ForceState(
-            anticipation=0.3, release_pressure=0.2,
-            instability=0.0, density=0.7, control_vs_chaos=0.5,
+    def test_higher_density_selects_denser_archetype(self):
+        sparse = ForceState(
+            anticipation=0.2, release_pressure=0.1,
+            instability=0.0, density=0.1, control_vs_chaos=0.1,
         )
-        disrupted = ForceState(
-            anticipation=0.3, release_pressure=0.2,
-            instability=0.9, density=0.7, control_vs_chaos=0.5,
+        dense = ForceState(
+            anticipation=0.2, release_pressure=0.1,
+            instability=0.0, density=0.95, control_vs_chaos=0.1,
         )
-        def kick_hits(force, seeds):
-            return sum(
-                len([e for e in _gen(force, pos=0.5, seed=s).all_events()
-                     if e.velocity > 0 and e.layer == "kick"])
-                for s in seeds
-            )
-        seeds = range(20)
-        assert kick_hits(disrupted, seeds) > kick_hits(base_force, seeds)
+        kick_sparse = len([e for e in _gen(sparse).all_events() if e.layer == "kick"])
+        kick_dense  = len([e for e in _gen(dense).all_events()  if e.layer == "kick"])
+        assert kick_dense > kick_sparse
 
 
 class TestRoleAssignment:
     def test_anchor_present(self):
         assert any(e.role == "anchor" for e in _gen(OAK_PROFILE).all_events())
 
-    def test_disruption_appears_under_high_instability(self):
-        found = any(
-            e.role == "disruption"
-            for seed in range(30)
-            for e in _gen(CHAOS_PROFILE, pos=0.5, seed=seed).all_events()
-        )
-        assert found
-
-    def test_withheld_resolution_appears_under_high_anticipation(self):
-        high_ant = ForceState(
-            anticipation=0.95, release_pressure=0.5,
-            instability=0.1, density=0.6, control_vs_chaos=0.1,
-        )
-        found = any(
-            e.role == "withheld_resolution"
-            for seed in range(40)
-            for e in _gen(high_ant, pos=0.1, seed=seed).all_events()
-        )
-        assert found
-
-    def test_withheld_only_on_high_expectation_slots(self):
-        high_ant = ForceState(
-            anticipation=0.95, release_pressure=0.5,
-            instability=0.05, density=0.6, control_vs_chaos=0.1,
-        )
-        for seed in range(20):
-            for e in _gen(high_ant, pos=0.1, seed=seed).all_events():
-                if e.role == "withheld_resolution":
-                    assert e.expected_weight >= EXPECTATION_ANCHOR_THRESHOLD
-
     def test_impact_appears_under_release_pressure(self):
         high_rp = ForceState(
             anticipation=0.5, release_pressure=0.85,
             instability=0.1, density=0.6, control_vs_chaos=0.2,
         )
-        found = any(
-            e.role == "impact"
-            for seed in range(20)
-            for e in _gen(high_rp, pos=0.1, seed=seed).all_events()
-        )
-        assert found
+        assert any(e.role == "impact" for e in _gen(high_rp, pos=0.1).all_events())
 
 
 class TestControls:
-    def test_chaos_limit_suppresses_disruptions(self):
-        controls = Controls(chaos_limit=0.0)
-        bank = BankGenerator(controls=controls, seed=5).generate(CHAOS_PROFILE, 0, 0.5)
-        assert not any(e.role == "disruption" for e in bank.all_events())
-
     def test_density_ceiling_reduces_hit_count(self):
         low  = Controls(density_ceiling=0.1)
         high = Controls(density_ceiling=1.0)
-        hits_low  = len(BankGenerator(controls=low,  seed=7).generate(OAK_PROFILE, 0, 0.1).all_events())
-        hits_high = len(BankGenerator(controls=high, seed=7).generate(OAK_PROFILE, 0, 0.1).all_events())
+        hits_low  = len(BankGenerator(controls=low).generate(OAK_PROFILE, 0, 0.1).all_events())
+        hits_high = len(BankGenerator(controls=high).generate(OAK_PROFILE, 0, 0.1).all_events())
         assert hits_low <= hits_high

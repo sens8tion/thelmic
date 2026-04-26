@@ -1,13 +1,19 @@
-"""Bank generator — Phase 1: kick, snare, hi-hat."""
+"""Bank generator — kick, snare, hi-hat.
+
+With no deformations registered, the output is fully deterministic: the archetype
+plays exactly as defined by its probability arrays (prob >= 0.5 fires, < 0.5 does not).
+All variation — jitter, ghost injection, density fills, withheld resolutions — belongs
+in deformations.py and is a no-op until algorithms are added there.
+"""
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass, field
 from typing import Optional
 
-from thelmic.archetypes import DrumBlend, select_blend
+from thelmic.archetypes import Anchors, DrumBlend, select_archetype, to_blend
 from thelmic.controls import Controls
+from thelmic.deformations import apply_deformations
 from thelmic.force_engine import ForceState, _clamp
 
 BARS_PER_PHRASE = 4
@@ -30,10 +36,10 @@ EXPECTATION_GHOST_THRESHOLD  = 0.25
 class MIDIEvent:
     time: str              # "bar.beat.tick" — bar is 1-indexed within bank
     note: int
-    velocity: int          # 0 = withheld (display only, no MIDI output)
+    velocity: int
     duration: float
     layer: str
-    role: str              # anchor | ghost | disruption | impact | withheld_resolution
+    role: str              # anchor | ghost | impact
     emphasis: float
     openness: float
     expected_weight: float
@@ -58,18 +64,21 @@ class Bank:
 class BankGenerator:
     """Generates a Bank from a ForceState and Controls.
 
-    Instruments: kick, snare, hi-hat. Each is generated independently from
-    the same archetype blend — no inter-instrument role logic yet (Phase 3).
+    Pipeline per bank:
+      1. select_archetype(density, selected_archetype) → RhythmArchetype
+      2. to_blend(archetype) → DrumBlend  (identity conversion)
+      3. apply_deformations(blend, anchors, force, landscape_position) → DrumBlend
+           (no-op until deformation algorithms are registered in deformations.py)
+      4. Deterministic phrase/bar generation from the resulting DrumBlend
 
-    Kick placement is driven by archetype probability distributions (archetypes.py).
-    Snare and hat follow their own per-archetype distributions. The expectation map
-    drives role assignment for all three layers.
+    Slot firing: prob >= 0.5 fires, < 0.5 does not. No RNG.
+    All variation (jitter, ghost notes, density fills, etc.) lives in deformations.
     """
 
     def __init__(self, controls: Optional[Controls] = None, seed: Optional[int] = None) -> None:
         self.controls = controls or Controls()
-        self._rng = random.Random(seed)
-        self.locked_archetype: Optional[str] = None
+        # seed retained for API compatibility; unused until deformations introduce RNG
+        self.selected_archetype: Optional[str] = None
 
     def generate(
         self, force: ForceState, bank_index: int, landscape_position: float = 0.0
@@ -82,30 +91,32 @@ class BankGenerator:
             control_vs_chaos=force.control_vs_chaos,
         )
 
-        # Select archetype blend once per bank so all phrases share the same feel
-        blend = select_blend(
-            density=effective.density,
-            instability=effective.instability,
-            landscape_position=landscape_position,
-            locked_archetype=self.locked_archetype,
+        # 1. Select archetype (density-driven or explicit; territory-agnostic)
+        archetype = select_archetype(effective.density, self.selected_archetype)
+
+        # 2. Extract anchor slots — passed to every deformation as a hard constraint
+        anchors = Anchors(
+            kick=archetype.kick_anchors,
+            snare=archetype.snare_anchors,
+            hat=archetype.hat_anchors,
+        )
+
+        # 3. Convert to blend and run deformation pipeline (currently no-op)
+        blend = apply_deformations(
+            to_blend(archetype), anchors, effective, landscape_position
         )
 
         bank = Bank(bank_index=bank_index)
         for phrase_idx in range(PHRASES_PER_BANK):
-            phrase = self._generate_phrase(
-                effective, bank_index, phrase_idx, blend
-            )
+            phrase = self._generate_phrase(effective, bank_index, phrase_idx, blend)
             bank.phrases.append(phrase)
         return bank
 
     # ------------------------------------------------------------------
 
-    def _roll_slots(self, probs: list[float], density_scale: float) -> set[int]:
-        """Decide which of the 16 slots fire. Called once per phrase per instrument."""
-        return {
-            slot for slot in range(16)
-            if self._should_fire(probs[slot], density_scale)
-        }
+    def _fired_slots(self, probs: list[float]) -> set[int]:
+        """Deterministic: a slot fires if its probability is >= 0.5."""
+        return {slot for slot, p in enumerate(probs) if p >= 0.5}
 
     def _generate_phrase(
         self,
@@ -117,10 +128,9 @@ class BankGenerator:
         phrase = Phrase(phrase_index=phrase_idx)
         bar_offset = phrase_idx * BARS_PER_PHRASE
 
-        # Roll fired slots once — all 4 bars in the phrase share the same pattern
-        kick_fired  = self._roll_slots(blend.kick_probs,  0.5 + force.density * 0.5)
-        snare_fired = self._roll_slots(blend.snare_probs, 0.4 + force.density * 0.6)
-        hat_fired   = self._roll_slots(blend.hat_probs,   0.35 + force.density * 0.5)
+        kick_fired  = self._fired_slots(blend.kick_probs)
+        snare_fired = self._fired_slots(blend.snare_probs)
+        hat_fired   = self._fired_slots(blend.hat_probs)
 
         for bar in range(BARS_PER_PHRASE):
             abs_bar = bar_offset + bar + 1
@@ -148,26 +158,17 @@ class BankGenerator:
         expectation: list[float],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
-        groove = self.controls.groove_lock * (1.0 - force.instability * 0.4)
 
         for slot in sorted(fired_slots):
             beat = slot // 4 + 1
-            sub  = slot % 4
-            tick = sub * SIXTEENTH
-
-            if not self.locked_archetype and groove < 0.9 and slot % 4 != 0:
-                jitter_range = int((1.0 - groove) * 3)
-                tick = max(0, tick + self._rng.randint(-jitter_range, jitter_range))
-
-            time_str = f"{abs_bar}.{beat}.{tick}"
+            tick = (slot % 4) * SIXTEENTH
             exp = expectation[slot]
-            role = self._assign_role(exp, force, slot, bar_in_phrase, phrase_idx)
-            velocity = self._kick_velocity(force, role)
+            role = self._assign_role(exp, force, phrase_idx)
 
             events.append(MIDIEvent(
-                time=time_str,
+                time=f"{abs_bar}.{beat}.{tick}",
                 note=KICK_NOTE,
-                velocity=velocity,
+                velocity=self._kick_velocity(force, role),
                 duration=0.08,
                 layer="kick",
                 role=role,
@@ -178,29 +179,6 @@ class BankGenerator:
                     force.release_pressure > 0.6 and bar_in_phrase == BARS_PER_PHRASE - 1
                 ),
             ))
-
-        # Withheld resolutions — high-expectation slots deliberately left empty
-        if force.anticipation > 0.55 and bar_in_phrase == BARS_PER_PHRASE - 1:
-            for slot in range(16):
-                if slot in fired_slots:
-                    continue
-                exp = expectation[slot]
-                if exp >= EXPECTATION_ANCHOR_THRESHOLD:
-                    if self._rng.random() < force.anticipation * 0.5:
-                        beat = slot // 4 + 1
-                        tick = (slot % 4) * SIXTEENTH
-                        events.append(MIDIEvent(
-                            time=f"{abs_bar}.{beat}.{tick}",
-                            note=KICK_NOTE,
-                            velocity=0,
-                            duration=0.0,
-                            layer="kick",
-                            role="withheld_resolution",
-                            emphasis=0.3,
-                            openness=1.0,
-                            expected_weight=exp,
-                            should_resolve=True,
-                        ))
 
         return events
 
@@ -222,7 +200,7 @@ class BankGenerator:
             beat = slot // 4 + 1
             tick = (slot % 4) * SIXTEENTH
             exp = snare_exp[slot]
-            role = self._assign_role(exp, force, slot, bar_in_phrase, phrase_idx)
+            role = self._assign_role(exp, force, phrase_idx)
             events.append(MIDIEvent(
                 time=f"{abs_bar}.{beat}.{tick}",
                 note=SNARE_NOTE,
@@ -274,67 +252,27 @@ class BankGenerator:
     # ------------------------------------------------------------------
     # Shared helpers
 
-    def _should_fire(self, prob: float, density_scale: float) -> bool:
-        """Deterministic when locked (prob >= 0.5); probabilistic otherwise."""
-        if self.locked_archetype:
-            return prob >= 0.5
-        return self._rng.random() < prob * density_scale
-
-    def _assign_role(
-        self,
-        exp: float,
-        force: ForceState,
-        slot: int,
-        bar_in_phrase: int,
-        phrase_idx: int,
-    ) -> str:
+    def _assign_role(self, exp: float, force: ForceState, phrase_idx: int) -> str:
+        """Deterministic role from expectation value and force state."""
         if exp >= EXPECTATION_ANCHOR_THRESHOLD:
             if force.release_pressure > 0.6 and phrase_idx == PHRASES_PER_BANK - 1:
                 return "impact"
             return "anchor"
-
-        if exp < EXPECTATION_GHOST_THRESHOLD and force.instability > 0.4:
-            if self._rng.random() < force.instability * 0.55:
-                return "disruption"
-
         if exp < EXPECTATION_GHOST_THRESHOLD:
             return "ghost"
-
         return "anchor"
 
     def _kick_velocity(self, force: ForceState, role: str) -> int:
-        base = {
-            "anchor":              100,
-            "ghost":               52,
-            "disruption":          112,
-            "impact":              127,
-            "withheld_resolution": 0,
-        }.get(role, 90)
-        if base == 0:
-            return 0
-        vel = int(base * (0.8 + force.density * 0.2))
-        return max(1, min(127, vel))
+        base = {"anchor": 100, "ghost": 52, "impact": 127}.get(role, 90)
+        return max(1, min(127, int(base * (0.8 + force.density * 0.2))))
 
     def _snare_velocity(self, force: ForceState, role: str) -> int:
-        base = {
-            "anchor":     95,
-            "ghost":      40,
-            "disruption": 108,
-            "impact":     120,
-        }.get(role, 80)
-        vel = int(base * (0.8 + force.density * 0.2))
-        return max(1, min(127, vel))
+        base = {"anchor": 95, "ghost": 40, "impact": 120}.get(role, 80)
+        return max(1, min(127, int(base * (0.8 + force.density * 0.2))))
 
     def _hat_velocity(self, force: ForceState, role: str) -> int:
         base = 72 if role == "anchor" else 38
-        vel = int(base * (0.75 + force.density * 0.25))
-        return max(1, min(127, vel))
+        return max(1, min(127, int(base * (0.75 + force.density * 0.25))))
 
     def _emphasis(self, role: str) -> float:
-        return {
-            "anchor":              0.8,
-            "ghost":               0.2,
-            "disruption":          0.9,
-            "impact":              1.0,
-            "withheld_resolution": 0.3,
-        }.get(role, 0.6)
+        return {"anchor": 0.8, "ghost": 0.2, "impact": 1.0}.get(role, 0.6)

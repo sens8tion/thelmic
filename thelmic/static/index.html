@@ -742,7 +742,7 @@
       document.getElementById('bank-count').textContent = `banks: ${s.bank_count}`;
 
       // Archetype lock
-      updateArchetypeDisplay(s.locked_archetype, s.archetype);
+      updateArchetypeDisplay(s.selected_archetype, s.archetype);
 
       // MIDI port status
       const midiStatus = document.getElementById('midi-status');
@@ -809,17 +809,17 @@
 
     function setArchetypeLock() {
       const val = document.getElementById('archetype-select').value || null;
-      send({ type: 'lock_archetype', value: val });
+      send({ type: 'set_archetype', value: val });
     }
 
-    function updateArchetypeDisplay(locked, current) {
+    function updateArchetypeDisplay(selected, current) {
       const sel = document.getElementById('archetype-select');
       const label = document.getElementById('archetype-current');
       if (document.activeElement !== sel) {
-        sel.value = locked || '';
+        sel.value = selected || '';
       }
-      if (locked) {
-        label.textContent = locked.replace(/_/g, ' ') + ' 🔒';
+      if (selected) {
+        label.textContent = selected.replace(/_/g, ' ');
         label.className = 'archetype-current locked';
       } else {
         label.textContent = (current || 'auto').replace(/_/g, ' ');
