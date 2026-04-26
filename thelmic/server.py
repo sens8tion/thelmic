@@ -399,12 +399,15 @@ async def _handle_message(msg: dict) -> None:
     if kind == "axis":
         value = float(msg.get("value", 0.0))
         if _playing:
-            # Set transition target — engine performs the journey over time
+            # Set transition target only — the playback loop drives the journey.
+            # Do NOT regenerate the preview bank here: force dimensions must
+            # reflect current_position (advanced per bar), not the target.
             _intent.set_axis(value)
+            await _broadcast({"type": "state", **_force_state_dict()})
         else:
-            # Stopped: preview position immediately, no transition
+            # Stopped: set position immediately and regenerate preview
             _intent.set_axis_immediate(value)
-        await _apply_and_preview()
+            await _apply_and_preview()
 
     elif kind == "play":
         if _midi is None:

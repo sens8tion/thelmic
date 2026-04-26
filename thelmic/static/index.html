@@ -964,7 +964,10 @@
 
     axisSlider.addEventListener('input', () => {
       const val = axisSlider.value / 1000;
-      updateTerritoryDisplay(val);
+      // When stopped, immediately show the territory being previewed.
+      // When playing, territory reflects the engine's current_position (from server
+      // state) — do not jump it to the target on drag.
+      if (!isPlaying) updateTerritoryDisplay(val);
       clearTimeout(axisThrottle);
       axisThrottle = setTimeout(() => send({ type: 'axis', value: val }), 30);
     });
@@ -1016,8 +1019,17 @@
     let deformationModelDimensions = {};
 
     function applyState(s) {
-      // Axis — only update slider if not currently dragging
-      if (document.activeElement !== axisSlider) {
+      // Axis slider — behaviour differs by playback state:
+      //   stopped: slider tracks current position (live preview)
+      //   playing: slider shows the TARGET (intent); current_position is in
+      //            the transition state dict and drives force bars + territory.
+      //            Do not snap slider back to current_position during playback.
+      const transition = s.transition || {};
+      if (isPlaying && transition.active && transition.target_position != null) {
+        if (document.activeElement !== axisSlider) {
+          axisSlider.value = Math.round(transition.target_position * 1000);
+        }
+      } else if (!isPlaying && document.activeElement !== axisSlider) {
         axisSlider.value = Math.round(s.landscape_position * 1000);
       }
       updateTerritoryDisplay(s.landscape_position);
