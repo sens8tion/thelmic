@@ -200,6 +200,7 @@ def apply_deformations(
     anchors: Anchors,
     force: ForceState,
     landscape_position: float,
+    curve_overrides: dict[str, float] | None = None,
 ) -> tuple[DrumBlend, dict[str, DeformationMap]]:
     """Apply the active deformation pipeline and return (blend, named_maps).
 
@@ -222,9 +223,11 @@ def apply_deformations(
         Oak (pos < 0.33): scaled down so pure Oak stays clean.
         """
         steps: list[tuple[str, object, float]] = []
-        # Ghost inject: instability drives ghost density; attenuated in Oak
+        overrides = curve_overrides or {}
+        # Ghost inject: instability drives ghost density; attenuated in Oak.
+        # A pressure curve targeting "ghost_inject" overrides the force-derived value.
         oak_scale = min(1.0, landscape_position / 0.33) if landscape_position < 0.33 else 1.0
-        ghost_intensity = force.instability * oak_scale
+        ghost_intensity = overrides.get("ghost_inject", force.instability * oak_scale)
         if ghost_intensity > 0.0:
             steps.append(("ghost_inject", deform_ghost_inject, ghost_intensity))
         return steps

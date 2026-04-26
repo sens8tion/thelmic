@@ -82,7 +82,8 @@ class BankGenerator:
         self.selected_archetype: Optional[str] = None
 
     def generate(
-        self, force: ForceState, bank_index: int, landscape_position: float = 0.0
+        self, force: ForceState, bank_index: int, landscape_position: float = 0.0,
+        curve_overrides: dict[str, float] | None = None,
     ) -> Bank:
         effective = ForceState(
             anticipation=force.anticipation,
@@ -104,7 +105,8 @@ class BankGenerator:
 
         # 3. Convert to blend and run deformation pipeline
         blend, named_maps = apply_deformations(
-            to_blend(archetype), anchors, effective, landscape_position
+            to_blend(archetype), anchors, effective, landscape_position,
+            curve_overrides=curve_overrides,
         )
 
         # Build per-layer named deform arrays: {name: [16 floats]} for each layer

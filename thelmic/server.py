@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
 from thelmic.deformations import DEFORMATION_COLOURS
+from thelmic.pressure_curves import CurveEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
 DIMENSION_ROLES: dict[str, str] = {
@@ -65,6 +66,7 @@ _generator: Optional[BankGenerator] = None
 _midi: Optional[MIDIOut] = None
 _bpm: float = 174.0
 _current_bank = None   # Bank | None
+_curve_engine: CurveEngine = CurveEngine()
 
 _playing: bool = False
 _play_thread: Optional[threading.Thread] = None
@@ -103,7 +105,8 @@ async def _apply_and_preview() -> None:
 
     with _preview_lock:
         fresh = _generator.generate(
-            _engine.force_state, _current_bank.bank_index, _engine.landscape_position
+            _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
+            curve_overrides=_curve_engine.overrides(),
         )
         # Splice: keep up-to-and-including current phrase, replace the rest
         for i, phrase in enumerate(fresh.phrases):
@@ -169,6 +172,7 @@ def _force_state_dict() -> dict:
         "selected_archetype": _generator.selected_archetype,
         "deformation_colours": DEFORMATION_COLOURS,
         "dimension_roles": DIMENSION_ROLES,
+        "pressure_curves": _curve_engine.state_dict(),
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
@@ -194,7 +198,10 @@ def _playback_loop() -> None:
     while _playing:
 
         snapshot = _engine.begin_bank()
-        bank = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
+        bank = _generator.generate(
+            _engine.force_state, bank_idx, _engine.landscape_position,
+            curve_overrides=_curve_engine.overrides(),
+        )
         _current_bank = bank
 
         try:
@@ -228,13 +235,31 @@ def _playback_loop() -> None:
             if not _playing:
                 break
             phrase_end = _midi.play_phrase_blocking(phrase, bpm=_bpm, bank_start=bank_start)
+
+            # Advance curve engine by the phrase's bar count; collect CC outputs
+            from thelmic.bank_generator import BARS_PER_PHRASE
+            cc_messages = _curve_engine.advance(bars=BARS_PER_PHRASE)
+            for _target, cc_num, val in cc_messages:
+                ch = 0  # default channel; CC targets can specify channel in target string
+                parts = _target.split(":")
+                if len(parts) >= 2:
+                    try:
+                        ch = int(parts[1])
+                    except ValueError:
+                        pass
+                if _midi:
+                    _midi._midiout.send_message([0xB0 | (ch & 0xF), cc_num & 0x7F, int(val * 127)])
+
             bars_done = (phrase.phrase_index + 1) * 4
             if bars_done % max(1, _quantize_bars) == 0:
                 # Regenerate remaining phrases from current (already-updated) state
                 next_idx = phrase.phrase_index + 1
                 if next_idx < len(bank.phrases):
                     with _preview_lock:
-                        fresh = _generator.generate(_engine.force_state, bank_idx, _engine.landscape_position)
+                        fresh = _generator.generate(
+                            _engine.force_state, bank_idx, _engine.landscape_position,
+                            curve_overrides=_curve_engine.overrides(),
+                        )
                         bank.phrases[next_idx:] = fresh.phrases[next_idx:]
                         _current_bank = bank
 
@@ -347,6 +372,30 @@ async def _handle_message(msg: dict) -> None:
         name = msg.get("value")
         _generator.selected_archetype = name if (name and name in ARCHETYPE_BY_NAME) else None
         await _apply_and_preview()
+
+    elif kind == "curve_add":
+        curve_id = _curve_engine.add(
+            shape      = msg.get("shape", "linear"),
+            bars       = int(msg.get("bars", 8)),
+            from_value = float(msg.get("from_value", 0.0)),
+            to_value   = float(msg.get("to_value", 1.0)),
+            target     = msg.get("target", "ghost_inject"),
+            next_id    = msg.get("next_id"),
+            loop       = bool(msg.get("loop", False)),
+        )
+        await _broadcast({"type": "state", **_force_state_dict()})
+
+    elif kind == "curve_start":
+        _curve_engine.start(int(msg.get("id", 0)))
+        await _apply_and_preview()
+
+    elif kind == "curve_stop":
+        _curve_engine.stop(msg.get("target", ""))
+        await _apply_and_preview()
+
+    elif kind == "curve_remove":
+        _curve_engine.remove(int(msg.get("id", 0)))
+        await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "midi_port":
         port_name = msg.get("value")

@@ -563,6 +563,107 @@
 
     .deform-cell.bar-start    { border-left: 1px solid #333; }
     .deform-cell.phrase-start { border-left: 1px solid #555; }
+
+    /* ── Pressure curves ── */
+    .curves-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .curves-heading {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+      font-weight: normal;
+      text-transform: uppercase;
+    }
+
+    .curve-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 6px 8px;
+    }
+
+    .curve-target {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+      min-width: 90px;
+    }
+
+    .curve-target.active { color: #6a8a6a; }
+
+    .curve-sparkline {
+      flex: 1;
+      height: 24px;
+      position: relative;
+    }
+
+    .curve-sparkline canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .curve-meta {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.05em;
+      min-width: 80px;
+      text-align: right;
+    }
+
+    .curve-val {
+      font-size: 11px;
+      color: var(--text);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    .curve-btn {
+      font-size: 10px;
+      padding: 3px 8px;
+      letter-spacing: 0.1em;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      cursor: pointer;
+      border-radius: 2px;
+    }
+
+    .curve-btn.running {
+      border-color: #6a8a6a;
+      color: #6a8a6a;
+    }
+
+    .curve-add-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 0 2px;
+    }
+
+    .curve-add-form select,
+    .curve-add-form input {
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 6px;
+      border-radius: 2px;
+    }
+
+    .curve-add-form input[type=number] { width: 52px; }
   </style>
 </head>
 <body>
@@ -661,6 +762,33 @@
         <div class="deform-strips-wrap" id="deform-strips"></div>
         <div class="seq-grid" id="seq-grid"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Pressure Curves -->
+  <div class="curves-section">
+    <h2 class="curves-heading">PRESSURE CURVES</h2>
+    <div id="curves-list"></div>
+    <div class="curve-add-form">
+      <select id="curve-shape">
+        <option value="linear">linear</option>
+        <option value="accelerating">accelerating</option>
+        <option value="decelerating">decelerating</option>
+        <option value="sinusoidal">sinusoidal</option>
+        <option value="step">step</option>
+      </select>
+      <input type="number" id="curve-bars" value="8" min="1" max="256" title="bars">
+      <input type="number" id="curve-from" value="0" min="0" max="1" step="0.05" title="from">
+      <span style="color:var(--dim);font-size:10px">→</span>
+      <input type="number" id="curve-to" value="1" min="0" max="1" step="0.05" title="to">
+      <select id="curve-target">
+        <option value="ghost_inject">ghost inject</option>
+        <option value="cc:0:74">cc 0:74</option>
+      </select>
+      <label style="font-size:10px;color:var(--dim);display:flex;align-items:center;gap:3px">
+        <input type="checkbox" id="curve-loop"> loop
+      </label>
+      <button class="curve-btn" onclick="addCurve()">+ add</button>
     </div>
   </div>
 
@@ -848,6 +976,9 @@
       // Playhead timing
       if (s.bank_started_at) bankStartedAt = s.bank_started_at;
       if (s.bank_duration_ms) bankDurationMs = s.bank_duration_ms;
+
+      // Pressure curves
+      if (s.pressure_curves) renderCurves(s.pressure_curves);
 
       // Dimension riders
       if (s.dimension_roles) {
@@ -1114,6 +1245,138 @@
         item.appendChild(dot);
         item.appendChild(name);
         legend.appendChild(item);
+      });
+    }
+
+    // ── Pressure curves ──
+
+    function drawSparkline(canvas, sparkline, progress, colour) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.offsetWidth || 200;
+      const H = canvas.offsetHeight || 24;
+      canvas.width  = W;
+      canvas.height = H;
+      ctx.clearRect(0, 0, W, H);
+
+      // Track line
+      ctx.beginPath();
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      sparkline.forEach((v, i) => {
+        const x = (i / (sparkline.length - 1)) * W;
+        const y = H - v * H;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Curve line (coloured)
+      ctx.beginPath();
+      ctx.strokeStyle = colour || '#50a0dc';
+      ctx.lineWidth = 1.5;
+      sparkline.forEach((v, i) => {
+        const x = (i / (sparkline.length - 1)) * W;
+        const y = H - v * H;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Progress marker
+      if (progress > 0 && progress < 1) {
+        const px = progress * W;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, H);
+        ctx.stroke();
+      }
+    }
+
+    let _curveTargetOptions = ['ghost_inject'];
+
+    function renderCurves(pressureCurves) {
+      if (!pressureCurves) return;
+      const { curves, active_targets } = pressureCurves;
+      const list = document.getElementById('curves-list');
+      list.innerHTML = '';
+
+      // Update target dropdown with known deformation colours
+      const sel = document.getElementById('curve-target');
+      if (sel) {
+        const existing = Array.from(sel.options).map(o => o.value);
+        Object.keys(deformationColours).forEach(name => {
+          if (!existing.includes(name)) {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name.replace(/_/g, ' ');
+            sel.insertBefore(opt, sel.firstChild);
+          }
+        });
+      }
+
+      curves.forEach(c => {
+        const isActive = active_targets.hasOwnProperty(c.target) &&
+                         Object.values(active_targets).length > 0;
+        const colour = deformationColours[c.target] || '#50a0dc';
+        const currentVal = active_targets[c.target];
+
+        const row = document.createElement('div');
+        row.className = 'curve-row';
+
+        const targetEl = document.createElement('div');
+        targetEl.className = `curve-target${isActive ? ' active' : ''}`;
+        targetEl.textContent = c.target.replace(/_/g, ' ');
+
+        const sparkWrap = document.createElement('div');
+        sparkWrap.className = 'curve-sparkline';
+        const canvas = document.createElement('canvas');
+        sparkWrap.appendChild(canvas);
+
+        const meta = document.createElement('div');
+        meta.className = 'curve-meta';
+        meta.textContent = `${c.shape} · ${c.bars}b`;
+
+        const valEl = document.createElement('div');
+        valEl.className = 'curve-val';
+        valEl.textContent = currentVal !== undefined ? currentVal.toFixed(2) : '—';
+
+        const startBtn = document.createElement('button');
+        startBtn.className = `curve-btn${isActive ? ' running' : ''}`;
+        startBtn.textContent = isActive ? '■ stop' : '▶ run';
+        startBtn.onclick = () => {
+          if (isActive) {
+            send({ type: 'curve_stop', target: c.target });
+          } else {
+            send({ type: 'curve_start', id: c.id });
+          }
+        };
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'curve-btn';
+        removeBtn.textContent = '✕';
+        removeBtn.onclick = () => send({ type: 'curve_remove', id: c.id });
+
+        row.appendChild(targetEl);
+        row.appendChild(sparkWrap);
+        row.appendChild(meta);
+        row.appendChild(valEl);
+        row.appendChild(startBtn);
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+
+        // Draw sparkline after layout
+        requestAnimationFrame(() => drawSparkline(canvas, c.sparkline, c.progress, colour));
+      });
+    }
+
+    function addCurve() {
+      send({
+        type:       'curve_add',
+        shape:      document.getElementById('curve-shape').value,
+        bars:       parseInt(document.getElementById('curve-bars').value) || 8,
+        from_value: parseFloat(document.getElementById('curve-from').value) || 0,
+        to_value:   parseFloat(document.getElementById('curve-to').value) || 1,
+        target:     document.getElementById('curve-target').value,
+        loop:       document.getElementById('curve-loop').checked,
       });
     }
 
