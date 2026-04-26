@@ -978,7 +978,13 @@
       if (s.bank_duration_ms) bankDurationMs = s.bank_duration_ms;
 
       // Pressure curves
-      if (s.pressure_curves) renderCurves(s.pressure_curves);
+      stateReceivedAt = Date.now();
+      if (s.pressure_curves) {
+        activeCurveTargets = s.pressure_curves.active_targets || {};
+        curveCanvases = {};  // renderCurves will repopulate
+        s.pressure_curves.curves.forEach(c => { curveProgressAtState[c.id] = c.progress; });
+        renderCurves(s.pressure_curves);
+      }
 
       // Dimension riders
       if (s.dimension_roles) {
@@ -1217,6 +1223,12 @@
             cell.style.opacity = alpha.toFixed(2);
             const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
             cell.title = `${ev.role} vel:${ev.velocity} deform:${deformDesc}`;
+            // Store data for live curve colour updates in animation loop
+            cell.dataset.step      = s;
+            cell.dataset.role      = ev.role;
+            cell.dataset.emphasis  = ev.emphasis;
+            cell.dataset.baseColour = ROLE_COLOURS[ev.role] || '#888';
+            cell.dataset.deform    = JSON.stringify(ev.deformation || {});
           }
           row.appendChild(cell);
         }
@@ -1245,6 +1257,78 @@
         item.appendChild(dot);
         item.appendChild(name);
         legend.appendChild(item);
+      });
+    }
+
+    // ── Pressure curves live state ──
+    let activeCurveTargets = {};   // {target: last-known value} from state
+    let curveCanvases = {};        // {id: {canvas, sparkline, curve}}
+    let curveProgressAtState = {}; // {id: progress at last state push}
+    let stateReceivedAt = 0;       // Date.now() when last state arrived
+
+    // Mirror of Python's evaluate() for client-side live interpolation
+    function evaluateCurveJS(curve, t) {
+      t = Math.max(0, Math.min(1, t));
+      let shaped;
+      switch (curve.shape) {
+        case 'linear':       shaped = t; break;
+        case 'accelerating': shaped = t * t; break;
+        case 'decelerating': shaped = 1 - (1 - t) * (1 - t); break;
+        case 'sinusoidal':   shaped = (1 - Math.cos(Math.PI * 2 * t)) / 2; break;
+        case 'step':         shaped = (t < 1) ? 0 : 1; break;
+        default:             shaped = t;
+      }
+      return curve.from_value + (curve.to_value - curve.from_value) * shaped;
+    }
+
+    function getLiveCurveValue(curveId) {
+      const entry = curveCanvases[curveId];
+      const progressAtState = curveProgressAtState[curveId];
+      if (!entry || progressAtState == null) return null;
+      const msPerBar = bankDurationMs > 0 ? bankDurationMs / 16 : 500;
+      const barsElapsed = (Date.now() - stateReceivedAt) / msPerBar;
+      const liveBarsTotal = progressAtState * entry.curve.bars + barsElapsed;
+      const liveProgress = Math.min(1, liveBarsTotal / entry.curve.bars);
+      return evaluateCurveJS(entry.curve, liveProgress);
+    }
+
+    // Build {target: liveValue} for all curves currently running
+    function liveOverrides() {
+      const out = {};
+      for (const [id, entry] of Object.entries(curveCanvases)) {
+        if (activeCurveTargets.hasOwnProperty(entry.curve.target)) {
+          const v = getLiveCurveValue(id);
+          if (v !== null) out[entry.curve.target] = v;
+        }
+      }
+      return out;
+    }
+
+    // Recolour grid cells ahead of playhead using live curve values
+    function applyLiveCurveColours() {
+      const overrides = liveOverrides();
+      if (Object.keys(overrides).length === 0) return;
+
+      const fraction = (bankDurationMs > 0)
+        ? Math.min(1, (Date.now() - bankStartedAt) / bankDurationMs) : 0;
+      const currentStep = Math.floor(fraction * TOTAL_STEPS);
+
+      const cells = document.querySelectorAll('#seq-content [data-step]');
+      cells.forEach(cell => {
+        const step = parseInt(cell.dataset.step);
+        if (step <= currentStep) return;
+        try {
+          const deformDict = JSON.parse(cell.dataset.deform);
+          const liveDeform = {};
+          for (const [name, val] of Object.entries(deformDict)) {
+            liveDeform[name] = (overrides[name] !== undefined) ? overrides[name] : val;
+          }
+          const dom = dominantDeform(liveDeform);
+          const colour = dom
+            ? blendTowardsHex(cell.dataset.baseColour, dom.colour, dom.intensity)
+            : cell.dataset.baseColour;
+          cell.style.background = colour;
+        } catch (_) {}
       });
     }
 
@@ -1363,7 +1447,9 @@
         row.appendChild(removeBtn);
         list.appendChild(row);
 
-        // Draw sparkline after layout
+        // Store canvas reference for animation loop
+        curveCanvases[c.id] = { canvas, sparkline: c.sparkline, curve: c };
+        // Initial draw
         requestAnimationFrame(() => drawSparkline(canvas, c.sparkline, c.progress, colour));
       });
     }
@@ -1394,6 +1480,23 @@
       } else if (el) {
         el.style.display = 'none';
       }
+
+      // Animate sparkline progress markers
+      for (const [id, entry] of Object.entries(curveCanvases)) {
+        if (!activeCurveTargets.hasOwnProperty(entry.curve.target)) continue;
+        const v = getLiveCurveValue(id);
+        if (v === null) continue;
+        const progressAtState = curveProgressAtState[id] ?? 0;
+        const msPerBar = bankDurationMs > 0 ? bankDurationMs / 16 : 500;
+        const barsElapsed = (Date.now() - stateReceivedAt) / msPerBar;
+        const liveProg = Math.min(1, (progressAtState * entry.curve.bars + barsElapsed) / entry.curve.bars);
+        const colour = deformationColours[entry.curve.target] || '#50a0dc';
+        drawSparkline(entry.canvas, entry.sparkline, liveProg, colour);
+      }
+
+      // Recolour grid cells ahead of playhead with live curve values
+      applyLiveCurveColours();
+
       requestAnimationFrame(animatePlayhead);
     }
     requestAnimationFrame(animatePlayhead);
