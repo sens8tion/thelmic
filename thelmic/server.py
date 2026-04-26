@@ -24,6 +24,23 @@ from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
 from thelmic.deformations import DEFORMATION_COLOURS
+
+# Roles each dimension currently plays — updated as deformations are wired in
+DIMENSION_ROLES: dict[str, str] = {
+    # Force state
+    "anticipation":          "future · Nott tension",
+    "release_pressure":      "impact role · resolve",
+    "instability":           "ghost inject",
+    "density":               "archetype · velocity",
+    "control_vs_chaos":      "future",
+    "resolution_likelihood": "display only",
+    # Controls
+    "groove_lock":           "unused",
+    "chaos_limit":           "clamps instability",
+    "density_ceiling":       "clamps density",
+    "variation_rate":        "unused",
+    "kick_dominance":        "unused",
+}
 from thelmic.controls import Controls
 from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
@@ -151,6 +168,7 @@ def _force_state_dict() -> dict:
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
         "deformation_colours": DEFORMATION_COLOURS,
+        "dimension_roles": DIMENSION_ROLES,
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),

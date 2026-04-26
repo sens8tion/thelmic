@@ -162,6 +162,17 @@
       letter-spacing: 0.08em;
     }
 
+    .force-rider {
+      font-size: 9px;
+      letter-spacing: 0.06em;
+      color: #444;
+      margin-left: 6px;
+      font-style: italic;
+      transition: color 0.3s;
+    }
+
+    .force-rider.active { color: #6a8a6a; }
+
     .force-bar-track {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -204,7 +215,7 @@
 
     .control-row {
       display: grid;
-      grid-template-columns: minmax(60px, 120px) 1fr 40px;
+      grid-template-columns: minmax(60px, 120px) 1fr 40px minmax(60px, 120px);
       gap: 6px;
       align-items: center;
     }
@@ -578,27 +589,27 @@
   <!-- Force state -->
   <div class="force-grid">
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">anticipation</span><span class="force-value" id="val-anticipation">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">anticipation</span><span class="force-rider" id="rider-anticipation"></span><span class="force-value" id="val-anticipation">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-anticipation" style="width:0%"></div></div>
     </div>
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">release pressure</span><span class="force-value" id="val-release_pressure">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">release pressure</span><span class="force-rider" id="rider-release_pressure"></span><span class="force-value" id="val-release_pressure">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-release_pressure" style="width:0%"></div></div>
     </div>
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">instability</span><span class="force-value" id="val-instability">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">instability</span><span class="force-rider" id="rider-instability"></span><span class="force-value" id="val-instability">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-instability" style="width:0%"></div></div>
     </div>
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">density</span><span class="force-value" id="val-density">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">density</span><span class="force-rider" id="rider-density"></span><span class="force-value" id="val-density">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-density" style="width:0%"></div></div>
     </div>
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">control / chaos</span><span class="force-value" id="val-control_vs_chaos">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">control / chaos</span><span class="force-rider" id="rider-control_vs_chaos"></span><span class="force-value" id="val-control_vs_chaos">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-control_vs_chaos" style="width:0%"></div></div>
     </div>
     <div class="force-row">
-      <div class="force-row-header"><span class="force-label">resolution likelihood</span><span class="force-value" id="val-resolution_likelihood">0.00</span></div>
+      <div class="force-row-header"><span class="force-label">resolution likelihood</span><span class="force-rider" id="rider-resolution_likelihood"></span><span class="force-value" id="val-resolution_likelihood">0.00</span></div>
       <div class="force-bar-track"><div class="force-bar-fill" id="bar-resolution_likelihood" style="width:0%;background:#5a8a7a"></div></div>
     </div>
   </div>
@@ -611,26 +622,45 @@
       <label>groove lock</label>
       <input type="range" id="ctrl-groove_lock" min="0" max="1000" value="800" step="1">
       <div class="control-value" id="ctrlval-groove_lock">0.80</div>
+      <span class="force-rider" id="rider-groove_lock"></span>
     </div>
     <div class="control-row">
       <label>chaos limit</label>
       <input type="range" id="ctrl-chaos_limit" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-chaos_limit">1.00</div>
+      <span class="force-rider" id="rider-chaos_limit"></span>
     </div>
     <div class="control-row">
       <label>density ceiling</label>
       <input type="range" id="ctrl-density_ceiling" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-density_ceiling">1.00</div>
+      <span class="force-rider" id="rider-density_ceiling"></span>
     </div>
     <div class="control-row">
       <label>variation rate</label>
       <input type="range" id="ctrl-variation_rate" min="0" max="1000" value="500" step="1">
       <div class="control-value" id="ctrlval-variation_rate">0.50</div>
+      <span class="force-rider" id="rider-variation_rate"></span>
     </div>
     <div class="control-row">
       <label>kick dominance</label>
       <input type="range" id="ctrl-kick_dominance" min="0" max="1000" value="700" step="1">
       <div class="control-value" id="ctrlval-kick_dominance">0.70</div>
+      <span class="force-rider" id="rider-kick_dominance"></span>
+    </div>
+  </div>
+
+  <!-- Sequencer -->
+  <div class="seq-section" id="seq-section">
+    <h2 class="seq-heading">SEQUENCER — bank <span id="seq-bank-num">—</span></h2>
+    <div class="seq-legend" id="seq-legend"></div>
+    <div class="seq-scroll">
+      <div class="seq-content" id="seq-content">
+        <div class="playhead" id="playhead"></div>
+        <!-- Deformation intensity strips — one row per active deformation type -->
+        <div class="deform-strips-wrap" id="deform-strips"></div>
+        <div class="seq-grid" id="seq-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -671,20 +701,6 @@
       <input type="number" id="quantize-input" value="2" min="1" max="64"
              onchange="sendQuantize()" onblur="sendQuantize()" style="width:48px">
       <span>bars</span>
-    </div>
-  </div>
-
-  <!-- Sequencer -->
-  <div class="seq-section" id="seq-section">
-    <h2 class="seq-heading">SEQUENCER — bank <span id="seq-bank-num">—</span></h2>
-    <div class="seq-legend" id="seq-legend"></div>
-    <div class="seq-scroll">
-      <div class="seq-content" id="seq-content">
-        <div class="playhead" id="playhead"></div>
-        <!-- Deformation intensity strips — one row per active deformation type -->
-        <div class="deform-strips-wrap" id="deform-strips"></div>
-        <div class="seq-grid" id="seq-grid"></div>
-      </div>
     </div>
   </div>
 
@@ -832,6 +848,18 @@
       // Playhead timing
       if (s.bank_started_at) bankStartedAt = s.bank_started_at;
       if (s.bank_duration_ms) bankDurationMs = s.bank_duration_ms;
+
+      // Dimension riders
+      if (s.dimension_roles) {
+        const activeRoles = new Set(['density', 'instability', 'release_pressure', 'chaos_limit', 'density_ceiling']);
+        for (const [dim, role] of Object.entries(s.dimension_roles)) {
+          const el = document.getElementById(`rider-${dim}`);
+          if (el) {
+            el.textContent = role;
+            el.className = `force-rider${activeRoles.has(dim) ? ' active' : ''}`;
+          }
+        }
+      }
 
       // Deformation colours (keyed by name)
       if (s.deformation_colours) deformationColours = s.deformation_colours;
