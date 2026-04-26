@@ -100,6 +100,13 @@ class BankGenerator:
 
     # ------------------------------------------------------------------
 
+    def _roll_slots(self, probs: list[float], density_scale: float) -> set[int]:
+        """Decide which of the 16 slots fire. Called once per phrase per instrument."""
+        return {
+            slot for slot in range(16)
+            if self._should_fire(probs[slot], density_scale)
+        }
+
     def _generate_phrase(
         self,
         force: ForceState,
@@ -110,16 +117,21 @@ class BankGenerator:
         phrase = Phrase(phrase_index=phrase_idx)
         bar_offset = phrase_idx * BARS_PER_PHRASE
 
+        # Roll fired slots once — all 4 bars in the phrase share the same pattern
+        kick_fired  = self._roll_slots(blend.kick_probs,  0.5 + force.density * 0.5)
+        snare_fired = self._roll_slots(blend.snare_probs, 0.4 + force.density * 0.6)
+        hat_fired   = self._roll_slots(blend.hat_probs,   0.35 + force.density * 0.5)
+
         for bar in range(BARS_PER_PHRASE):
             abs_bar = bar_offset + bar + 1
             phrase.events.extend(self._generate_kick_bar(
-                force, abs_bar, bar, phrase_idx, blend.kick_probs, blend.kick_exp
+                force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp
             ))
             phrase.events.extend(self._generate_snare_bar(
-                force, abs_bar, bar, phrase_idx, blend.snare_probs, blend.snare_exp
+                force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp
             ))
             phrase.events.extend(self._generate_hat_bar(
-                force, abs_bar, blend.hat_probs, blend.hat_exp
+                force, abs_bar, hat_fired, blend.hat_exp
             ))
         return phrase
 
@@ -132,19 +144,11 @@ class BankGenerator:
         abs_bar: int,
         bar_in_phrase: int,
         phrase_idx: int,
-        kick_probs: list[float],
+        fired_slots: set[int],
         expectation: list[float],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
-
-        density_scale = 0.5 + force.density * 0.5
         groove = self.controls.groove_lock * (1.0 - force.instability * 0.4)
-
-        fired_slots: set[int] = set()
-
-        for slot in range(16):
-            if self._should_fire(kick_probs[slot], density_scale):
-                fired_slots.add(slot)
 
         for slot in sorted(fired_slots):
             beat = slot // 4 + 1
@@ -209,32 +213,28 @@ class BankGenerator:
         abs_bar: int,
         bar_in_phrase: int,
         phrase_idx: int,
-        snare_probs: list[float],
+        fired_slots: set[int],
         snare_exp: list[float],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
-        # Snare density tracks overall density but is moderated slightly
-        density_scale = 0.4 + force.density * 0.6
-
-        for slot in range(16):
-            if self._should_fire(snare_probs[slot], density_scale):
-                beat = slot // 4 + 1
-                tick = (slot % 4) * SIXTEENTH
-                exp = snare_exp[slot]
-                role = self._assign_role(exp, force, slot, bar_in_phrase, phrase_idx)
-                events.append(MIDIEvent(
-                    time=f"{abs_bar}.{beat}.{tick}",
-                    note=SNARE_NOTE,
-                    velocity=self._snare_velocity(force, role),
-                    duration=0.05,
-                    layer="snare",
-                    role=role,
-                    emphasis=self._emphasis(role),
-                    openness=1.0 - force.density * 0.2,
-                    expected_weight=exp,
-                    should_resolve=False,
-                ))
+        for slot in sorted(fired_slots):
+            beat = slot // 4 + 1
+            tick = (slot % 4) * SIXTEENTH
+            exp = snare_exp[slot]
+            role = self._assign_role(exp, force, slot, bar_in_phrase, phrase_idx)
+            events.append(MIDIEvent(
+                time=f"{abs_bar}.{beat}.{tick}",
+                note=SNARE_NOTE,
+                velocity=self._snare_velocity(force, role),
+                duration=0.05,
+                layer="snare",
+                role=role,
+                emphasis=self._emphasis(role),
+                openness=1.0 - force.density * 0.2,
+                expected_weight=exp,
+                should_resolve=False,
+            ))
 
         return events
 
@@ -245,34 +245,29 @@ class BankGenerator:
         self,
         force: ForceState,
         abs_bar: int,
-        hat_probs: list[float],
+        fired_slots: set[int],
         hat_exp: list[float],
     ) -> list[MIDIEvent]:
         events: list[MIDIEvent] = []
 
-        # Hat density is slightly suppressed relative to overall density
-        density_scale = 0.35 + force.density * 0.5
-
-        for slot in range(16):
-            if self._should_fire(hat_probs[slot], density_scale):
-                beat = slot // 4 + 1
-                tick = (slot % 4) * SIXTEENTH
-                exp = hat_exp[slot]
-                # Open hat on "and" positions (slot%4 == 2)
-                note = OPEN_HAT_NOTE if slot % 4 == 2 else CLOSED_HAT_NOTE
-                role = "anchor" if exp >= 0.5 else "ghost"
-                events.append(MIDIEvent(
-                    time=f"{abs_bar}.{beat}.{tick}",
-                    note=note,
-                    velocity=self._hat_velocity(force, role),
-                    duration=0.03 if note == CLOSED_HAT_NOTE else 0.06,
-                    layer="hat",
-                    role=role,
-                    emphasis=self._emphasis(role),
-                    openness=1.0,
-                    expected_weight=exp,
-                    should_resolve=False,
-                ))
+        for slot in sorted(fired_slots):
+            beat = slot // 4 + 1
+            tick = (slot % 4) * SIXTEENTH
+            exp = hat_exp[slot]
+            note = OPEN_HAT_NOTE if slot % 4 == 2 else CLOSED_HAT_NOTE
+            role = "anchor" if exp >= 0.5 else "ghost"
+            events.append(MIDIEvent(
+                time=f"{abs_bar}.{beat}.{tick}",
+                note=note,
+                velocity=self._hat_velocity(force, role),
+                duration=0.03 if note == CLOSED_HAT_NOTE else 0.06,
+                layer="hat",
+                role=role,
+                emphasis=self._emphasis(role),
+                openness=1.0,
+                expected_weight=exp,
+                should_resolve=False,
+            ))
 
         return events
 

@@ -67,9 +67,10 @@ class TestArchetypeDrivenDensity:
         hits_4tf = len([e for e in _gen(four_otf, pos=0.1, seed=1).all_events() if e.velocity > 0])
         assert hits_ts <= hits_4tf
 
-    def test_gabber_disruption_denser_than_stable_chaos(self):
-        # density > 0.65 at chaos selects GABBER as disruption archetype;
-        # high instability blends toward it → more events than low instability
+    def test_gabber_disruption_denser_kick_in_chaos(self):
+        # GABBER is the disruption archetype for high-density chaos; it makes the
+        # kick near-continuous while snare/hat become sparser (kick dominates).
+        # Test kick layer specifically across seeds for statistical robustness.
         base_force = ForceState(
             anticipation=0.3, release_pressure=0.2,
             instability=0.0, density=0.7, control_vs_chaos=0.5,
@@ -78,9 +79,14 @@ class TestArchetypeDrivenDensity:
             anticipation=0.3, release_pressure=0.2,
             instability=0.9, density=0.7, control_vs_chaos=0.5,
         )
-        hits_stable    = len([e for e in _gen(base_force,  pos=0.5, seed=3).all_events() if e.velocity > 0])
-        hits_disrupted = len([e for e in _gen(disrupted,   pos=0.5, seed=3).all_events() if e.velocity > 0])
-        assert hits_disrupted > hits_stable
+        def kick_hits(force, seeds):
+            return sum(
+                len([e for e in _gen(force, pos=0.5, seed=s).all_events()
+                     if e.velocity > 0 and e.layer == "kick"])
+                for s in seeds
+            )
+        seeds = range(20)
+        assert kick_hits(disrupted, seeds) > kick_hits(base_force, seeds)
 
 
 class TestRoleAssignment:
