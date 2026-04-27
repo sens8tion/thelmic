@@ -1,17 +1,14 @@
-"""Stab generator — rhythmically locked punctuation events.
+"""Stab generator — mini catch motif system.
 
 Architectural contract
 ----------------------
-Generate musical intent as step indices first.
-Convert step indices to scheduled time only at the final output stage.
+Generate musical intent as a motif object first.
+Render that motif into timed events only at the output stage.
 
-  musical intent
-  → call events (from rhythm)
-  → valid step indices
-  → note events with exact bar.beat.tick timestamps
-  → scheduled MIDI
-
-Never: compute a time offset, then try to quantize later.
+  select motif
+  → apply variation (constrained)
+  → render call / response notes per bar
+  → convert steps to bar.beat.tick timestamps
 
 Grid definition
 ---------------
@@ -19,21 +16,30 @@ Grid definition
   TICKS_PER_STEP = 6        (24 PPQN / 4 = 6 ticks per 16th)
   valid steps: 0 .. 15
 
+Phrase structure
+----------------
+  2-bar call / response:
+    call bar  (bar_in_pair == 0): first note only — setup / anticipation
+    resp bar  (bar_in_pair == 1): full motif — answer
+
+  Variation every 4 bars (pair_idx // 2):
+    level 0 (bars  1–4): base motif
+    level 1 (bars  5–8): drop middle note
+    level 2 (bars  9–12): shift final step by +1
+    level 3 (bars 13–16): extend final duration
+
+  Every 8 bars (level 3 → wraps back to 0 on the next bank).
+
 Debug test mode
 ---------------
-Set STAB_TEST_PATTERN to a list of step indices to bypass normal generation
-and emit stabs at exactly those steps every bar. Use to verify grid alignment
-before tuning musical behaviour.
-
-  STAB_TEST_PATTERN = [4, 10, 14]   # or [3, 7, 11, 15]
-
-Set back to None to return to musical generation.
+Set STAB_TEST_PATTERN to a list of step indices to emit a fixed pattern
+for grid verification. Set to None to restore musical generation.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 from thelmic.bank_generator import MIDIEvent
@@ -46,27 +52,23 @@ from thelmic.rhythm import conformance_for_landscape
 
 TICKS_PER_BAR  = 96
 TICKS_PER_BEAT = 24
-TICKS_PER_STEP = 6     # 1 sixteenth note
-STEPS_PER_BAR  = 16    # valid step indices: 0 .. 15
+TICKS_PER_STEP = 6
+STEPS_PER_BAR  = 16
+
+# Step duration in seconds at 174 BPM (approximate; bar timing is absolute)
+_STEP_SECONDS = 60.0 / (174.0 * TICKS_PER_BEAT / TICKS_PER_STEP)   # ≈ 0.086 s
 
 # Musical grid masks
-OFFBEAT_STEPS   = frozenset([2, 6, 10, 14])   # "e" and "ah" of each beat
-BEAT_STEPS      = frozenset([0, 4, 8, 12])    # strong beat positions (avoid)
-LATE_PHRASE     = frozenset([11, 14, 15])      # tension / late-phrase feel
+OFFBEAT_STEPS = frozenset([2, 6, 10, 14])
+BEAT_STEPS    = frozenset([0, 4, 8, 12])
+LATE_PHRASE   = frozenset([11, 14, 15])
 
-# Note
 MID_NOTE = 60
 
 # ---------------------------------------------------------------------------
 # Debug test mode
 # ---------------------------------------------------------------------------
 
-# Set to a list of step indices to override normal generation with a fixed
-# pattern. Every bar that has any call events will fire stabs at exactly these
-# steps. Set to None to restore musical generation.
-#
-#   STAB_TEST_PATTERN = [4, 10, 14]
-#   STAB_TEST_PATTERN = [3, 7, 11, 15]
 STAB_TEST_PATTERN: Optional[list[int]] = None
 
 # ---------------------------------------------------------------------------
@@ -80,23 +82,18 @@ def _log_stab_event(event: MIDIEvent, bar: int, step: int) -> None:
     if not _log.isEnabledFor(logging.DEBUG):
         return
     abs_tick = (bar - 1) * TICKS_PER_BAR + step * TICKS_PER_STEP
-    # Duration as step count (always 1 step for now — pitch/duration tuning later)
     _log.debug(
-        "bar=%d\tstep=%d\tabs_tick=%d\tnote=%d\tvelocity=%d\tduration_steps=1",
+        "bar=%d\tstep=%d\tabs_tick=%d\tnote=%d\tvelocity=%d\tduration_steps=%d",
         bar, step, abs_tick, event.note, event.velocity,
+        max(1, round(event.duration / _STEP_SECONDS)),
     )
 
 
 # ---------------------------------------------------------------------------
-# Grid primitives — the only place time strings are constructed or parsed
+# Grid primitives
 # ---------------------------------------------------------------------------
 
 def _step_to_time(bar: int, step: int) -> str:
-    """Convert a (bar, step) pair to a bar.beat.tick string.
-
-    bar:  1-indexed bar number
-    step: 0-indexed step within the bar (0..STEPS_PER_BAR-1)
-    """
     assert 0 <= step < STEPS_PER_BAR, f"invalid step {step}"
     tick_in_bar = step * TICKS_PER_STEP
     beat = tick_in_bar // TICKS_PER_BEAT + 1
@@ -105,7 +102,6 @@ def _step_to_time(bar: int, step: int) -> str:
 
 
 def _time_to_bar_step(time_str: str) -> tuple[int, int]:
-    """Parse a time string to (bar, step).  Returns step=-1 if off-grid."""
     parts = time_str.split(".")
     bar  = int(parts[0])
     beat = int(parts[1])
@@ -113,8 +109,7 @@ def _time_to_bar_step(time_str: str) -> tuple[int, int]:
     abs_tick = (bar - 1) * TICKS_PER_BAR + (beat - 1) * TICKS_PER_BEAT + tick
     if abs_tick % TICKS_PER_STEP != 0:
         return bar, -1
-    step = (abs_tick % TICKS_PER_BAR) // TICKS_PER_STEP
-    return bar, step
+    return bar, (abs_tick % TICKS_PER_BAR) // TICKS_PER_STEP
 
 
 def _is_grid_aligned(time_str: str) -> bool:
@@ -123,7 +118,170 @@ def _is_grid_aligned(time_str: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Call events — identify rhythmic anchor points that invite a stab response
+# Motif data model
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StabMotif:
+    """A short rhythmic and melodic motif to be rendered into one bar.
+
+    All fields are parallel lists of the same length.
+
+    steps:      step indices within the bar (0..15)
+    intervals:  semitone offset from root note
+    durations:  note length in steps (1 = 1/16th)
+    velocities: MIDI velocities (0–127)
+    """
+    steps:      tuple[int, ...]
+    intervals:  tuple[int, ...]
+    durations:  tuple[int, ...]
+    velocities: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        n = len(self.steps)
+        assert n >= 1
+        assert len(self.intervals)  == n
+        assert len(self.durations)  == n
+        assert len(self.velocities) == n
+        assert all(0 <= s < STEPS_PER_BAR for s in self.steps), f"out-of-range steps: {self.steps}"
+        assert self.steps == tuple(sorted(self.steps)), "steps must be sorted ascending"
+
+    def __len__(self) -> int:
+        return len(self.steps)
+
+    def first_note_only(self) -> "StabMotif":
+        """Return a single-note version using only the first note."""
+        return StabMotif(
+            steps=(self.steps[0],),
+            intervals=(self.intervals[0],),
+            durations=(self.durations[0],),
+            velocities=(int(self.velocities[0] * 0.75),),   # lighter on the call
+        )
+
+    def drop_middle(self) -> "StabMotif":
+        """Drop the middle note (variation level 1)."""
+        if len(self) < 3:
+            return self
+        idx = [0, len(self) - 1]
+        return StabMotif(
+            steps=tuple(self.steps[i] for i in idx),
+            intervals=tuple(self.intervals[i] for i in idx),
+            durations=(self.durations[0], self.durations[-1] + 1),
+            velocities=tuple(self.velocities[i] for i in idx),
+        )
+
+    def shift_final_step(self, delta: int = 1) -> "StabMotif":
+        """Shift the final step by delta, clamped to 0..15 (variation level 2)."""
+        new_last = max(0, min(STEPS_PER_BAR - 1, self.steps[-1] + delta))
+        # Avoid landing on a beat step
+        if new_last in BEAT_STEPS:
+            new_last = max(0, min(STEPS_PER_BAR - 1, new_last + 1))
+        new_steps = self.steps[:-1] + (new_last,)
+        if not (new_steps == tuple(sorted(new_steps))):
+            return self   # shift would invert order — skip
+        return StabMotif(
+            steps=new_steps,
+            intervals=self.intervals,
+            durations=self.durations,
+            velocities=self.velocities,
+        )
+
+    def extend_final_duration(self) -> "StabMotif":
+        """Extend the final note duration by 1 step (variation level 3)."""
+        new_dur = self.durations[:-1] + (min(self.durations[-1] + 1, 4),)
+        return StabMotif(
+            steps=self.steps,
+            intervals=self.intervals,
+            durations=new_dur,
+            velocities=self.velocities,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Built-in motifs
+# ---------------------------------------------------------------------------
+
+LATE_ANSWER = StabMotif(
+    steps=(10, 13, 14),
+    intervals=(0, 3, 5),
+    durations=(1, 1, 2),
+    velocities=(90, 78, 105),
+)
+
+PICKUP_CATCH = StabMotif(
+    steps=(11, 14, 15),
+    intervals=(0, 2, 0),
+    durations=(1, 1, 1),
+    velocities=(85, 75, 95),
+)
+
+SYNCOPATED_HOOK = StabMotif(
+    steps=(6, 10, 13),
+    intervals=(0, 5, 3),
+    durations=(1, 1, 2),
+    velocities=(88, 82, 100),
+)
+
+_MOTIFS = [LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK]
+
+
+# ---------------------------------------------------------------------------
+# Motif selection and variation
+# ---------------------------------------------------------------------------
+
+def _select_motif(landscape_position: float, bank_idx: int) -> StabMotif:
+    """Pick a motif deterministically from landscape position and bank index."""
+    idx = (bank_idx + int(landscape_position * 10)) % len(_MOTIFS)
+    return _MOTIFS[idx]
+
+
+def _varied_motif(base: StabMotif, abs_bar: int) -> StabMotif:
+    """Apply deterministic variation based on bar position.
+
+    Level escalates every 4 bars:
+      bars  1–4:  base
+      bars  5–8:  drop middle note
+      bars  9–12: shift final step +1
+      bars 13–16: extend final duration
+    """
+    level = ((abs_bar - 1) // 4) % 4
+    if level == 0:
+        return base
+    if level == 1:
+        return base.drop_middle()
+    if level == 2:
+        return base.shift_final_step(+1)
+    return base.extend_final_duration()
+
+
+# ---------------------------------------------------------------------------
+# Landscape-based firing rules
+# ---------------------------------------------------------------------------
+
+def _should_fire_in_bar(
+    abs_bar: int,
+    bar_in_pair: int,   # 0 = call bar, 1 = response bar
+    landscape_position: float,
+) -> bool:
+    """Decide whether the motif fires at all in this bar."""
+    if landscape_position <= 0.33:
+        # Oak: sparse — response bars only, every 2 bars (even pairs)
+        return bar_in_pair == 1
+    if landscape_position >= 0.67:
+        # Nott: very sparse — only phrase-boundary response bars (bar 4, 8, 12, 16)
+        return bar_in_pair == 1 and abs_bar % 4 == 0
+    # Chaos: both call and response bars
+    return True
+
+
+def _velocity_scale(behaviour: BehaviourField, bar_in_pair: int) -> float:
+    """Scale velocity by energy and call/response role."""
+    base = max(0.5, behaviour.energy_level)
+    return base * (0.75 if bar_in_pair == 0 else 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Call event collection (kept for compatibility / bar detection)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -142,8 +300,7 @@ def collect_call_events(events: list[MIDIEvent]) -> list[CallEvent]:
             continue
         bar, step = _time_to_bar_step(event.time)
         if step < 0:
-            continue  # off-grid source — skip
-
+            continue
         was_withheld = "anchor_withholding" in event.deformation
         is_anchor    = event.role in {"anchor", "impact"}
         is_strong    = is_anchor and event.expected_weight >= 0.7 and step % 4 == 0
@@ -164,114 +321,77 @@ def collect_call_events(events: list[MIDIEvent]) -> list[CallEvent]:
             ))
 
         if bar % 4 == 0 and bar not in seen_phrase_bars:
-            # Phrase boundary call — step 14 (late, high-tension)
             calls.append(CallEvent(
                 time=_step_to_time(bar, 14),
                 source_role="phrase_boundary",
                 strength=0.45,
-                was_withheld=False,
             ))
             seen_phrase_bars.add(bar)
     return calls
 
 
 # ---------------------------------------------------------------------------
-# Step selection — step indices only, no time arithmetic
+# Motif rendering
 # ---------------------------------------------------------------------------
 
-def _gate_value(bar: int, step: int, salt: int = 0) -> float:
-    """Deterministic pseudo-random value in [0, 1) from bar/step/salt."""
-    return ((bar * 41 + step * 19 + salt * 31) % 100) / 100.0
-
-
-def _candidate_steps(
-    call_step: int,
-    bar: int,
-    occupied: set[int],
-    landscape_position: float,
-) -> list[int]:
-    """Return valid stab step indices for a response to a call at call_step.
-
-    Rules:
-    - Must be an offbeat step (not on a strong beat)
-    - Must come after the call (leave at least 1 step gap)
-    - Must not be occupied by an existing stab or avoided anchor
-    - Landscape colours which offbeats are preferred
-    """
-    # Window: respond within 4 steps of the call, wrapping into the next bar
-    # is handled at the call site by using bar+1.
-    candidates = [
-        s for s in sorted(OFFBEAT_STEPS)
-        if s > call_step                   # after the call
-        and s not in occupied              # not already taken
-        and s not in BEAT_STEPS            # not on a strong beat
-    ]
-
-    # Nott: prefer late-phrase steps
-    if landscape_position >= 0.67:
-        late = [s for s in candidates if s in LATE_PHRASE]
-        if late:
-            return late
-
-    return candidates
-
-
-def _select_step(candidates: list[int], bar: int, call_step: int, strength: float) -> int:
-    """Deterministically pick one step from candidates."""
-    h = int(_gate_value(bar, call_step, salt=int(strength * 10))) * len(candidates)
-    return candidates[h % len(candidates)]
-
-
-# ---------------------------------------------------------------------------
-# Velocity / note helpers
-# ---------------------------------------------------------------------------
-
-def _clamp_velocity(v: float) -> int:
-    return max(1, min(127, int(round(v))))
-
-
-def _stab_velocity(behaviour: BehaviourField, source_velocity: int) -> int:
-    ghost  = min(behaviour.ghost_velocity, max(0.0, behaviour.anchor_velocity - 0.1))
-    anchor = max(behaviour.anchor_velocity, ghost + 0.1)
-    scale  = max(0.0, min(anchor - 0.05, max(ghost + 0.05, behaviour.energy_level * 0.8), 1.0))
-    return _clamp_velocity(source_velocity * scale)
-
-
-def _should_emit(
-    call: CallEvent,
-    call_step: int,
-    bar: int,
+def _make_stab_event(
+    source: Optional[MIDIEvent],
+    time_str: str,
+    note: int,
+    velocity: int,
+    duration_steps: int,
     behaviour: BehaviourField,
-    landscape_position: float,
-    stabs_in_bar: int,
-) -> bool:
-    """Deterministic gate: should this call produce a stab?"""
-    conformance = conformance_for_landscape(landscape_position)
+) -> MIDIEvent:
+    duration_s = duration_steps * _STEP_SECONDS * 0.9   # slight gap to next note
+    src_deform = source.deformation if source else {}
+    base = source if source else MIDIEvent(
+        time="1.1.0", note=note, velocity=velocity, duration=duration_s,
+        layer="stab", role="stab", emphasis=0.7, openness=0.5,
+        expected_weight=0.0, should_resolve=False,
+    )
+    return replace(
+        base,
+        time=time_str,
+        note=note,
+        velocity=max(1, min(127, velocity)),
+        duration=duration_s,
+        layer="stab",
+        role="stab",
+        emphasis=max(0.45, behaviour.energy_level * 0.8),
+        openness=0.5,
+        expected_weight=0.0,
+        should_resolve=False,
+        active=True,
+        deformation={**src_deform, "stab": behaviour.energy_level},
+    )
 
-    # Oak: sparse — only odd bars, only snare anchors, at most 1 per bar
-    if landscape_position <= 0.33:
-        return (
-            call.source_role == "snare_anchor"
-            and bar % 2 == 1
-            and stabs_in_bar == 0
-        )
 
-    # Nott: phrase-locked — only on phrase boundaries or withheld anchors
-    if landscape_position >= 0.67:
-        return (
-            (call.was_withheld or call.source_role == "phrase_boundary")
-            and bar % 4 == 0
-            and stabs_in_bar == 0
-        )
+def _render_motif_in_bar(
+    motif: StabMotif,
+    abs_bar: int,
+    bar_in_pair: int,
+    root_note: int,
+    behaviour: BehaviourField,
+    source: Optional[MIDIEvent],
+) -> list[MIDIEvent]:
+    """Render a motif into MIDIEvents for one bar.
 
-    # Chaos: probability gate
-    probability = call.strength * behaviour.energy_level * (1.0 - conformance)
-    if call.was_withheld:
-        probability += 0.35
-    if stabs_in_bar >= 1:
-        probability *= 0.3
-    probability = max(0.0, min(0.85, probability))
-    return _gate_value(bar, call_step, salt=2) < probability
+    call bar (bar_in_pair=0): first note only — anticipation
+    resp bar (bar_in_pair=1): full motif — answer
+    """
+    render_motif = motif.first_note_only() if bar_in_pair == 0 else motif
+    vel_scale = _velocity_scale(behaviour, bar_in_pair)
+    events = []
+    for i in range(len(render_motif)):
+        step     = render_motif.steps[i]
+        note     = max(0, min(127, root_note + render_motif.intervals[i]))
+        velocity = max(1, min(127, int(render_motif.velocities[i] * vel_scale)))
+        duration = render_motif.durations[i]
+        time_str = _step_to_time(abs_bar, step)
+        ev = _make_stab_event(source, time_str, note, velocity, duration, behaviour)
+        events.append(ev)
+        _log_stab_event(ev, abs_bar, step)
+    return events
 
 
 # ---------------------------------------------------------------------------
@@ -285,95 +405,59 @@ def generate_stabs_from_calls(
     landscape_position: float = 0.0,
     debug: dict | None = None,
 ) -> list[MIDIEvent]:
-    """Generate stab events from a list of calls.
+    """Generate stab mini-catch motif across all bars in the bank.
 
-    Step-index-first flow:
-      call → (bar, call_step) → candidate steps → selected step → time string
+    The motif is selected once per bank, varied every 4 bars, and rendered
+    as call (first note) / response (full motif) pairs every 2 bars.
     """
     if STAB_TEST_PATTERN is not None:
         return _generate_test_pattern(events, behaviour, landscape_position)
 
-    counters: dict = {
-        "call_candidates": len(calls),
-        "stabs_emitted": 0,
-        "stabs_suppressed_by_no_candidates": 0,
-        "stabs_suppressed_by_probability": 0,
-        "stabs_suppressed_by_density": 0,
-        "stabs_off_grid_rejected": 0,
-    }
+    if not events:
+        if debug is not None:
+            debug.update({"stabs_emitted": 0})
+        return []
+
+    # Determine which bars are present in the bank
+    bars_with_events: set[int] = set()
+    for e in events:
+        bar, _ = _time_to_bar_step(e.time)
+        bars_with_events.add(bar)
+
+    if not bars_with_events:
+        return []
+
+    # Select motif for this bank (deterministic from landscape + bar context)
+    min_bar = min(bars_with_events)
+    bank_idx = (min_bar - 1) // 16   # approximate bank index from bar numbers
+    root = MID_NOTE - 12 if landscape_position >= 0.67 else MID_NOTE
+    base_motif = _select_motif(landscape_position, bank_idx)
+
+    # Source event for attribute copying (any event will do)
+    source = next(
+        (e for e in events if e.layer in {"kick", "snare"}),
+        events[0] if events else None,
+    )
 
     stab_events: list[MIDIEvent] = []
-    stabs_per_bar: dict[int, int] = {}
-    occupied_per_bar: dict[int, set[int]] = {}
-    source_by_time = {e.time: e for e in events}
+    emitted = 0
 
-    for call in calls:
-        bar, call_step = _time_to_bar_step(call.time)
-        if call_step < 0:
-            counters["stabs_off_grid_rejected"] += 1
+    for abs_bar in sorted(bars_with_events):
+        pair_idx   = (abs_bar - 1) // 2   # which 2-bar pair: 0, 1, 2, ...
+        bar_in_pair = (abs_bar - 1) % 2   # 0 = call, 1 = response
+
+        if not _should_fire_in_bar(abs_bar, bar_in_pair, landscape_position):
             continue
 
-        stabs_in_bar = stabs_per_bar.get(bar, 0)
-        if stabs_in_bar >= 1:
-            counters["stabs_suppressed_by_density"] += 1
-
-        if not _should_emit(call, call_step, bar, behaviour, landscape_position, stabs_in_bar):
-            counters["stabs_suppressed_by_probability"] += 1
-            continue
-
-        occupied = occupied_per_bar.setdefault(bar, set())
-        candidates = _candidate_steps(call_step, bar, occupied, landscape_position)
-
-        if not candidates:
-            # Try early offbeats in the next bar
-            next_bar_occupied = occupied_per_bar.get(bar + 1, set())
-            next_candidates = [
-                s for s in [2, 6] if s not in next_bar_occupied
-            ]
-            if next_candidates:
-                selected_step = _select_step(next_candidates, bar + 1, call_step, call.strength)
-                stab_bar = bar + 1
-            else:
-                counters["stabs_suppressed_by_no_candidates"] += 1
-                continue
-        else:
-            selected_step = _select_step(candidates, bar, call_step, call.strength)
-            stab_bar = bar
-
-        stab_time = _step_to_time(stab_bar, selected_step)
-
-        source = source_by_time.get(call.time)
-        src_velocity = source.velocity if source and source.velocity > 0 else 80
-        src_deformation = source.deformation if source else {}
-        src_emphasis    = source.emphasis if source else call.strength
-        src_weight      = source.expected_weight if source else 0.0
-
-        note = MID_NOTE - 12 if landscape_position >= 0.67 else MID_NOTE
-
-        stab = replace(
-            source or events[0],
-            time=stab_time,
-            note=note,
-            velocity=_stab_velocity(behaviour, src_velocity),
-            duration=0.08,
-            layer="stab",
-            role="stab",
-            emphasis=max(0.45, src_emphasis * 0.7),
-            openness=0.5,
-            expected_weight=src_weight,
-            should_resolve=False,
-            active=True,
-            deformation={**src_deformation, "stab": behaviour.energy_level},
+        motif = _varied_motif(base_motif, abs_bar)
+        bar_events = _render_motif_in_bar(
+            motif, abs_bar, bar_in_pair, root, behaviour, source,
         )
-
-        stab_events.append(stab)
-        occupied_per_bar.setdefault(stab_bar, set()).add(selected_step)
-        stabs_per_bar[stab_bar] = stabs_per_bar.get(stab_bar, 0) + 1
-        counters["stabs_emitted"] += 1
-        _log_stab_event(stab, stab_bar, selected_step)
+        stab_events.extend(bar_events)
+        emitted += len(bar_events)
 
     if debug is not None:
-        debug.update(counters)
+        debug.update({"stabs_emitted": emitted, "motif": base_motif.steps})
     return stab_events
 
 
@@ -382,45 +466,24 @@ def _generate_test_pattern(
     behaviour: BehaviourField,
     landscape_position: float,
 ) -> list[MIDIEvent]:
-    """Emit stabs at STAB_TEST_PATTERN steps in every bar that has events.
-
-    Used to verify grid alignment before enabling musical generation.
-    """
+    """Emit stabs at STAB_TEST_PATTERN steps in every bar that has events."""
     if not events or STAB_TEST_PATTERN is None:
         return []
-
-    bars_with_events: set[int] = set()
+    bars: set[int] = set()
     for e in events:
         bar, _ = _time_to_bar_step(e.time)
-        bars_with_events.add(bar)
-
+        bars.add(bar)
     note = MID_NOTE - 12 if landscape_position >= 0.67 else MID_NOTE
-    stab_events: list[MIDIEvent] = []
-
-    for bar in sorted(bars_with_events):
+    out: list[MIDIEvent] = []
+    for bar in sorted(bars):
         for step in STAB_TEST_PATTERN:
             if not (0 <= step < STEPS_PER_BAR):
                 continue
-            stab_time = _step_to_time(bar, step)
-            stab = replace(
-                events[0],
-                time=stab_time,
-                note=note,
-                velocity=80,
-                duration=0.08,
-                layer="stab",
-                role="stab",
-                emphasis=0.7,
-                openness=0.5,
-                expected_weight=0.0,
-                should_resolve=False,
-                active=True,
-                deformation={"stab": 1.0},
-            )
-            stab_events.append(stab)
-            _log_stab_event(stab, bar, step)
-
-    return stab_events
+            time_str = _step_to_time(bar, step)
+            ev = _make_stab_event(events[0], time_str, note, 80, 1, behaviour)
+            out.append(ev)
+            _log_stab_event(ev, bar, step)
+    return out
 
 
 def generate_stabs(
@@ -429,6 +492,4 @@ def generate_stabs(
     landscape_position: float = 0.0,
 ) -> list[MIDIEvent]:
     calls = collect_call_events(events)
-    if not calls and STAB_TEST_PATTERN is None:
-        return []
     return generate_stabs_from_calls(calls, events, behaviour, landscape_position)

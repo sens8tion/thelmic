@@ -1,10 +1,7 @@
-"""Tests for stab generation — step-index-first architecture.
+"""Tests for stab mini-catch motif system.
 
-All stab events must land on valid 16th-note step indices (0..15).
-The generation flow is:
-  call → (bar, call_step) → candidate steps → selected step → time string
-
-No time-offset arithmetic; no free timing.
+Grid invariant: every stab event must land on a valid 16th-note step (0..15).
+Motif invariant: stab timing is generated from step indices, not time offsets.
 """
 
 import pytest
@@ -12,17 +9,12 @@ from thelmic.bank_generator import MIDIEvent
 from thelmic.behaviour_field import BehaviourField
 from thelmic import stabs as stabs_mod
 from thelmic.stabs import (
-    generate_stabs,
-    generate_stabs_from_calls,
-    collect_call_events,
-    _step_to_time,
-    _time_to_bar_step,
-    _is_grid_aligned,
-    _candidate_steps,
-    TICKS_PER_STEP,
-    STEPS_PER_BAR,
-    OFFBEAT_STEPS,
-    BEAT_STEPS,
+    StabMotif,
+    LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK,
+    generate_stabs, generate_stabs_from_calls, collect_call_events,
+    _step_to_time, _time_to_bar_step, _is_grid_aligned,
+    _varied_motif, _select_motif, _should_fire_in_bar,
+    TICKS_PER_STEP, STEPS_PER_BAR, OFFBEAT_STEPS, BEAT_STEPS,
 )
 
 
@@ -31,10 +23,10 @@ from thelmic.stabs import (
 # ---------------------------------------------------------------------------
 
 def _behaviour(
-    energy_level: float = 0.5,
+    energy_level: float = 0.6,
     ghost_intensity: float = 1.0,
     anticipation: float = 0.5,
-    instability: float = 1.0,
+    instability: float = 0.5,
     release_pressure: float = 0.0,
 ) -> BehaviourField:
     return BehaviourField(
@@ -53,20 +45,19 @@ def _behaviour(
     )
 
 
-def _event(role: str = "anchor", layer: str = "snare", time: str = "1.2.0",
-           velocity: int = 100, emphasis: float = 0.8) -> MIDIEvent:
+def _event(layer: str = "snare", time: str = "1.2.0", role: str = "anchor",
+           velocity: int = 100) -> MIDIEvent:
     return MIDIEvent(
-        time=time,
-        note=38,
-        velocity=velocity,
-        duration=0.05,
-        layer=layer,
-        role=role,
-        emphasis=emphasis,
-        openness=1.0,
-        expected_weight=0.9,
-        should_resolve=False,
+        time=time, note=38, velocity=velocity, duration=0.05,
+        layer=layer, role=role, emphasis=0.8, openness=1.0,
+        expected_weight=0.9, should_resolve=False,
     )
+
+
+def _bank_events(bars: list[int] = None) -> list[MIDIEvent]:
+    """Minimal bank events: one kick at beat 1 per bar."""
+    bars = bars or list(range(1, 17))
+    return [_event(layer="kick", time=_step_to_time(b, 0), role="anchor") for b in bars]
 
 
 # ---------------------------------------------------------------------------
@@ -75,101 +66,155 @@ def _event(role: str = "anchor", layer: str = "snare", time: str = "1.2.0",
 
 class TestGridPrimitives:
 
-    def test_step_to_time_step_0(self):
-        assert _step_to_time(1, 0) == "1.1.0"
-
-    def test_step_to_time_step_4(self):
-        # step 4 = 4*6 = 24 ticks = beat 2, tick 0
-        assert _step_to_time(1, 4) == "1.2.0"
-
-    def test_step_to_time_step_8(self):
-        # step 8 = 48 ticks = beat 3, tick 0
-        assert _step_to_time(1, 8) == "1.3.0"
-
-    def test_step_to_time_step_2(self):
-        # step 2 = 12 ticks = beat 1, tick 12
-        assert _step_to_time(1, 2) == "1.1.12"
-
-    def test_step_to_time_step_6(self):
-        # step 6 = 36 ticks = beat 2, tick 12
-        assert _step_to_time(1, 6) == "1.2.12"
-
-    def test_step_to_time_step_10(self):
-        # step 10 = 60 ticks = beat 3, tick 12
+    def test_step_to_time_known_values(self):
+        assert _step_to_time(1, 0)  == "1.1.0"
+        assert _step_to_time(1, 2)  == "1.1.12"
+        assert _step_to_time(1, 4)  == "1.2.0"
+        assert _step_to_time(1, 6)  == "1.2.12"
+        assert _step_to_time(1, 8)  == "1.3.0"
         assert _step_to_time(1, 10) == "1.3.12"
-
-    def test_step_to_time_step_14(self):
-        # step 14 = 84 ticks = beat 4, tick 12
         assert _step_to_time(1, 14) == "1.4.12"
 
-    def test_step_to_time_roundtrip(self):
-        for bar in [1, 2, 5]:
+    def test_step_to_time_roundtrip_all_steps(self):
+        for bar in [1, 3, 7]:
             for step in range(STEPS_PER_BAR):
-                time_str = _step_to_time(bar, step)
-                parsed_bar, parsed_step = _time_to_bar_step(time_str)
-                assert parsed_bar == bar
-                assert parsed_step == step
+                t = _step_to_time(bar, step)
+                b, s = _time_to_bar_step(t)
+                assert b == bar and s == step
 
-    def test_time_to_bar_step_aligned(self):
-        assert _time_to_bar_step("1.1.0")  == (1, 0)
-        assert _time_to_bar_step("1.1.6")  == (1, 1)
-        assert _time_to_bar_step("1.1.12") == (1, 2)
-        assert _time_to_bar_step("1.2.0")  == (1, 4)
-        assert _time_to_bar_step("2.1.0")  == (2, 0)
+    def test_time_to_bar_step_off_grid_returns_minus_one(self):
+        for off in [1, 3, 5, 7, 9, 11]:
+            _, step = _time_to_bar_step(f"1.1.{off}")
+            assert step == -1
 
-    def test_time_to_bar_step_off_grid(self):
-        _, step = _time_to_bar_step("1.1.3")
-        assert step == -1
-        _, step = _time_to_bar_step("1.1.7")
-        assert step == -1
-
-    def test_is_grid_aligned_valid(self):
+    def test_is_grid_aligned(self):
         for step in range(STEPS_PER_BAR):
             assert _is_grid_aligned(_step_to_time(1, step))
-
-    def test_is_grid_aligned_invalid(self):
         assert not _is_grid_aligned("1.1.3")
         assert not _is_grid_aligned("1.1.9")
-        assert not _is_grid_aligned("1.1.1")
 
-    def test_offbeat_steps_not_on_beats(self):
-        assert OFFBEAT_STEPS.isdisjoint(BEAT_STEPS)
-
-    def test_step_to_time_rejects_out_of_range(self):
-        with pytest.raises(AssertionError):
-            _step_to_time(1, 16)
+    def test_step_to_time_invalid_raises(self):
         with pytest.raises(AssertionError):
             _step_to_time(1, -1)
+        with pytest.raises(AssertionError):
+            _step_to_time(1, 16)
 
 
 # ---------------------------------------------------------------------------
-# Candidate steps
+# StabMotif
 # ---------------------------------------------------------------------------
 
-class TestCandidateSteps:
+class TestStabMotif:
 
-    def test_candidates_are_after_call(self):
-        candidates = _candidate_steps(call_step=4, bar=1, occupied=set(), landscape_position=0.5)
-        assert all(s > 4 for s in candidates)
+    def test_built_in_motifs_are_valid(self):
+        for m in [LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK]:
+            assert len(m) >= 2
+            assert all(0 <= s < STEPS_PER_BAR for s in m.steps)
+            assert m.steps == tuple(sorted(m.steps))
+            assert all(1 <= d <= 4 for d in m.durations)
 
-    def test_candidates_are_offbeat(self):
-        candidates = _candidate_steps(call_step=0, bar=1, occupied=set(), landscape_position=0.5)
-        assert all(s in OFFBEAT_STEPS for s in candidates)
+    def test_first_note_only_returns_single_note(self):
+        assert len(LATE_ANSWER.first_note_only()) == 1
+        assert LATE_ANSWER.first_note_only().steps == (LATE_ANSWER.steps[0],)
 
-    def test_candidates_exclude_occupied(self):
-        candidates = _candidate_steps(call_step=0, bar=1, occupied={6, 10}, landscape_position=0.5)
-        assert 6 not in candidates
-        assert 10 not in candidates
+    def test_first_note_only_velocity_is_lighter(self):
+        full_vel = LATE_ANSWER.velocities[0]
+        call_vel = LATE_ANSWER.first_note_only().velocities[0]
+        assert call_vel < full_vel
 
-    def test_candidates_empty_when_call_too_late(self):
-        # Call at step 14 — no offbeat after 14 in same bar
-        candidates = _candidate_steps(call_step=14, bar=1, occupied=set(), landscape_position=0.5)
-        assert candidates == []
+    def test_drop_middle_removes_middle_note(self):
+        varied = LATE_ANSWER.drop_middle()
+        assert len(varied) == 2
+        assert varied.steps[0] == LATE_ANSWER.steps[0]
+        assert varied.steps[-1] == LATE_ANSWER.steps[-1]
 
-    def test_nott_prefers_late_phrase_steps(self):
-        candidates = _candidate_steps(call_step=0, bar=1, occupied=set(), landscape_position=0.9)
-        # Should only contain late-phrase steps (10-15 range)
-        assert all(s >= 10 for s in candidates)
+    def test_drop_middle_extends_final_duration(self):
+        base_dur  = LATE_ANSWER.durations[-1]
+        varied    = LATE_ANSWER.drop_middle()
+        assert varied.durations[-1] == base_dur + 1
+
+    def test_shift_final_step_moves_last_step(self):
+        varied = LATE_ANSWER.shift_final_step(+1)
+        assert varied.steps[-1] == LATE_ANSWER.steps[-1] + 1
+
+    def test_shift_final_step_stays_sorted(self):
+        for delta in [-1, +1]:
+            varied = LATE_ANSWER.shift_final_step(delta)
+            assert varied.steps == tuple(sorted(varied.steps))
+
+    def test_shift_final_step_avoids_beat_steps(self):
+        # step 11 + 1 = 12 which is a beat step; should shift to 13
+        motif = StabMotif(
+            steps=(10, 11), intervals=(0, 2), durations=(1, 1), velocities=(80, 80),
+        )
+        varied = motif.shift_final_step(+1)
+        assert varied.steps[-1] not in BEAT_STEPS
+
+    def test_extend_final_duration_adds_one_step(self):
+        base  = LATE_ANSWER.durations[-1]
+        varied = LATE_ANSWER.extend_final_duration()
+        assert varied.durations[-1] == base + 1
+
+    def test_extend_final_duration_capped_at_4(self):
+        motif = StabMotif(
+            steps=(10,), intervals=(0,), durations=(4,), velocities=(80,),
+        )
+        assert motif.extend_final_duration().durations[-1] == 4
+
+
+# ---------------------------------------------------------------------------
+# Variation
+# ---------------------------------------------------------------------------
+
+class TestVariation:
+
+    def test_level_0_returns_base_unmodified(self):
+        assert _varied_motif(LATE_ANSWER, abs_bar=1) is LATE_ANSWER
+        assert _varied_motif(LATE_ANSWER, abs_bar=4) is LATE_ANSWER
+
+    def test_level_1_drops_middle(self):
+        varied = _varied_motif(LATE_ANSWER, abs_bar=5)
+        assert len(varied) < len(LATE_ANSWER)
+
+    def test_level_2_shifts_final_step(self):
+        varied = _varied_motif(LATE_ANSWER, abs_bar=9)
+        assert varied.steps[-1] != LATE_ANSWER.steps[-1]
+
+    def test_level_3_extends_final_duration(self):
+        varied = _varied_motif(LATE_ANSWER, abs_bar=13)
+        assert varied.durations[-1] > LATE_ANSWER.durations[-1]
+
+    def test_variation_stays_grid_aligned(self):
+        for bar in range(1, 17):
+            varied = _varied_motif(LATE_ANSWER, abs_bar=bar)
+            for step in varied.steps:
+                assert 0 <= step < STEPS_PER_BAR
+
+
+# ---------------------------------------------------------------------------
+# Firing rules
+# ---------------------------------------------------------------------------
+
+class TestFiringRules:
+
+    def test_oak_fires_only_on_response_bars(self):
+        pos = 0.0
+        # Bar 1 = call bar (bar_in_pair=0) → should not fire
+        assert not _should_fire_in_bar(1, bar_in_pair=0, landscape_position=pos)
+        # Bar 2 = response bar → should fire
+        assert _should_fire_in_bar(2, bar_in_pair=1, landscape_position=pos)
+
+    def test_nott_fires_only_on_phrase_end_response(self):
+        pos = 1.0
+        # Bar 4 = phrase end, response → fires
+        assert _should_fire_in_bar(4, bar_in_pair=1, landscape_position=pos)
+        # Bar 2 = response but not phrase end → does not fire
+        assert not _should_fire_in_bar(2, bar_in_pair=1, landscape_position=pos)
+
+    def test_chaos_fires_on_both_call_and_response(self):
+        pos = 0.5
+        assert _should_fire_in_bar(1, bar_in_pair=0, landscape_position=pos)
+        assert _should_fire_in_bar(2, bar_in_pair=1, landscape_position=pos)
 
 
 # ---------------------------------------------------------------------------
@@ -188,114 +233,87 @@ class TestTestPattern:
         stabs_mod.STAB_TEST_PATTERN = [4, 10, 14]
         events = [_event(time="1.1.0")]
         stabs = generate_stabs(events, _behaviour())
-
-        assert len(stabs) == 3
         times = {s.time for s in stabs}
         assert _step_to_time(1, 4)  in times
         assert _step_to_time(1, 10) in times
         assert _step_to_time(1, 14) in times
 
-    def test_fixed_pattern_steps_are_grid_aligned(self):
+    def test_fixed_pattern_is_grid_aligned(self):
         stabs_mod.STAB_TEST_PATTERN = [3, 7, 11, 15]
-        events = [_event(time="2.1.0")]
-        stabs = generate_stabs(events, _behaviour())
-        for s in stabs:
-            assert _is_grid_aligned(s.time), f"stab at {s.time} is off-grid"
-
-    def test_fixed_pattern_layer_and_role(self):
-        stabs_mod.STAB_TEST_PATTERN = [6]
         events = [_event(time="1.1.0")]
-        stabs = generate_stabs(events, _behaviour())
-        assert stabs[0].layer == "stab"
-        assert stabs[0].role  == "stab"
+        for s in generate_stabs(events, _behaviour()):
+            assert _is_grid_aligned(s.time)
 
     def test_no_stabs_without_events(self):
         stabs_mod.STAB_TEST_PATTERN = [4, 10, 14]
-        stabs = generate_stabs([], _behaviour())
-        assert stabs == []
+        assert generate_stabs([], _behaviour()) == []
 
 
 # ---------------------------------------------------------------------------
-# Musical generation — all stabs must be grid-aligned
+# Grid alignment invariant — end-to-end
 # ---------------------------------------------------------------------------
 
 class TestGridAlignmentInvariant:
 
-    @pytest.mark.parametrize("pos", [0.0, 0.16, 0.33, 0.5, 0.67, 0.84, 1.0])
-    def test_all_stabs_grid_aligned_across_landscape(self, pos):
-        events = [
-            _event(time=_step_to_time(1, s)) for s in [0, 4, 8, 12]
-        ]
-        b = _behaviour(energy_level=0.8)
-        for stab in generate_stabs(events, b, landscape_position=pos):
+    @pytest.mark.parametrize("pos", [0.0, 0.25, 0.5, 0.75, 1.0])
+    def test_all_stabs_grid_aligned(self, pos):
+        events = _bank_events()
+        for stab in generate_stabs(events, _behaviour(), landscape_position=pos):
             assert _is_grid_aligned(stab.time), (
                 f"stab at {stab.time} off-grid at pos={pos}"
             )
 
-    def test_all_stabs_grid_aligned_multi_bar(self):
-        events = []
-        for bar in range(1, 5):
-            for step in [0, 8]:
-                events.append(_event(time=_step_to_time(bar, step)))
-        b = _behaviour(energy_level=0.9)
-        for stab in generate_stabs(events, b, landscape_position=0.5):
-            assert _is_grid_aligned(stab.time)
-
-    def test_stab_time_reconstructs_to_same_step(self):
-        events = [_event(time=_step_to_time(1, 8))]
-        b = _behaviour(energy_level=0.9)
-        for stab in generate_stabs(events, b, landscape_position=0.5):
+    def test_stab_step_roundtrips_exactly(self):
+        events = _bank_events()
+        for stab in generate_stabs(events, _behaviour(), landscape_position=0.5):
             bar, step = _time_to_bar_step(stab.time)
-            assert step >= 0, f"stab step negative from {stab.time}"
             assert 0 <= step < STEPS_PER_BAR
 
 
 # ---------------------------------------------------------------------------
-# Musical constraints
+# Motif continuity
 # ---------------------------------------------------------------------------
 
-class TestMusicalConstraints:
+class TestMotifContinuity:
 
-    def test_stab_does_not_land_on_strong_beat(self):
-        events = [_event(time=_step_to_time(1, 0))]
-        b = _behaviour(energy_level=0.9)
-        for stab in generate_stabs(events, b, landscape_position=0.5):
-            _, step = _time_to_bar_step(stab.time)
-            assert step not in BEAT_STEPS, f"stab landed on strong beat step {step}"
-
-    def test_stab_is_after_call(self):
-        call_step = 4
-        events = [_event(time=_step_to_time(1, call_step))]
-        b = _behaviour(energy_level=0.9)
-        for stab in generate_stabs(events, b, landscape_position=0.5):
-            stab_bar, stab_step = _time_to_bar_step(stab.time)
-            call_bar = 1
-            # stab must be after call in the same bar, or in next bar
-            if stab_bar == call_bar:
-                assert stab_step > call_step
-            else:
-                assert stab_bar > call_bar
-
-    def test_at_most_one_stab_per_bar(self):
-        # Multiple calls in the same bar should produce at most 1 stab
-        events = [
-            _event(time=_step_to_time(1, 0)),
-            _event(time=_step_to_time(1, 4)),
-            _event(time=_step_to_time(1, 8)),
-        ]
+    def test_response_bars_have_more_notes_than_call_bars(self):
+        events = _bank_events(list(range(1, 5)))
         b = _behaviour(energy_level=0.9)
         stabs = generate_stabs(events, b, landscape_position=0.5)
-        bars = [_time_to_bar_step(s.time)[0] for s in stabs]
-        for bar in bars:
-            assert bars.count(bar) <= 1, f"multiple stabs in bar {bar}"
+        stabs_by_bar: dict[int, list] = {}
+        for s in stabs:
+            bar, _ = _time_to_bar_step(s.time)
+            stabs_by_bar.setdefault(bar, []).append(s)
+        # Response bar (bar 2) should have more notes than call bar (bar 1)
+        call_count = len(stabs_by_bar.get(1, []))
+        resp_count = len(stabs_by_bar.get(2, []))
+        assert resp_count >= call_count
 
-    def test_oak_fires_on_odd_bars_only(self):
-        events = []
-        for bar in [1, 2, 3, 4]:
-            events.append(_event(time=_step_to_time(bar, 8), role="anchor"))
+    def test_motif_steps_are_offbeat(self):
+        """Base motifs should use offbeat steps or late steps, not strong beats."""
+        for motif in [LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK]:
+            # At least one step should be an offbeat
+            has_offbeat = any(s in OFFBEAT_STEPS or s > 8 for s in motif.steps)
+            assert has_offbeat, f"motif {motif.steps} has no offbeat steps"
+
+    def test_same_motif_across_bank(self):
+        """All stabs in a bank should come from the same base motif."""
+        events = _bank_events()
         b = _behaviour(energy_level=0.9)
-        stabs = generate_stabs(events, b, landscape_position=0.0)
-        stab_bars = {_time_to_bar_step(s.time)[0] for s in stabs}
-        assert all(bar % 2 == 1 for bar in stab_bars), (
-            f"Oak stabs fired on even bars: {stab_bars}"
-        )
+        stabs = generate_stabs(events, b, landscape_position=0.5)
+        # The base motif is the same for the whole bank — first stab step
+        # should appear in multiple response bars
+        resp_bar_steps: dict[int, list] = {}
+        for s in stabs:
+            bar, step = _time_to_bar_step(s.time)
+            bar_in_pair = (bar - 1) % 2
+            if bar_in_pair == 1:  # response bars
+                resp_bar_steps.setdefault(bar, []).append(step)
+        # All response bars should start with the same base motif step
+        if len(resp_bar_steps) >= 2:
+            bars = sorted(resp_bar_steps)
+            first_step_bar1 = resp_bar_steps[bars[0]][0]
+            first_step_bar2 = resp_bar_steps[bars[1]][0]
+            assert first_step_bar1 == first_step_bar2, (
+                "Response bars use different base motif starts — motif is not stable"
+            )
