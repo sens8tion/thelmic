@@ -5,7 +5,10 @@ from dataclasses import replace
 from thelmic.bank_generator import MIDIEvent
 from thelmic.behaviour_field import BehaviourField
 from thelmic.rhythm import conformance_for_landscape
-from thelmic.call_response import CALL_WINDOW, RESPONSE_WINDOW_MIN
+from thelmic.call_response import (
+    CALL_WINDOW, RESPONSE_WINDOW_MIN,
+    response_velocity, response_duration_steps,
+)
 
 LOW_NOTE = 36
 OFFBEAT_TICKS = 12
@@ -206,25 +209,31 @@ def generate_bass_response_from_steps(
         return bass_events
 
     for bar, resp_steps in sorted(leader_steps_by_bar.items()):
-        for step in resp_steps:
+        n = len(resp_steps)
+        for i, step in enumerate(resp_steps):
             assert step >= RESPONSE_WINDOW_MIN, (
                 f"bass response step {step} violates HARD RULE (< {RESPONSE_WINDOW_MIN})"
             )
             time_str = _step_to_bass_time(bar, step)
-            velocity = _clamp_velocity(
-                source.velocity * behaviour.anchor_velocity * 0.85
-            )
+
+            # Response emphasis: escalate velocity, hold the final note.
+            # The bass response should feel heavier than the call — it's the landing.
+            base_vel = int(source.velocity * behaviour.anchor_velocity)
+            vel = response_velocity(i, n, base_vel)
+            dur_steps = response_duration_steps(i, n, base_steps=1)
+            duration_s = dur_steps * TICKS_PER_STEP * (60.0 / (174.0 * 24.0)) * 0.9
+
             ev = replace(
                 source,
                 time=time_str,
                 note=LOW_NOTE,
-                velocity=velocity,
-                duration=0.10,
+                velocity=_clamp_velocity(vel),
+                duration=duration_s,
                 layer="bass",
                 role="bass_response",
-                emphasis=0.65,
+                emphasis=0.85 if i == n - 1 else 0.65,
                 openness=0.0,
-                expected_weight=0.7,
+                expected_weight=0.8 if i == n - 1 else 0.7,
                 should_resolve=False,
                 active=True,
                 deformation={**source.deformation, "bass": behaviour.energy_level},

@@ -47,7 +47,7 @@ from thelmic.behaviour_field import BehaviourField
 from thelmic.call_response import (
     CALL_WINDOW, RESPONSE_WINDOW,
     RESPONSE_WINDOW_MIN, RESPONSE_WINDOW_MAX,
-    derive_response_steps,
+    derive_response_steps, response_velocity, response_duration_steps,
 )
 from thelmic.rhythm import conformance_for_landscape
 
@@ -784,18 +784,26 @@ def generate_stab_response_from_steps(
     except AssertionError:
         return []
 
+    n = len(resp_motif)
     events = []
-    for i in range(len(resp_motif)):
+    for i in range(n):
         step = resp_motif.steps[i]
         assert step >= RESPONSE_WINDOW_MIN, (
             f"stab response step {step} violates HARD RULE (< {RESPONSE_WINDOW_MIN})"
         )
-        note     = max(0, min(127, root + resp_motif.intervals[i]))
-        velocity = max(1, min(127, int(resp_motif.velocities[i]
-                                       * max(0.5, behaviour.energy_level) * 0.85)))
+        note = max(0, min(127, root + resp_motif.intervals[i]))
+
+        # Response emphasis: escalate toward the landing note.
+        # Base velocity from the motif, then apply approach→landing curve.
+        base_vel = max(1, int(resp_motif.velocities[i] * max(0.5, behaviour.energy_level)))
+        velocity = response_velocity(i, n, base_vel)
+
+        # Hold the final response note — creates arrival, not just a later tap.
+        dur_steps = response_duration_steps(i, n, resp_motif.durations[i])
+
         ev = _make_stab_event(
             source, _step_to_time(abs_bar, step),
-            note, velocity, resp_motif.durations[i], behaviour,
+            note, velocity, dur_steps, behaviour,
         )
         events.append(ev)
         _log_stab_event(ev, abs_bar, step)

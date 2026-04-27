@@ -63,6 +63,41 @@ def default_state() -> CallResponseState:
 
 
 # ---------------------------------------------------------------------------
+# Response emphasis helpers — shared by bass and stab response generators
+# ---------------------------------------------------------------------------
+
+def response_velocity(note_idx: int, total_notes: int, base_velocity: int) -> int:
+    """Escalate velocity through the response so the final note lands heaviest.
+
+    Approach (first note):   80% — lighter, coming in
+    Middle notes:            90% — building
+    Landing (final note):   110% — the arrival, loudest note in the pair
+
+    This creates a clear approach → landing shape rather than a flat sequence
+    of notes that happen to be later in the bar.
+    """
+    if total_notes <= 1:
+        return max(1, min(127, int(base_velocity * 1.05)))
+    scale = {0: 0.80}.get(note_idx, 0.90)
+    if note_idx == total_notes - 1:
+        scale = 1.10
+    return max(1, min(127, int(base_velocity * scale)))
+
+
+def response_duration_steps(note_idx: int, total_notes: int, base_steps: int) -> int:
+    """Hold the final response note longer — creates a sense of arrival.
+
+    All notes except the last: base_steps (1 step = 1/16th note)
+    Final note: base_steps + 1, minimum 2 steps (≥ 1/8th note)
+
+    The held final note distinguishes a landing from a passing note.
+    """
+    if note_idx == total_notes - 1:
+        return max(2, base_steps + 1)
+    return base_steps
+
+
+# ---------------------------------------------------------------------------
 # Deterministic gate helpers (no random() anywhere)
 # ---------------------------------------------------------------------------
 

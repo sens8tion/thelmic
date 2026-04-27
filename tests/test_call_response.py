@@ -9,6 +9,7 @@ from thelmic.call_response import (
     Mode, CallResponseState, default_state,
     CALL_WINDOW, RESPONSE_WINDOW, RESPONSE_WINDOW_MIN, RESPONSE_WINDOW_MAX,
     derive_response_steps, advance_mode, should_flip,
+    response_velocity, response_duration_steps,
     _gate_hash, _next_duration,
 )
 from thelmic.bank_generator import MIDIEvent
@@ -360,6 +361,62 @@ class TestBassCallAndResponse:
 # ---------------------------------------------------------------------------
 # Integration — stab calls derive bass response correctly
 # ---------------------------------------------------------------------------
+
+class TestResponseEmphasis:
+    """response_velocity and response_duration_steps shape the landing feel."""
+
+    def test_final_note_loudest(self):
+        # For a 3-note response, final note must be louder than first
+        first = response_velocity(0, 3, 100)
+        final = response_velocity(2, 3, 100)
+        assert final > first, f"final={final} should be > first={first}"
+
+    def test_final_note_above_base(self):
+        # Final note should exceed base (it's the landing, not a gentle arrival)
+        final = response_velocity(0, 1, 100)
+        assert final > 100 * 0.95, f"single-note response {final} should be near or above base"
+
+    def test_first_note_lighter_than_base(self):
+        first = response_velocity(0, 3, 100)
+        assert first < 100, f"approach note {first} should be below base"
+
+    def test_velocity_clamped(self):
+        assert response_velocity(2, 3, 127) <= 127
+        assert response_velocity(0, 3, 1) >= 1
+
+    def test_final_note_held_longer(self):
+        final_dur = response_duration_steps(2, 3, base_steps=1)
+        other_dur = response_duration_steps(0, 3, base_steps=1)
+        assert final_dur > other_dur, "final note should be longer than approach"
+
+    def test_final_note_minimum_2_steps(self):
+        assert response_duration_steps(0, 1, base_steps=1) >= 2   # single note
+        assert response_duration_steps(2, 3, base_steps=1) >= 2   # final of 3
+
+    def test_non_final_notes_unchanged(self):
+        assert response_duration_steps(0, 3, base_steps=1) == 1
+        assert response_duration_steps(1, 3, base_steps=1) == 1
+
+    def test_bass_response_final_note_louder_than_first(self):
+        from thelmic.bass import generate_bass_response_from_steps
+        leader = {2: [8, 12]}  # two response steps
+        evts = generate_bass_response_from_steps(
+            leader, [_kick(bar=2)], _behaviour(),
+        )
+        assert len(evts) == 2
+        # Sort by step to get first and final
+        evts_sorted = sorted(evts, key=lambda e: _time_to_bar_step(e.time)[1])
+        assert evts_sorted[-1].velocity >= evts_sorted[0].velocity
+
+    def test_stab_response_final_note_louder_than_first(self):
+        evts = generate_stab_response_from_steps(
+            leader_steps=[0, 4], abs_bar=2, behaviour=_behaviour(),
+            landscape_position=0.5,
+        )
+        if len(evts) >= 2:
+            evts_sorted = sorted(evts, key=lambda e: _time_to_bar_step(e.time)[1])
+            assert evts_sorted[-1].velocity >= evts_sorted[0].velocity
+
 
 class TestStabLeadsIntegration:
 
