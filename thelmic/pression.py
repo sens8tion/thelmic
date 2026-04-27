@@ -178,6 +178,41 @@ def _decay(values: list[float], decay: float = 0.6) -> list[float]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Intra-bar shape functions
+#
+# Each returns a float multiplier in [0, 1] for step s.
+# Combined as: value[s] = phrase_component + shape(s) * local_range
+# ---------------------------------------------------------------------------
+
+# Precomputed: call/response tension arc within one bar.
+# Rises through beats 1–2 (call), peaks at beat 3 arrival, decays in beat 4.
+_CALL_RESPONSE_ARC: tuple[float, ...] = (
+    0.05, 0.10, 0.18, 0.24,   # beat 1: slow build
+    0.28, 0.30, 0.30, 0.28,   # beat 2: sustained call peak
+    0.26, 0.22, 0.18, 0.14,   # beat 3: response arrival, releasing
+    0.10, 0.08, 0.06, 0.04,   # beat 4: settled
+)
+
+def _call_response_arc(s: int) -> float:
+    return _CALL_RESPONSE_ARC[s]
+
+def _riser_arc(s: int, phrase_scale: float) -> float:
+    """Accelerating ramp within the bar, scaled by phrase position (0.25–1.0).
+    Bar 0 of phrase: gentle rise.  Bar 3: steep acceleration toward beat 4.
+    """
+    step_ramp = ((s + 1) / 16.0) ** (1.0 + phrase_scale)   # exponent 1.25–2.0
+    return phrase_scale * step_ramp
+
+def _pre_warning_ramp(s: int) -> float:
+    """Quiet in beats 1–2, accelerating rise through beats 3–4.
+    Used to signal 'something is approaching'.
+    """
+    if s < 8:
+        return s / 7.0 * 0.30            # slow build: 0 → 0.30
+    return 0.30 + (s - 8) / 7.0 * 0.70  # fast rise: 0.30 → 1.0
+
+
 def _events_at_steps(bar_events: list["MIDIEvent"]) -> dict[int, list["MIDIEvent"]]:
     """Group events by their step index (0–15). Off-grid events are dropped."""
     from thelmic.stabs import _time_to_bar_step
@@ -248,63 +283,82 @@ def compute_pression_bar(
         pw_scalar = min(1.0, nearness * 0.7 + t_velocity * 0.3)
 
     # --- Per-step arrays ---
+    # Each dimension = phrase_component + bar_arc + event_component
+    # phrase_component  → macro tension across bars (already in scalars above)
+    # bar_arc           → within-bar motion (call/response shape, riser ramp, etc.)
+    # event_component   → spikes and decay from actual note events
 
-    # pressure: smoothly constant (bar-level), jitter at hit positions
-    pressure = [_i(p_scalar)] * STEPS_PER_BAR
-    for s, evts in by_step.items():
-        if evts:
-            hit = max(e.velocity for e in evts) / 127.0
-            pressure[s] = _i(min(1.0, p_scalar + hit * 0.2))
+    # ── pressure ────────────────────────────────────────────────────────────
+    # phrase scalar + call/response arc + hit spikes
+    # The arc encodes musical expectation: rising call, resolving response.
+    pressure = []
+    for s in range(STEPS_PER_BAR):
+        arc   = _call_response_arc(s) * (1.0 - p_scalar * 0.5)  # more arc when quiet
+        base  = min(1.0, p_scalar + arc)
+        evts  = by_step[s]
+        spike = (max(e.velocity for e in evts) / 127.0 * 0.20) if evts else 0.0
+        pressure.append(_i(min(1.0, base + spike)))
 
-    # impact: velocity spike at hit steps, decaying forward
+    # ── impact ──────────────────────────────────────────────────────────────
+    # Event velocity spikes with exponential decay — most expressive when dense
     impact_raw = [
-        max((e.velocity / 127.0) for e in evts) if evts else 0.0
-        for evts in (by_step[s] for s in range(STEPS_PER_BAR))
+        max(e.velocity / 127.0 for e in by_step[s]) if by_step[s] else 0.0
+        for s in range(STEPS_PER_BAR)
     ]
     impact = [_i(v) for v in _decay(impact_raw, decay=0.5)]
 
-    # density: event count per step, smoothed with decay
+    # ── density ─────────────────────────────────────────────────────────────
+    # Event count per step, smoothed with decay — shows local activity
     density_raw = [
-        min(1.0, len(by_step[s]) / 4.0)   # 4 events on a step = full
+        min(1.0, len(by_step[s]) / 4.0)
         for s in range(STEPS_PER_BAR)
     ]
     density = [_i(v) for v in _decay(density_raw, decay=0.7)]
 
-    # silence: inverse of density — emphasises gaps
+    # ── silence ─────────────────────────────────────────────────────────────
+    # Inverse of density — grows in gaps, spikes between phrases
     silence = [max(0, 127 - d) for d in density]
 
-    # riser: constant within bar (bar-level position in phrase)
-    riser = [_i(riser_scalar)] * STEPS_PER_BAR
+    # ── riser ───────────────────────────────────────────────────────────────
+    # Accelerating ramp within bar, steeper at later phrase positions.
+    # Bar 0 of phrase: gentle rise.  Bar 3: near-vertical toward beat 4.
+    riser = [_i(_riser_arc(s, riser_scalar)) for s in range(STEPS_PER_BAR)]
 
-    # leadership: constant within bar
+    # ── leadership ──────────────────────────────────────────────────────────
+    # Constant within bar (macro concept — no intra-bar variation needed).
     leadership = [lead_val] * STEPS_PER_BAR
 
-    # call_intensity: activity in steps 0–7 (beats 1–2), decay rightward
+    # ── call_intensity ──────────────────────────────────────────────────────
+    # Structural baseline (rises through beats 1–2 based on energy) +
+    # actual event spikes. Baseline ensures the dimension moves even in
+    # sparse bars so it remains musically readable.
     call_raw = [0.0] * STEPS_PER_BAR
     for s in range(0, 8):
+        # structural: rises 0→0.3 across beats 1–2
+        structural = behaviour.energy_level * (s / 7.0 * 0.30)
+        call_raw[s] = structural
         evts = by_step[s]
         if evts:
-            peak = max(e.velocity for e in evts) / 127.0
-            # weight by role — stab/bass call events count more
-            call_bonus = 0.3 if any(
-                e.layer in {"stab", "bass"} for e in evts
-            ) else 0.0
-            call_raw[s] = min(1.0, peak + call_bonus)
+            peak  = max(e.velocity for e in evts) / 127.0
+            bonus = 0.25 if any(e.layer in {"stab", "bass"} for e in evts) else 0.0
+            call_raw[s] = min(1.0, peak + bonus)
     call_intensity = [_i(v) for v in _decay(call_raw, decay=0.6)]
 
-    # response_intensity: activity in steps 8–15 (beats 3–4), decay rightward
+    # ── response_intensity ──────────────────────────────────────────────────
+    # Structural baseline (rises through beats 3–4) + event spikes.
     resp_raw = [0.0] * STEPS_PER_BAR
     for s in range(8, 16):
+        structural = behaviour.energy_level * ((s - 8) / 7.0 * 0.35)
+        resp_raw[s] = structural
         evts = by_step[s]
         if evts:
-            peak = max(e.velocity for e in evts) / 127.0
-            resp_bonus = 0.3 if any(
-                e.layer in {"stab", "bass"} for e in evts
-            ) else 0.0
-            resp_raw[s] = min(1.0, peak + resp_bonus)
+            peak  = max(e.velocity for e in evts) / 127.0
+            bonus = 0.25 if any(e.layer in {"stab", "bass"} for e in evts) else 0.0
+            resp_raw[s] = min(1.0, peak + bonus)
     response_intensity = [_i(v) for v in _decay(resp_raw, decay=0.6)]
 
-    # landing_strength: final response note (steps 12–15), peak-and-hold
+    # ── landing_strength ────────────────────────────────────────────────────
+    # Spike at the final response note (steps 12–15), held to end of bar.
     land_raw = [0.0] * STEPS_PER_BAR
     final_step = -1
     final_vel  = 0.0
@@ -317,11 +371,13 @@ def compute_pression_bar(
                 final_step = s
     if final_step >= 0:
         for s in range(final_step, STEPS_PER_BAR):
-            land_raw[s] = final_vel   # hold through end of bar
+            land_raw[s] = final_vel
     landing_strength = [_i(v) for v in land_raw]
 
-    # pre_warning: constant within bar (bar-level value)
-    pre_warning = [_i(pw_scalar)] * STEPS_PER_BAR
+    # ── pre_warning ─────────────────────────────────────────────────────────
+    # Low in beats 1–2, accelerating rise through beats 3–4 when transition
+    # is approaching completion. Creates clear anticipation signal.
+    pre_warning = [_i(pw_scalar * _pre_warning_ramp(s)) for s in range(STEPS_PER_BAR)]
 
     # --- Event overlays ---
     overlays: list[PressionOverlay] = []
