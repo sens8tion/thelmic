@@ -46,6 +46,7 @@ from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
 )
+from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.transition_engine import TransitionEngine
 
@@ -259,13 +260,15 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     appended_bass  = _append_events_to_bank(bank, bass_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
-    syntax_stats = enforce_phrase_syntax(bank, _phrase_plan)
+    syntax_stats   = enforce_phrase_syntax(bank, _phrase_plan)
+    support_stats  = enforce_supporting_layer_compliance(bank, _phrase_plan)
     _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
     _runtime_debug.update(planned_calls.stats)
     _runtime_debug.update(planned_responses.stats)
     _runtime_debug.update(syntax_stats)
+    _runtime_debug.update(support_stats)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
     _runtime_debug["bass_source"] = "phrase_plan"
