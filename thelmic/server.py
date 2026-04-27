@@ -565,7 +565,9 @@ def _live_state_dict() -> dict:
         "bpm": _bpm,
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
+        "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
+        "pression_bar_idx": _pression_bar_idx,   # current bar, for UI cursor
         "runtime": {**_runtime_debug, "boundary_timing": _boundary_timing},
         "force": {
             "anticipation": round(fs.anticipation, 3),
@@ -736,9 +738,18 @@ def _playback_loop() -> None:
                 next_idx = phrase.phrase_index + 1
                 is_boundary = (abs_bar % max(1, _quantize_bars) == 0)
 
+                # Look up pre-computed pression bar for step-level CC injection.
+                _pb = (
+                    _pression_timeline[abs_bar - 1]
+                    if _pression_timeline and 0 <= abs_bar - 1 < len(_pression_timeline)
+                    else None
+                )
                 t_play_start = time.perf_counter()
                 bar_end = _midi.play_bar_in_phrase_blocking(
                     phrase, bar_in_phrase, bpm=_bpm, bank_start=bank_start,
+                    pression_bar=_pb,
+                    pression_cc_map=_pression_cc_map if _midi_cc else None,
+                    pression_cc_port=_midi_cc,
                 )
                 t_after_play = time.perf_counter()
                 play_ms = (t_after_play - t_play_start) * 1000
@@ -761,15 +772,11 @@ def _playback_loop() -> None:
                     _send_behaviour_filter_cc(manual_overrides)
                 curves_ms = (time.perf_counter() - t0) * 1000
 
-                # ── Pression CC — bar-peak values from pre-computed timeline.
-                # Read-only; no computation on the hot path.
+                # Pression CCs are now emitted at step resolution inside
+                # play_bar_in_phrase_blocking (injected into MIDI timeline).
+                # Update tracking variable for UI state broadcast.
                 global _pression_bar_idx
-                _pression_bar_idx = abs_bar - 1   # 0-based within bank
-                if _midi_cc and 0 <= _pression_bar_idx < len(_pression_timeline):
-                    _pb = _pression_timeline[_pression_bar_idx]
-                    for _dim, (_ch, _cc) in _pression_cc_map.items():
-                        _peak = max(getattr(_pb, _dim, [0]))
-                        _midi_cc.send_cc(_ch, _cc, _peak / 127.0)
+                _pression_bar_idx = abs_bar - 1
 
                 # ── Live state build + enqueue ──────────────────────────────
                 t0 = time.perf_counter()
