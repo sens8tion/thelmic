@@ -30,6 +30,7 @@ from thelmic.call_response import (
     CallResponseState, Mode, default_state, advance_mode,
 )
 from thelmic.calls import generate_planned_calls
+from thelmic.responses import generate_planned_responses
 from thelmic.hook import generate_planned_hook
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
@@ -244,21 +245,16 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
 
     bass_events: list = generate_planned_bass(base_events, behaviour, _phrase_plan)
     hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
-    planned_calls = generate_planned_calls(base_events, behaviour, _phrase_plan)
-    stab_events: list = planned_calls.events
+    planned_calls     = generate_planned_calls(base_events, behaviour, _phrase_plan)
+    planned_responses = generate_planned_responses(base_events, behaviour, _phrase_plan)
+    stab_events: list = planned_calls.events + planned_responses.events
 
-    if mode == Mode.STAB_LEADS:
-        _log.debug(
-            "bank=%d mode=STAB_LEADS bars_in_mode=%d",
-            bank.bank_index, _cr_state.bars_in_mode,
-        )
-
-    else:  # Mode.BASS_LEADS
-        # Phase 4 does not render responses; planned response ownership comes later.
-        _log.debug(
-            "bank=%d mode=BASS_LEADS bars_in_mode=%d",
-            bank.bank_index, _cr_state.bars_in_mode,
-        )
+    _log.debug(
+        "bank=%d mode=%s calls_rendered=%d responses_rendered=%d",
+        bank.bank_index, mode.value,
+        planned_calls.stats.get("call_events_rendered", 0),
+        planned_responses.stats.get("response_events_rendered", 0),
+    )
 
     appended_bass  = _append_events_to_bank(bank, bass_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
@@ -268,6 +264,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
     _runtime_debug.update(planned_calls.stats)
+    _runtime_debug.update(planned_responses.stats)
     _runtime_debug.update(syntax_stats)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
