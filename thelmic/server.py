@@ -29,6 +29,7 @@ from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.call_response import (
     CallResponseState, Mode, default_state, advance_mode,
 )
+from thelmic.hook import generate_planned_hook
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
     DIMENSION_NAMES, DIMENSION_COLOURS, BARS_PER_BANK, empty_timeline,
@@ -204,6 +205,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         _runtime_debug = {
             "anchors_dropped_per_bar": {},
             "bass_events_per_bar": {},
+            "hook_events_per_bar": {},
             "stab_events_per_bar": {},
         }
         return
@@ -240,6 +242,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
 
     bass_events: list = generate_planned_bass(base_events, behaviour, _phrase_plan)
+    hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
     stab_events: list = []
 
     if mode == Mode.STAB_LEADS:
@@ -282,13 +285,16 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         )
 
     appended_bass  = _append_events_to_bank(bank, bass_events)
+    appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
     _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
+    _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
     _runtime_debug["bass_source"] = "phrase_plan"
     _runtime_debug["bass_tonal_centre"] = 36
+    _runtime_debug["hook_source"] = "phrase_plan"
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance

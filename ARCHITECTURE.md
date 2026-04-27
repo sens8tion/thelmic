@@ -17,7 +17,7 @@ kick-first phase notes are historical and are not the active architecture.
 |---|---|---|
 | Phase 0 planner foundation | complete | `thelmic/phrase_plan.py` exists and exposes a debuggable `PhrasePlan` |
 | Phase 1 planned bass | complete | bass is rendered from `phrase_plan.bass_pattern` |
-| Phase 2 hook consumption | pending | `phrase_plan.hook_pattern` exists but is not yet rendered as first-class hook identity |
+| Phase 2 hook identity rendering | complete | hook is rendered from `phrase_plan.hook_pattern` |
 
 Current rule:
 
@@ -145,7 +145,7 @@ DROP_RELOCK
 Current consumption:
 
 - `bass_pattern` is consumed by planned bass rendering.
-- `hook_pattern` is planned and exposed, but not yet consumed as rendered hook identity.
+- `hook_pattern` is consumed by first-class hook identity rendering.
 - `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` exist but are
   not yet the sole authority for every generator.
 - `pressure_curve` informs macro context but must not own note syntax.
@@ -177,15 +177,16 @@ runtime:
 
 ## Hook Identity
 
-Hook is planned but not yet consumed as first-class rendered identity.
+Hook is first-class rendered identity from `phrase_plan.hook_pattern`.
 
 Current status:
 
 - `PhrasePlan.hook_pattern` exists.
-- The plan exposes hook material for inspection.
-- No renderer currently treats hook as the persistent identity layer.
+- `generate_planned_hook()` renders hook events with `layer="hook"` and `role="hook"`.
+- Hook is independent of call/response material.
+- Hook repeats across rendered bars from the authored plan.
 
-Pending Phase 2 contract:
+Implemented Phase 2 contract:
 
 - Render a recognisable 2-5 note motif.
 - Keep it loopable over 1-2 bars.
@@ -328,6 +329,7 @@ Current implemented responsibilities:
 
 - create base drum/archetype events.
 - render planned bass from `phrase_plan.bass_pattern`.
+- render planned hook from `phrase_plan.hook_pattern`.
 - apply ghost injection.
 - apply anchor withholding.
 - apply behaviour-driven dynamics.
@@ -378,6 +380,7 @@ phrase_plan:
 
 runtime:
   bass_source: "phrase_plan"
+  hook_source: "phrase_plan"
   bass_tonal_centre:
   anchors_dropped_per_bar:
   bass_events_per_bar:
@@ -407,6 +410,7 @@ thelmic/
 |   |-- archetypes.py               # rhythm archetypes and expectation maps
 |   |-- bank_generator.py           # Bank, Phrase, MIDIEvent, BankGenerator
 |   |-- bass.py                     # planned bass rendering from bass_pattern
+|   |-- hook.py                     # planned hook rendering from hook_pattern
 |   |-- stabs.py                    # stab/call-response support
 |   |-- rhythm.py                   # rhythm conformance helpers
 |   |-- deformations.py             # legacy deformation map pipeline
@@ -443,7 +447,7 @@ thelmic/
 |---|---|
 | 0 | Planner foundation - done |
 | 1 | Planned bass truth - done |
-| 2 | Hook identity rendering - next |
+| 2 | Hook identity rendering - done |
 | 3 | Phrase syntax compliance |
 | 4 | Planner-owned call generation |
 | 5 | Planner-owned response generation |

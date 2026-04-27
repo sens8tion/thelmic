@@ -16,6 +16,7 @@ LAYER_CHANNELS: dict[str, int] = {
     "hat":   2,
     "bass":  3,
     "stab":  4,
+    "hook":  5,
 }
 
 

@@ -1315,8 +1315,9 @@
       anchor_withholding: '#202020',
       bass: '#5aa05a',
       stab: '#d48ad4',
+      hook: '#f0c85a',
     };
-    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'stab'];
+    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'stab', 'hook'];
     const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
 
     // Deformation colours from server — updated on every state push
@@ -1369,6 +1370,7 @@
       if (event.active === false || deform.anchor_withholding) return 'anchor_withholding';
       if (event.layer === 'bass' || event.role === 'bass') return 'bass';
       if (event.layer === 'stab' || event.role === 'stab') return 'stab';
+      if (event.layer === 'hook' || event.role === 'hook') return 'hook';
       return event.role || event.layer || 'event';
     }
 
