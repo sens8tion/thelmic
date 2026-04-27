@@ -2,65 +2,66 @@
 
 > An instrument you ride, not configure.
 
-A performance instrument for shaping anticipation → tension → release over time.
-MIDI out. Python. No DAW dependency at this stage.
+Thelmic is a stateful, intent-driven MIDI generation system for live hard
+electronic music. Its current architectural contract is planner-first: musical
+meaning is planned before renderers emit events.
+
+This document describes the current implementation and musical contract. Older
+kick-first phase notes are historical and are not the active architecture.
 
 ---
 
-## What This Is
+## Current Status
 
-Thelmic is a stateful, intent-driven MIDI sequencer for live dance music performance
-(target: DnB / heavy electronic). The performer rides a landscape of three territories —
-Oak, Chaos, Nott — in real time, using a MIDI knob. The engine maintains coherent
-force state across generated banks, responding to trajectory and history rather than
-executing fixed patterns.
+| Phase | Status | Meaning |
+|---|---|---|
+| Phase 0 planner foundation | complete | `thelmic/phrase_plan.py` exists and exposes a debuggable `PhrasePlan` |
+| Phase 1 planned bass | complete | bass is rendered from `phrase_plan.bass_pattern` |
+| Phase 2 hook consumption | pending | `phrase_plan.hook_pattern` exists but is not yet rendered as first-class hook identity |
 
-This is not a step sequencer. It does not loop clips. It generates banks of MIDI
-(4 phrases × 4 bars) driven by a continuous force state, queues them for playback,
-and accepts interrupts from the performer.
-
----
-
-## Landscape Territories
-
-```
-Oak    — stable, archetype-compliant, trust-building
-Chaos  — principled corruption; internal logic the audience cannot track
-Nott   — off-beam resolution; dark, legible destination, unexpected arrival
-```
-
-All transitions between territories are permissible. No fixed sequence.
-The `landscape_position` axis (0.0 → 1.0, Oak → Nott via Chaos) is a live
-performance control, mapped to a MIDI CC knob.
-
-The engine tracks not just current position but transition history — where it came
-from, how fast it moved, what it left unresolved.
-
----
-
-## System Architecture
+Current rule:
 
 ```text
-Intent Input        (axis value + optional text intent)
-        |
-Control Layer       (knobs / parameter constraints)
-        |
-Transition Engine   (target_position -> current_position)
-        |
-Force Engine        (force_state from current_position)
-        |
-BehaviourField      (module-facing behaviour contract)
-        |
-Phrase Planner      (bass, hook, syntax, slots, silence, pressure)
-        |
-Bank Generator      (renders plan + supporting layers to MIDI)
-        |
-Transport           (queue / play / interrupt-replace)
-        |
-MIDI Out            (rtmidi, same pattern as dnb-seq)
+Bass defines meaning.
+Hook defines identity.
+Everything else behaves relative to those two.
 ```
 
-Current musical generation order:
+---
+
+## Active System Architecture
+
+```text
+Intent / controls / landscape position
+        |
+Transition Engine
+        |
+Force Engine
+        |
+BehaviourField
+        |
+PhrasePlan
+        |
+Bass truth
+        |
+Hook identity
+        |
+Phrase syntax
+        |
+Call / response
+        |
+Silence
+        |
+Pressure / Pression
+        |
+Supporting renderers
+        |
+Transport
+        |
+MIDI out
+```
+
+The musical generation order is:
 
 ```text
 phrase_plan
@@ -73,77 +74,50 @@ phrase_plan
 -> supporting layers
 ```
 
-No generator may invent musical syntax independently of `phrase_plan` once its
-planner phase has landed.
+Generators consume `PhrasePlan`. They must not invent phrase structure
+independently once their planner phase has landed.
 
 ---
 
-## Current Implementation Map
-
-This section records the implementation state of the current working tree. It
-supersedes older phase notes where those notes describe planned work that has
-since landed.
-
-### Live Control Flow
-
-Correct live flow:
+## Live Control Flow
 
 ```text
 slider -> target_position
 transition_engine -> current_position
 force_engine -> force_state(current_position)
 behaviour_field -> derived from force_state + transition
-modules -> driven by behaviour_field
+phrase_plan -> musical syntax and authored material
+modules/renderers -> driven by phrase_plan + behaviour_field
 manual overrides -> override per key only
 ```
 
 Invariants:
 
-- `target_position` is intent only.
-- `current_position` is live landscape state.
+- `target_position` represents intent only.
+- `current_position` represents live landscape state.
 - `force_state` is derived from `current_position`, not `target_position`.
-- `BehaviourField` is the module-facing contract; musical modules must not consume
-  raw `ForceState` directly.
-- Manual pressure/CC overrides win per target only.
+- `BehaviourField` is the module-facing behaviour contract.
+- Musical modules consume `BehaviourField`, not raw `ForceState`.
+- Musical structure comes from `PhrasePlan`, not individual generators.
+- Manual overrides win per key only.
 
-Implemented files:
+---
 
-- `thelmic/transition_engine.py`
-- `thelmic/force_engine.py`
-- `thelmic/behaviour_field.py`
-- `thelmic/behaviour_hooks.py`
+## PhrasePlan
 
-### BehaviourField
+Implemented in `thelmic/phrase_plan.py`.
 
-`BehaviourField` currently exposes:
+Core structures:
 
 ```text
-ghost_intensity
-ghost_clustering
-anchor_drop_prob
-filter_target
-gate_tightness
-energy_level
-accent_strength
-ghost_velocity
-anchor_velocity
-anticipation
-instability
-release_pressure
+PhrasePlan
+PlanNote
+SilenceMask
+PhraseState
+generate_phrase_plan()
 ```
 
-Current module use:
-
-- ghost injection uses `ghost_intensity`, `ghost_clustering`, and ghost velocity.
-- anchor withholding uses `anchor_drop_prob`.
-- dynamics uses `ghost_velocity` and `anchor_velocity`.
-- filter CC output uses `filter_target`.
-
-### Planner Foundation
-
-Planner Phase 0 is implemented in `thelmic/phrase_plan.py`.
-
-The planner produces a visible/debuggable `PhrasePlan`:
+Planner output:
 
 ```text
 bass_pattern
@@ -165,48 +139,93 @@ RESPONSE_RESOLVED
 DROP_RELOCK
 ```
 
-The plan is exposed over WebSocket as `phrase_plan`.
+Current consumption:
 
-Important: not every generator consumes the full plan yet. Phase 1 has connected
-bass to the plan. Hook, silence, support compliance, and validation remain backlog.
+- `bass_pattern` is consumed by planned bass rendering.
+- `hook_pattern` is planned and exposed, but not yet consumed as rendered hook identity.
+- `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` exist but are
+  not yet the sole authority for every generator.
+- `pressure_curve` informs macro context but must not own note syntax.
 
-### Bass Truth Layer
+---
 
-Planner Phase 1 is implemented.
+## Bass Truth
 
-Bass is now first-class authored material:
+Bass is now first-class authored truth from `phrase_plan.bass_pattern`.
+
+Implemented contract:
 
 - `generate_planned_bass()` renders `PhrasePlan.bass_pattern`.
-- bass is locked to active kick-grid steps.
-- bass pitch is restricted to root / fifth / octave around tonal centre.
-- bass no longer depends on stab/lead material.
-- in `STAB_LEADS`, bass remains authored truth instead of becoming a stab-derived
-  response.
-- in `BASS_LEADS`, stabs may respond to authored bass call-window notes.
+- Bass chooses and exposes a tonal centre.
+- Bass pitch movement is constrained to root, optional fifth, and optional octave.
+- Bass rhythm is locked to the kick grid.
+- Bass is not derived from stabs, lead material, hook material, or call/response.
+- Bass remains stable truth even when stabs carry a call role.
 
-Debug exposes:
+Required debug state:
 
 ```yaml
 runtime:
-  bass_source: phrase_plan
+  bass_source: "phrase_plan"
   bass_tonal_centre: 36
 ```
 
-### Call / Response
+---
 
-Current call/response is dual-modal:
+## Hook Identity
 
-- `STAB_LEADS`: stab calls in the call window; bass remains authored truth.
-- `BASS_LEADS`: planned bass notes in the call window seed stab responses.
+Hook is planned but not yet consumed as first-class rendered identity.
 
-The system still needs later planner compliance work so call/response windows come
-strictly from `PhrasePlan.call_slots` and `PhrasePlan.response_slots`.
+Current status:
 
-### Pression
+- `PhrasePlan.hook_pattern` exists.
+- The plan exposes hook material for inspection.
+- No renderer currently treats hook as the persistent identity layer.
 
-Pression is a CC/export system, not a note generator.
+Pending Phase 2 contract:
 
-Current stable CC lanes include global lanes:
+- Render a recognisable 2-5 note motif.
+- Keep it loopable over 1-2 bars.
+- Preserve recognisability across phrase states.
+- Ensure it does not mask or redefine bass meaning.
+- Keep call/response subordinate to hook identity.
+
+---
+
+## Call / Response
+
+Current call/response exists but is not yet fully planner-owned.
+
+Target contract:
+
+- Calls occur only in planned call slots.
+- Responses occur only in planned response slots.
+- A response must be caused by a call.
+- No call means no response.
+- Calls must leave space.
+- Responses must fill or resolve that space.
+- Bass truth and hook identity must remain legible.
+
+---
+
+## Silence
+
+Silence is punctuation, not absence.
+
+Target contract:
+
+- Silence comes from `phrase_plan.silence_mask`.
+- Silence follows calls, occurs during `HOLD_SILENCE`, and precedes drops.
+- Silence may thin or omit bass, hook, percussion, and support layers as planned.
+- Event generators do not yet fully obey silence mask; this is pending compliance work.
+
+---
+
+## Pression / Pressure
+
+Pression is CC, control, and intensity only. It is not musical syntax.
+
+Implemented Pression lanes include:
 
 ```text
 pressure
@@ -219,354 +238,145 @@ call_intensity
 response_intensity
 landing_strength
 pre_warning
-```
-
-and stable instrument lanes:
-
-```text
 bass_intensity
 stab_intensity
 ```
 
-Current Pression behaviour:
+Allowed:
 
-- computes a bank-level CC timeline ahead of playback.
-- includes phrase-level metadata per lane:
-  - `current_value`
-  - `target_value`
-  - `phrase_position`
-  - `phrase_length_bars`
-  - `tension`
-  - `anticipation`
-  - `release_proximity`
-  - `thinning`
-- models drop as a phrase-level arrival:
-  - pressure/riser build
-  - density thins before arrival
-  - silence peaks before arrival
-  - riser holds/decays in the silent pre-drop gap
-  - impact and landing are withheld until the drop
-  - at the drop, silence collapses, impact/landing spike, density returns, riser
-    discharges.
-- exposes per-lane `Map` toggles; mapping mode mutes all other Pression CC lanes.
-- UI renders recorded history left of a fixed playhead and a non-mutating preview
-  to the right.
+- CC output.
+- Ableton mapping isolation via per-lane Map toggles.
+- Phrase-level control/intensity movement.
+- Tension, anticipation, release proximity, thinning, riser, impact, landing,
+  bass intensity, and stab intensity as control signals.
+- Intra-bar motion and event spikes as smaller additions to phrase-level values.
+- Lookahead preview that does not mutate live state.
 
-### Grid / UI Rendering
+Not allowed:
 
-Main sequencer lanes are instrument lanes only:
+- Generating notes.
+- Choosing bass truth.
+- Choosing hook identity.
+- Inventing call/response syntax.
+- Replacing `PhrasePlan.phrase_state` with pressure-curve shape labels.
 
-```text
-kick
-snare
-hat
-bass
-stab
-```
+Impact reduction rule:
 
-Deformation/debug roles are not rendered as full instrument tracks.
-
-### Boundary Scheduling
-
-Playback precomputes upcoming bank work and uses lightweight boundary swaps.
-WebSocket state work is queued/deferred where possible. Timing instrumentation is
-available in `runtime.boundary_timing`.
-
-### Current Verification Surface
-
-Relevant tests:
-
-```text
-tests/test_behaviour_field.py
-tests/test_deformations_anchor.py
-tests/test_deformations_dynamics.py
-tests/test_bass.py
-tests/test_phrase_plan.py
-tests/test_pression.py
-tests/test_pressure_curves.py
-```
+- Do not reduce impact by repeating motif material at lower velocity. That reads
+  as accidental echo/delay, not musical restraint.
+- Prefer thinning, omission, shorter articulation, density reduction, or timbral
+  softening.
+- Echo/delay must be explicit FX only.
 
 ---
 
-## Layer Specifications
+## BehaviourField
 
-### 1. Force Engine
+Implemented in `thelmic/behaviour_field.py`.
 
-The heart of the system. Owns state and trajectory — not just what is happening
-now, but what needs to happen next.
+`BehaviourField` is derived from `ForceState` and `Transition` and is the only
+behaviour input modules should consume.
 
-**Force dimensions** (all 0.0–1.0):
-- `anticipation`        — pressure building toward an event
-- `release_pressure`    — accumulated need to resolve
-- `instability`         — degree of principled corruption active
-- `density`             — rhythmic and textural fullness
-- `control_vs_chaos`    — position on the Oak–Chaos axis
-
-**Temporal state:**
-- `landscape_position`      — current 0.0–1.0 axis value (live, from MIDI CC)
-- `bank_history`            — list of BankSnapshot objects (force values + transition event)
-- `current_trajectory`      — direction and rate of change (delta per bank)
-- `resolution_likelihood`   — 0.0–1.0, forward-looking
-
-**Three temporal scopes:**
-1. Phrase scope  — bar-by-bar; what is happening right now
-2. Bank scope    — position of this phrase in the 4-phrase arc
-3. Cross-bank    — memory and momentum; informs generation of next bank
-
-**Transition events** are recorded explicitly in bank_history:
-```python
-@dataclass
-class TransitionEvent:
-    from_territory: str        # 'oak' | 'chaos' | 'nott'
-    to_territory: str
-    axis_position: float       # where on 0.0–1.0 the transition occurred
-    bank_index: int            # which bank this happened at
-    left_unresolved: bool      # whether the departing territory was resolved
-```
-
-```python
-@dataclass
-class BankSnapshot:
-    bank_index: int
-    force_state: ForceState
-    transition: TransitionEvent | None
-    completed: bool            # False if bank was interrupted
-```
-
-### 2. Control Layer
-
-User-defined parameter constraints. Applied as ceilings/floors on force engine output.
-
-```python
-@dataclass
-class Controls:
-    groove_lock: float       # 0.0–1.0; how tightly rhythm aligns to grid
-    chaos_limit: float       # 0.0–1.0; ceiling on instability dimension
-    density_ceiling: float   # 0.0–1.0
-    variation_rate: float    # 0.0–1.0; how fast patterns change within a bank
-    kick_dominance: float    # 0.0–1.0; kick vs other elements
-```
-
-### 3. Bank Generator
-
-The bank generator renders the current `PhrasePlan` plus compliant supporting
-layers into MIDI events. It does not own musical syntax. Bass, hook intent,
-phrase states, call/response slots, silence, and pressure targets are planned
-above it.
-
-Current implemented contract:
-
-- `PhrasePlan` is created before event rendering.
-- `phrase_plan.bass_pattern` is first-class authored truth.
-- `generate_planned_bass()` renders the planned bass line, locked to the active
-  kick grid and restricted to root / fifth / octave around the tonal centre.
-- `PhrasePlan.hook_pattern` exists and is exposed, but hook material is not yet
-  consumed as a first-class rendered identity layer.
-- call/response, silence, support compliance, and validation are partially
-  implemented and must continue moving toward planner ownership.
-- Pression/pressure may shape CC, control intensity, and expose drop/anticipation
-  state, but it must not own phrase syntax or decide note structure.
-
-Current musical generation order:
+Current fields:
 
 ```text
-phrase_plan
--> bass_pattern
--> hook_pattern
--> phrase_state
--> call/response
--> silence_mask
--> pressure_curve
--> supporting layers
+ghost_intensity
+ghost_clustering
+anchor_drop_prob
+filter_target
+gate_tightness
+energy_level
+accent_strength
+ghost_velocity
+anchor_velocity
+anticipation
+instability
+release_pressure
 ```
 
-**Event roles:**
-- `anchor`              - weight-bearing; establishes grid
-- `ghost`               - decorative; low emphasis
-- `disruption`          - breaks expectation deliberately
-- `impact`              - high-energy landing
-- `withheld_resolution` - expected impact that does not arrive
+Current module use:
+
+- ghost injection uses `ghost_intensity`, `ghost_clustering`, and `ghost_velocity`.
+- anchor withholding uses `anchor_drop_prob`.
+- dynamics uses `ghost_velocity` and `anchor_velocity`.
+- filter CC output uses `filter_target`.
+
+Manual merge rule:
 
 ```python
-@dataclass
-class MIDIEvent:
-    time: str              # e.g. "7.4.3" (bar.beat.tick)
-    note: int
-    velocity: int
-    duration: float
-    layer: str             # e.g. "kick", "snare", "bass", "stab"
-    role: str              # anchor | ghost | disruption | impact | withheld_resolution
-    emphasis: float        # 0.0-1.0
-    openness: float        # 0.0-1.0
-    expected_weight: float # 0.0-1.0
-    should_resolve: bool
+result = dict(behaviour_overrides)
+result.update(manual_overrides)
 ```
 
-Phase status:
+Manual overrides win only for the keys they explicitly control.
 
-| Phase | Status | Notes |
-|---|---|---|
-| Phase 0 planner foundation | complete | `thelmic/phrase_plan.py`; plan visible as `phrase_plan` |
-| Phase 1 planned bass | complete | bass comes from `phrase_plan.bass_pattern` |
-| Phase 2 hook consumption | pending | `hook_pattern` exists, but is not yet rendered as first-class identity |
+---
 
-### 3a. Rhythmic Archetype System
+## Bank Generator
 
-Kick placement is driven by **probability distributions and expectation maps** derived
-from dance music genre conventions (`thelmic/archetypes.py`), not uniform random sampling.
+The bank generator renders the current plan and supporting layers into MIDI
+events. It does not define the musical build order.
 
-**Slot index reference** (0-indexed, 4/4 at 16th-note resolution):
+Current implemented responsibilities:
 
+- create base drum/archetype events.
+- render planned bass from `phrase_plan.bass_pattern`.
+- apply ghost injection.
+- apply anchor withholding.
+- apply behaviour-driven dynamics.
+- append bass and stab events where current implementation supports them.
+- expose debug/runtime counters.
+
+Current non-responsibilities:
+
+- It must not decide bass truth independently.
+- It must not invent hook identity.
+- It must not invent phrase syntax once planner compliance exists for that layer.
+- It must not let Pression decide note structure.
+
+---
+
+## Debug State
+
+State exposed for inspection must include:
+
+```yaml
+force:
+  anticipation:
+  instability:
+  release_pressure:
+
+behaviour:
+  ghost_intensity:
+  ghost_clustering:
+  anchor_drop_prob:
+  filter_target:
+  gate_tightness:
+  energy_level:
+  ghost_velocity:
+  anchor_velocity:
+
+transition:
+  progress:
+  velocity:
+
+phrase_plan:
+  bass_pattern:
+  hook_pattern:
+  phrase_state:
+  call_slots:
+  response_slots:
+  silence_mask:
+  pressure_curve:
+
+runtime:
+  bass_source: "phrase_plan"
+  bass_tonal_centre:
+  anchors_dropped_per_bar:
+  bass_events_per_bar:
+  stab_events_per_bar:
+  boundary_timing:
 ```
-0  = beat 1 (downbeat)     8  = beat 3
-1  = "1-e"                 9  = "3-e"
-2  = "1-and"               10 = "3-and"
-3  = "1-ah"                11 = "3-ah"
-4  = beat 2                12 = beat 4
-5  = "2-e"                 13 = "4-e"
-6  = "2-and"               14 = "4-and"
-7  = "2-ah"                15 = "4-ah"
-```
-
-Beats 2 and 4 (slots 4 and 12) are snare territory in all DnB archetypes — kick
-archetypes deliberately avoid or approach these slots as part of their identity.
-
-**The 10 archetypes:**
-
-| Name | Genre | Key slots | Density |
-|------|-------|-----------|---------|
-| `half_step` | Neurofunk / dark DnB | 0 only | 0.10 |
-| `two_step` | DnB signature | 0, 6 | 0.35 |
-| `shuffled_two_step` | Jungle | 0, 6 + swing fills | 0.45 |
-| `stutter` | DnB / hardcore | 0–1, 8–9 double-hits | 0.50 |
-| `rolling` | Liquid / tech-step | 0, 3, 6, 9, 12 (every 3rd) | 0.60 |
-| `breakbeat_hardcore` | Early UK rave | 0, 6, 8, 14 complex | 0.55 |
-| `four_on_the_floor` | House / hardcore / techno | 0, 4, 8, 12 | 0.75 |
-| `happy_hardcore` | Bouncy hardcore | 0, 2, 4, 6, 8, 10, 12, 14 | 0.85 |
-| `amen` | Jungle / DnB break | Multi-hit: 0, 2, 4, 6, 8, 10 | 0.70 |
-| `gabber` | Industrial hardcore | Near-continuous | 1.00 |
-
-**Archetype selection** (`select_blend(density, instability, landscape_position)`):
-
-```
-Oak  (pos < 0.33):  density selects along half_step → two_step → rolling
-                    → four_on_the_floor → happy_hardcore
-                    Disruption archetype: breakbeat_hardcore
-
-Chaos (0.33–0.67):  blends shuffled_two_step → amen, weighted by (density × chaos_depth)
-                    Disruption archetype: gabber (density > 0.65) or stutter
-
-Nott (pos > 0.67):  blends two_step → half_step with increasing nott_depth
-                    Disruption archetype: stutter
-```
-
-In all territories, `instability` blends the base archetype toward the disruption
-archetype (capped at 65% so the base is always audible).
-
-**Role assignment** uses the expectation map of the selected blend:
-
-```
-slot expectation ≥ 0.7  →  anchor (or impact if release_pressure > 0.6 on final phrase)
-slot expectation < 0.25 + high instability  →  disruption (probabilistic)
-slot expectation < 0.25  →  ghost
-slot fired on any other mid-expectation slot  →  anchor
-unfired slot with expectation ≥ 0.7 (last bar, high anticipation)  →  withheld_resolution
-```
-
-`withheld_resolution` events have `velocity=0` and are display-only — they mark expected
-hits that were deliberately withheld. They appear in the sequencer grid as blue blocks
-but produce no MIDI output.
-
-### 4. Transport
-
-```
-Generate → Queue → Playing
-               ↓
-         [interrupt] → Generate new → replaces queue
-```
-
-- **Queue**: bank generates ahead, drops in at next bank boundary (bar 1, beat 1)
-- **Interrupt**: performer blows away queued bank; new bank generates immediately
-- **Force continuity**: if a bank is interrupted, the snapshot records `completed=False`
-  and trajectory updates from the actual exit point, not the intended destination
-
-```python
-class Transport:
-    def queue_bank(self, bank: Bank) -> None: ...
-    def interrupt_and_replace(self, bank: Bank) -> None: ...
-    def on_bank_boundary(self) -> None: ...   # called by clock at bar 1 beat 1
-    def current_position(self) -> str: ...    # bar.beat.tick
-```
-
-### 5. MIDI Out
-
-- Library: `rtmidi` (python-rtmidi)
-- Virtual MIDI port, named `thelmic`
-- Ableton (or any DAW) receives it as a standard MIDI input
-- No DAW API calls; no tight integration
-
-### 6. Web UI
-
-- Server: FastAPI + uvicorn (`thelmic/server.py`)
-- Frontend: single-page HTML/JS, no framework (`thelmic/static/index.html`)
-- Real-time: WebSocket at `/ws` — bidirectional state sync
-- Start: `python -m thelmic.server` or `thelmic` (after `pip install -e .`)
-- Open: `http://localhost:8000`
-
-**UI controls:**
-- Axis slider (Oak → Chaos → Nott) — sends `{ type: "axis", value: 0.0–1.0 }`
-- Force state bars — live readout of all five dimensions + resolution_likelihood
-- Play / Stop — starts/stops the MIDI playback loop in a background thread
-- BPM input — updates playback speed
-- Controls section — all five `Controls` fields as sliders
-
-**WebSocket message protocol:**
-
-Client → Server:
-```json
-{ "type": "axis",    "value": 0.5 }
-{ "type": "play" }
-{ "type": "stop" }
-{ "type": "bpm",     "value": 174 }
-{ "type": "control", "key": "groove_lock", "value": 0.8 }
-```
-
-Server -> Client:
-```json
-{
-  "type": "state",
-  "landscape_position": 0.5,
-  "transition": { "current_position": 0.5, "target_position": 0.8, "progress": 0.25 },
-  "force": { "anticipation": 0.7, "instability": 0.8, "release_pressure": 0.6 },
-  "behaviour": { "ghost_intensity": 0.74, "anchor_drop_prob": 0.2, "filter_target": 0.4 },
-  "phrase_plan": {
-    "bass_pattern": [],
-    "hook_pattern": [],
-    "phrase_state": [],
-    "call_slots": [],
-    "response_slots": [],
-    "silence_mask": {},
-    "pressure_curve": []
-  },
-  "runtime": { "bass_source": "phrase_plan", "bass_tonal_centre": 36 },
-  "bank_count": 4,
-  "playing": true,
-  "bpm": 174,
-  "midi_port": "poodle 0",
-  "bank_events": [{ "time": 0.0, "layer": "kick", "role": "anchor", "velocity": 100 }]
-}
-```
-
-`midi_port` is `null` until a port is selected. `bank_events` is the full event list
-for the current bank. Debug state must include `phrase_plan`, `bass_source:
-"phrase_plan"`, and `bass_tonal_centre`.
-
-**MIDI port selection** (WebSocket):
-```json
-{ "type": "midi_port", "value": "poodle" }
-```
-Server opens the named loopMIDI port (case-insensitive substring match). REST endpoint
-`GET /api/midi-ports` returns the current list of available output ports.
 
 ---
 
@@ -585,7 +395,7 @@ thelmic/
 |   |-- transition_engine.py        # Transition and TransitionEngine
 |   |-- behaviour_field.py          # BehaviourField module-facing contract
 |   |-- behaviour_hooks.py          # Behaviour/manual override merge helpers
-|   |-- phrase_plan.py              # PhrasePlan, PlanNote, PhraseState, planner MVP
+|   |-- phrase_plan.py              # PhrasePlan, PlanNote, SilenceMask, PhraseState, generate_phrase_plan
 |   |-- controls.py                 # Controls dataclass
 |   |-- archetypes.py               # rhythm archetypes and expectation maps
 |   |-- bank_generator.py           # Bank, Phrase, MIDIEvent, BankGenerator
@@ -620,398 +430,30 @@ thelmic/
 
 ---
 
-## Build Order
-
-The current build order is planner-first. Older kick/snare/hat/bass milestone notes
-are historical only and must not be used as the musical contract.
-
-### Phase 0 - Planner Foundation (complete)
-
-- `thelmic/phrase_plan.py` defines `PhrasePlan`, `PlanNote`, `SilenceMask`, and
-  `PhraseState`.
-- `generate_phrase_plan()` produces the default plan structure.
-- The server exposes the plan as `phrase_plan` for inspection/debug.
-- No full generator compliance was introduced in Phase 0.
-
-### Phase 1 - Planned Bass / Truth Layer (complete)
-
-- Bass is authored first from `phrase_plan.bass_pattern`.
-- Bass chooses and exposes a tonal centre.
-- Bass uses root / optional fifth / optional octave only.
-- Bass rhythm is locked to the kick grid.
-- Bass is not derived from stab, lead, hook, or call/response material.
-- Debug exposes `bass_source: "phrase_plan"` and `bass_tonal_centre`.
-
-### Phase 2 - Hook Identity (pending)
-
-- `PhrasePlan.hook_pattern` exists, but hook material is not yet rendered as a
-  first-class identity layer.
-- The next architectural step is to consume `hook_pattern` without disturbing
-  planned bass truth.
-- Hook must remain recognisable and must not mask or redefine bass meaning.
-
-### Current Execution Contract
-
-```text
-phrase_plan
--> bass_pattern
--> hook_pattern
--> phrase_state
--> call/response
--> silence_mask
--> pressure_curve
--> supporting layers
-```
-
-Implemented today:
-
-- `phrase_plan` exists and is visible.
-- `bass_pattern` is consumed by planned bass.
-- `hook_pattern` is planned but not consumed as rendered identity.
-- `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` exist but are
-  not yet the sole authority for all generators.
-- Pression generates CC/control/intensity movement only. It may express tension,
-  thinning, riser, impact, and drop anticipation, but it must not decide syntax or
-  note structure.
-
-### Pression / Pressure Scope
-
-Pression is not a musical syntax owner.
-
-Allowed:
-
-- CC output.
-- mapping-mode isolation for Pression lanes.
-- phrase-level control/intensity movement.
-- drop, tension, anticipation, thinning, impact, landing, bass/stab intensity as
-  control signals.
-- smaller intra-bar motion and event spikes on top of phrase-level values.
-
-Not allowed:
-
-- inventing call/response windows.
-- generating notes.
-- deciding bass truth or hook identity.
-- replacing planner phrase states with pressure-curve shape labels.
-
-Impact reduction rule:
-
-- Do not implement reduced impact as repeated lower-velocity copies of motif
-  material. It reads as echo/delay, not restraint.
-- Prefer thinning, omission, shorter articulation, density reduction, or timbral
-  softening.
-- Echo/delay must be explicit FX only.
-
----
-
-## Key Principles
-
-1. Bass defines meaning. It is first-class authored truth from
-   `phrase_plan.bass_pattern`.
-2. Hook defines identity. It is planned now, but first-class hook rendering is the
-   next pending phase.
-3. PhrasePlan defines syntax. Generators must not independently invent structure
-   once their planner phase has landed.
-4. BehaviourField is the module-facing behaviour contract. Modules do not consume
-   raw `ForceState` for musical behaviour.
-5. Pression/pressure is CC, control, and intensity only. It must not own musical
-   syntax.
-6. Call must leave space; response must fill that space.
-7. Silence is punctuation, not absence.
-8. Only one layer may destabilise the system at a time.
-9. Supporting layers comply with bass, hook, syntax, and silence or they are
-   reduced/removed.
-10. Transition history matters, but transition-engine work is parallel/future
-    intent infrastructure, not the current implemented musical generation order.
-11. Perception is ground truth - Oak listens and labels.
-
-Required debug state:
-
-```yaml
-phrase_plan:
-  bass_pattern: ...
-  hook_pattern: ...
-  phrase_state: ...
-  call_slots: ...
-  response_slots: ...
-  silence_mask: ...
-  pressure_curve: ...
-runtime:
-  bass_source: "phrase_plan"
-  bass_tonal_centre: 36
-```
-
----
-
-## Territory Force Profiles (starting defaults)
-
-```python
-OAK_PROFILE = ForceState(
-    anticipation=0.2,
-    release_pressure=0.1,
-    instability=0.05,
-    density=0.6,
-    control_vs_chaos=0.1,
-)
-
-CHAOS_PROFILE = ForceState(
-    anticipation=0.7,
-    release_pressure=0.6,
-    instability=0.8,
-    density=0.75,
-    control_vs_chaos=0.8,
-)
-
-NOTT_PROFILE = ForceState(
-    anticipation=0.1,
-    release_pressure=0.0,
-    instability=0.2,
-    density=0.5,
-    control_vs_chaos=0.3,
-)
-```
-
-These are starting points. They will be refined through perceptual iteration.
-
----
-
-## Session Guide (Token Efficiency)
-
-This project is designed to be worked on in narrow, focused Claude Code sessions.
-Each session should have one target. Do not let sessions sprawl.
-
-### Opening a session
-
-Start every session with:
-
-```
-Read ARCHITECTURE.md. Current phase is [N]. Current target is [one sentence].
-Do not read other files unless necessary for the target.
-```
-
-Then state only what you need done. Do not ask for a plan, a summary, or a
-tour of the codebase. Go straight to the work.
-
-### Session targets by phase
-
-Use the planner-first backlog as the active development map:
+## Active Development Backlog
 
 | Phase | Target |
-|-------|--------|
-| 0 | ~~Planner foundation: `PhrasePlan`, default structures, debug visibility~~ **done** |
-| 1 | ~~Planned bass: first-class authored truth from `phrase_plan.bass_pattern`~~ **done** |
-| 2 | Hook identity: consume `hook_pattern` as recognisable rendered material |
-| 3 | Phrase syntax compliance: make generators obey `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` |
-| 4 | Call generator: calls only in planned call windows, leaving response space |
-| 5 | Response generator: responses only answer planned calls and resolve/reframe tension |
-| 6 | Silence system: event generators obey planned punctuation |
-| 7 | Pressure integration: Pression remains CC/control/intensity and follows plan context |
-| 8 | Supporting layer compliance: reduce/remove layers that mask bass, hook, syntax, or silence |
-| 9 | Drop construction: align bass, kick, hook, density, and contrast at `DROP_RELOCK` |
-| 10 | Validation: enforce bass stability, hook identity, syntax clarity, silence, and drop impact |
-
-### Rules for Claude Code sessions
-
-- Read `ARCHITECTURE.md` first, nothing else unless required
-- Work on one file or one interface at a time
-- Do not refactor and extend in the same session
-- Commit before ending a session — clean git state is cheap context
-- If a session produces something that needs perceptual verification,
-  stop and let Oak listen before continuing
-- Do not scaffold Phase N+1 during Phase N
-
-### What NOT to ask Claude Code
-
-- "Build the sequencer" — too broad
-- "Refactor everything to be cleaner" — expensive, low value early
-- "What does this codebase do?" — read ARCHITECTURE.md yourself first
-- "Plan the next few phases" — the plan is already here
+|---|---|
+| 0 | Planner foundation - done |
+| 1 | Planned bass truth - done |
+| 2 | Hook identity rendering - next |
+| 3 | Phrase syntax compliance |
+| 4 | Planner-owned call generation |
+| 5 | Planner-owned response generation |
+| 6 | Silence mask compliance |
+| 7 | Pressure integration as CC/control only |
+| 8 | Supporting layer compliance |
+| 9 | Drop construction aligned to bass, hook, and silence |
+| 10 | Validation and enforcement |
 
 ---
-
-## Notes for Claude Code
-
-- Read `ARCHITECTURE.md` first, then inspect only the files needed for the target.
-- Preserve planner-first ordering. Do not let a generator define syntax that belongs
-  in `PhrasePlan`.
-- Current status: Phase 0 planner foundation complete; Phase 1 planned bass
-  complete; Phase 2 hook consumption pending.
-- Do not change note/rhythm generation when working only on Pression, CC mapping,
-  docs, or debug state.
-- Use dataclasses for structural contracts.
-- No LLM calls at runtime. The intent layer at this stage is axis/transition state.
-- Python 3.11+. Use `pyproject.toml` with `[project]` table.
-- rtmidi via `python-rtmidi`. Virtual port name: `thelmic`.
 
 ## Future / Parallel Transition-Intent Work
 
-This section preserves transition-engine design material. It is parallel/future intent infrastructure, not the current implemented musical generation order. The current generation contract remains `phrase_plan -> bass_pattern -> hook_pattern -> phrase_state -> call/response -> silence_mask -> pressure_curve -> supporting layers`.
+Transition-engine work is preserved as future/parallel behavioural infrastructure.
+It is not the current implemented musical generation order.
 
-The current system has working pressure curves, deformation modulation, MIDI CC output, and a live Oak → Chaos → Nott slider. The next phase should not simplify the UI yet, and should not add more pressure curve shapes for their own sake.
-
-The priority is to stabilise the behavioural core so the system can be observed, debugged, and heard as it changes over time.
-
-### Current Problem
-
-The system can currently:
-
-- move through the Thelmic landscape using the slider
-- trigger pressure curves
-- affect beat structure through deformation modules
-- affect filters/gates/effects through outbound MIDI CC
-
-Transition state now exists as intent/current-position infrastructure. Remaining work is to keep pressure behaviour musical and subordinate to planner syntax, rather than treating pressure curves as independent structural generators.
-
-### Core Concept: Transition / Intent Vector
-
-A slider movement should not directly set the live landscape position.
-
-Instead, dragging from one point to another should create an active transition object:
-
-```yaml
-transition:
-  start_position: 0.32
-  target_position: 0.78
-  current_position: 0.41
-  remaining_distance: 0.37
-  duration_bars: 8
-  elapsed_bars: 2
-  direction: toward_nott
-  active: true
-```
-
-This transition is the engine's current intent.
-
-The UI should render this as a horizontal bar from the current position to the target position on the Oak → Chaos → Nott axis. As the system travels, the bar shortens until the destination is reached.
-
-### Transition Behaviour
-
-The transition should:
-
-1. Capture the current landscape position as `start_position`
-2. Capture the user's selected destination as `target_position`
-3. Move the actual landscape state toward the target over musical time
-4. Expose transition progress, remaining distance, direction, velocity, and phase
-5. Trigger or modulate internal pressure behaviours automatically
-6. Update visual state so the performer can see where the system is going
-
-The key idea:
-
-```text
-user sets destination
-system performs the journey
-```
-
-not:
-
-```text
-user manually triggers every pressure curve
-```
-
-### Pressure Curves Become Internal Behaviour
-
-Pressure curves should remain available, but they should increasingly behave as internal modulation timelines attached to transitions.
-
-They should not be thought of primarily as user-facing controls.
-
-Example:
-
-```yaml
-on_transition:
-  from: oak
-  to: chaos
-  behaviours:
-    - increase ghost injection
-    - tighten gate
-    - reduce stability
-    - avoid full release
-
-on_transition:
-  from: chaos
-  to: nott
-  behaviours:
-    - decay ghost pressure
-    - open filter or collapse it
-    - increase impact behaviour
-    - resolve or discharge accumulated tension
-```
-
-### Required State to Expose
-
-Add a visible/debuggable state model that includes:
-
-```yaml
-thelmic_state:
-  position: 0.0-1.0
-  target_position: 0.0-1.0
-  direction: left | right | none
-  transition_active: true/false
-  transition_progress: 0.0-1.0
-  transition_remaining: 0.0-1.0
-  unresolved_tension: 0.0-1.0
-  phrase_phase: 0.0-1.0
-  last_impact_time: bar.beat
-  recent_intensity: 0.0-1.0
-```
-
-This state should be inspectable in the UI/log/debug output so we can verify whether the engine's internal state matches what we hear.
-
-### Why This Matters
-
-The current system can make pressure happen, but the performer still has to manually coordinate too much of it.
-
-The next goal is for the system to understand:
-
-```text
-where we are
-where we are going
-how far remains
-what pressure has been built
-what has not yet resolved
-```
-
-Then deformation modules and CC outputs can respond musically to the journey.
-
-### Behaviour Before UI Simplification
-
-Do not collapse the interface into the final "tension trackpad" yet.
-
-First, the behaviour model must prove itself using the existing UI/debug visibility.
-
-The correct order is:
-
-1. Add transition/intention state
-2. Make pressure curves respond to transitions
-3. Expose state visually and in logs
-4. Confirm the audible result
-5. Only then simplify the UI into a tension trackpad
-
-### Future UI Direction: 2D Tension Trackpad
-
-Eventually the main control may become a 2D gesture surface.
-
-Horizontal movement:
-
-```text
-Oak → Chaos → Nott
-```
-
-Vertical movement:
-
-```text
-up   = intensify / strain / lift / accelerate
-down = drain / hollow / restrain / collapse
-```
-
-But this should be implemented only after transition behaviour is musically convincing.
-
-### Future Transition Development Plan
-
-The phase numbers below apply only to this transition-intent thread, not to the planner-first musical backlog.
-
-#### Transition Phase 1: Transition State
-
-Implement a `Transition` model:
+The transition model:
 
 ```python
 @dataclass
@@ -1024,344 +466,36 @@ class Transition:
     active: bool
 ```
 
-Add derived values:
+Derived values:
 
-```python
+```text
 progress
 remaining
 direction
 velocity
 ```
 
-#### Transition Phase 2: Transition Engine
-
-Add a transition engine that updates current landscape position over musical time.
-
-The slider should set a target, not instantly overwrite the live position.
-
-#### Transition Phase 3: Pressure Behaviour Hooks
-
-Allow pressure curves and deformation modules to respond to transition state.
-
-Example inputs to modules:
-
-```python
-transition_progress
-transition_remaining
-transition_direction
-unresolved_tension
-phrase_phase
-```
-
-#### Transition Phase 4: Debug/Visual State
-
-Render:
-
-- current position on Oak → Chaos → Nott axis
-- target position
-- shrinking transition bar
-- transition direction
-- active pressure behaviours
-- current deformation intensities
-- current outbound CC values
-
-#### Transition Phase 5: Auditory Validation
-
-Test whether movement through the landscape now creates audible, expected pressure changes without manually launching curves.
-
-Expected result:
+Separation rule:
 
 ```text
-Moving toward Chaos should create structured tension.
-Moving toward Nott should discharge, collapse, or impact.
-Returning toward Oak should stabilise without becoming dead.
+TransitionEngine -> ForceEngine -> BehaviourField -> modules/renderers
 ```
 
-### Design Principle
+Transition state represents traversal/intent. Force state represents landscape
+state. PhrasePlan represents musical syntax.
 
-Pressure curves and deformations should not be extra controls the performer must manually operate.
-
-They should become embedded musical behaviours driven by transition intent.
-
-The performer should ride the system at the level of intent.
-
-The engine should handle the pressure mechanics.
+Transition and pressure behaviours may influence `BehaviourField` and Pression
+control lanes, but they must not override the planner's ownership of bass, hook,
+phrase syntax, call/response, silence, or drop structure.
 
 ---
 
-## Amendments to Phases 1–3 Implementation Plan
-
-These amendments refine the proposed implementation to ensure correct architectural separation, predictable behaviour, and clean extensibility. They should be applied before implementation proceeds.
-
----
-
-### 1. Keep Transition State Separate from ForceEngine
-
-**Do not place `Transition` in `force_engine.py`.**
-
-Instead:
-
-```
-thelmic/transition_engine.py
-  - Transition
-  - TransitionEngine
-```
-
-**Reason:**
-Transition state represents **traversal / intent**, not **force / landscape state**.
-
-Maintain clean dependency direction:
-
-```
-TransitionEngine -> ForceEngine -> BehaviourField -> modules/deformations
-```
-
-Not:
-
-```
-ForceEngine owns Transition
-```
-
----
-
-### 2. Manual Override Merge Must Be Per-Target
-
-Manual pressure curves should override **only the targets they explicitly control**.
-
-Do NOT treat "manual active" as disabling all behaviour hooks.
-
-Correct merge rule:
-
-```python
-result = dict(hook_overrides)
-result.update(manual_overrides)
-```
-
-Meaning:
-
-- Manual overrides win for the same key
-- Behaviour hooks still fill any missing targets
-
-Example:
-
-```yaml
-manual:
-  cc.filter_cutoff: 0.8
-
-hooks:
-  ghost_inject: 0.6
-```
-
-Final result:
-
-```yaml
-cc.filter_cutoff: 0.8
-ghost_inject: 0.6
-```
-
----
-
-### 3. Slider Behaviour: Separate Play vs Stop
-
-Avoid mixing target-setting and time advancement during UI drag.
-
-#### When playing:
-- Slider sets `target_position`
-- `TransitionEngine` performs the journey over time
-
-#### When stopped:
-- Slider directly previews position (immediate, no advance_fractional)
-- Do NOT implicitly call `advance_fractional()` on every drag
-
-Optional later enhancement: explicit "preview transition" mode.
-
----
-
-### 4. Transition Duration Must Be Configurable
-
-Add a constant immediately:
-
-```python
-DEFAULT_TRANSITION_BARS = 8.0
-```
-
-This should be easily adjustable during auditory testing.
-
----
-
-### 5. Behaviour Hooks Must Use Named Targets
-
-Hooks should return values using the same key structure as curve overrides.
-
-Initial form:
-
-```python
-{
-  "ghost_inject": 0.63
-}
-```
-
-Future-safe form (when CC targets are added):
-
-```python
-{
-  "deformations.ghost_inject.intensity": 0.63,
-  "cc.filter_cutoff": 0.72
-}
-```
-
-Start simple with the existing override key format. Align with it, do not invent a new one.
-
----
-
-### 6. Expose Transition State via WebSocket Immediately
-
-Add full transition visibility to the state broadcast from day one:
-
-```yaml
-transition:
-  active: true/false
-  start_position: float
-  current_position: float
-  target_position: float
-  progress: 0.0–1.0
-  remaining: 0.0–1.0
-  direction: toward_nott | toward_oak | none
-  velocity: 0.0–1.0
-```
-
-**This is critical for auditory validation.** The audible result cannot be verified without visible state.
-
----
-
-## Amended Implementation Summary
-
-| # | Change |
-|---|---|
-| 1 | `Transition` lives in `transition_engine.py`, not `force_engine.py` |
-| 2 | Hook/manual merge is per-target: hooks first, manual overwrites specific keys only |
-| 3 | Stopped slider = immediate position preview; playing slider = sets target only |
-| 4 | `DEFAULT_TRANSITION_BARS = 8.0` as a named constant from the start |
-| 5 | Hook return keys match existing override format (`"ghost_inject"` etc.) |
-| 6 | Full transition state broadcast on every WS state push |
-
----
-
-## Core Principle
-
-> The performer sets intent (destination).  
-> The system performs the journey.  
-> Behaviour hooks supply pressure automatically unless explicitly overridden.
-
----
-
-## Musically Legible System Backlog
-
-This is the current forward architecture for making the generator musically legible.
-
-Core hierarchy:
-
-```text
-1. Bassline      = truth
-2. Hook          = identity
-3. Phrase syntax = structure
-4. Call/response = motion
-5. Silence       = punctuation
-6. Pressure      = anticipation
-7. Support       = compliance
-8. Drop          = alignment
-9. Validation    = enforcement
-```
-
-Global rules:
-
-- only one layer may destabilise the system at a time.
-- bass defines tonal meaning globally.
-- hook must remain recognisable at all times.
-- call must leave space.
-- response must fill that space.
-- silence must be intentional.
-- supporting layers must comply or be removed.
-
-### Planner Contract
-
-All generators should eventually consume `PhrasePlan`.
-
-Planner output:
-
-```text
-bass_pattern
-hook_pattern
-phrase_state
-call_slots
-response_slots
-silence_mask
-pressure_curve
-```
-
-No generator should independently define structure once its phase is complete.
-
-### Backlog Status
-
-| Phase | Status | Notes |
-|---|---|---|
-| 0 Planner foundation | done | `thelmic/phrase_plan.py`; visible as `phrase_plan`; no full generator compliance yet |
-| 1 Bassline first | done | planned bass is authored from `bass_pattern`, kick-grid locked, root/fifth/octave constrained |
-| 2 Hook layer | next | implement explicit `hook_pattern` rendering and recognisability checks |
-| 3 Phrase structure | partial | `phrase_state`, `call_slots`, `response_slots`, `silence_mask` exist; generators do not fully obey them yet |
-| 4 Call generator | partial | dual-modal bass/stab call logic exists; must be constrained by planner slots |
-| 5 Response generator | partial | stab responses can derive from planned bass calls; must be constrained by planner slots |
-| 6 Silence system | not started for notes | Pression models silence; event generators do not yet obey `silence_mask` |
-| 7 Pressure integration | partial | Pression handles macro CC/drop behaviour; structural decision-making must move out of Pression over time |
-| 8 Support compliance | partial | grid/debug separation exists; support-layer conflict checks not implemented |
-| 9 Drop construction | partial | Pression drop behaviour exists; note/event drop alignment not planner-driven yet |
-| 10 Validation layer | not started | no `validate_all()` enforcement pass yet |
-
-### Immediate Next Phase: Hook Identity
-
-Goal: introduce explicit hook generation without disturbing planned bass.
-
-Required:
-
-- generate a 2-5 note hook motif.
-- loop over 1-2 bars.
-- stay recognisable across the phrase.
-- avoid masking the bass.
-- store as `PhrasePlan.hook_pattern`.
-- expose/debug hook events distinctly from call/response stabs.
-
-Do not:
-
-- let call/response redefine hook identity.
-- add harmonic complexity as a substitute for memorability.
-- change Pression, transition, or rhythm generation unless necessary for hook output.
-
-### Later Compliance Target
-
-Final execution model:
-
-```python
-bass = generate_bass(plan)
-hook = generate_hook(plan, bass)
-
-phrase = define_phrase_structure(plan)
-
-call = generate_call(phrase, bass, hook)
-response = generate_response(phrase, call, bass)
-
-silence = insert_silence(phrase, call, response)
-pressure = generate_pressure(phrase, silence)
-
-support = generate_supporting_layers(bass, hook, call, response, silence, pressure)
-drop = construct_drop(bass, hook, pressure, silence)
-
-validate_all()
-```
-
-Final rule:
-
-```text
-Bass defines meaning.
-Hook defines identity.
-Everything else behaves relative to those two.
-```
+## Session Rules
+
+- Read `ARCHITECTURE.md` first.
+- Preserve planner-first ordering.
+- Do not change runtime behaviour when asked for documentation only.
+- Do not let generators invent syntax that belongs in `PhrasePlan`.
+- Do not let Pression become a note generator.
+- Do not refactor and extend in the same session.
+- Commit before ending a completed session.
