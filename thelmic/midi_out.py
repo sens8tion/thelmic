@@ -14,6 +14,8 @@ LAYER_CHANNELS: dict[str, int] = {
     "kick":  0,
     "snare": 1,
     "hat":   2,
+    "bass":  3,
+    "stab":  4,
 }
 
 
@@ -46,6 +48,8 @@ class MIDIOut:
         self._midiout = rtmidi.MidiOut()
         self._port_open = False
         self._port_name: Optional[str] = None
+        self.last_send_ms: float = 0.0
+        self.last_cleanup_ms: float = 0.0
         self._open_port(port_name)
 
     def _open_port(self, port_name: Optional[str]) -> None:
@@ -111,33 +115,42 @@ class MIDIOut:
         abs_bar_idx    = phrase.phrase_index * BARS_PER_PHRASE + bar_in_phrase
         bar_start_tick = abs_bar_idx * ticks_per_bar
         bar_end_tick   = bar_start_tick + ticks_per_bar
+        bar_end_s      = bar_end_tick * seconds_per_tick   # bar-relative end time
 
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if event.velocity == 0:
+            if not getattr(event, "active", True) or event.velocity == 0:
                 continue
             t_tick = event_to_abs_tick(event.time)
             if bar_start_tick <= t_tick < bar_end_tick:
                 t_on  = t_tick * seconds_per_tick
-                t_off = t_on + event.duration
+                # Cap note-off at bar boundary so the function always returns on time.
+                # Long-duration notes (bass, stabs) would otherwise sleep past bar_end_abs,
+                # delaying the next bar's start and causing an audible stutter.
+                t_off = min(t_on + event.duration, bar_end_s)
                 ch    = LAYER_CHANNELS.get(event.layer, 0)
                 timeline.append((t_on,  "on",  ch, event.note, event.velocity))
                 timeline.append((t_off, "off", ch, event.note, 0))
 
         timeline.sort(key=lambda x: x[0])
 
+        send_ms = 0.0
         for t_rel, action, ch, note, vel in timeline:
             target_time = bank_start + t_rel
             now = time.perf_counter()
             if target_time > now:
                 time.sleep(target_time - now)
+            t_send = time.perf_counter()
             if action == "on":
                 self.send_note_on(ch, note, vel)
             else:
                 self.send_note_off(ch, note)
+            send_ms += (time.perf_counter() - t_send) * 1000
+        self.last_send_ms = round(send_ms, 3)
 
         bar_end_abs = bank_start + bar_end_tick * seconds_per_tick
         remaining   = bar_end_abs - time.perf_counter()
+        self.last_cleanup_ms = 0.0
         if remaining > 0:
             time.sleep(remaining)
 
@@ -175,7 +188,7 @@ class MIDIOut:
         # Build a flat sorted timeline of (abs_time_s, action, ch, note, vel)
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in bank.all_events():
-            if event.velocity == 0:
+            if not getattr(event, "active", True) or event.velocity == 0:
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration
@@ -228,7 +241,7 @@ class MIDIOut:
 
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if event.velocity == 0:
+            if not getattr(event, "active", True) or event.velocity == 0:
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration

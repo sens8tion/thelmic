@@ -726,6 +726,7 @@ def _playback_loop() -> None:
                         "midi_note_send_ms": getattr(_midi, "last_send_ms", 0.0),
                         "midi_cleanup_ms": getattr(_midi, "last_cleanup_ms", 0.0),
                         "boundary_total_ms": round(boundary_work_ms, 3),
+                        "play_ms": round(play_ms, 2),
                         "loop_iteration_ms": 0.0,
                         "gc_pause_suspected": False,
                     }
@@ -741,6 +742,7 @@ def _playback_loop() -> None:
                 overhead_ms = (t_end - t_after_play) * 1000
                 loop_ms = (t_end - t_after_play) * 1000
                 _boundary_timing["loop_iteration_ms"] = round(loop_ms, 3)
+                _boundary_timing["play_ms"] = round(play_ms, 2)
 
                 if _BAR_LOG.isEnabledFor(logging.DEBUG):
                     _BAR_LOG.debug(
