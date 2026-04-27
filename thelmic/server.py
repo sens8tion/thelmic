@@ -24,14 +24,22 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
-from thelmic.bass import generate_bass
+from thelmic.bass import (
+    generate_bass, generate_bass_call, generate_bass_response_from_steps,
+)
 from thelmic.behaviour_field import compute_behaviour_field
+from thelmic.call_response import (
+    CallResponseState, Mode, default_state, advance_mode, derive_response_steps,
+)
 from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
 from thelmic.pressure_curves import CurveEngine
 from thelmic.rhythm import conformance_for_landscape
-from thelmic.stabs import collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass
+from thelmic.stabs import (
+    collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
+    generate_stab_call, generate_stab_response_from_steps,
+)
 from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
@@ -103,6 +111,7 @@ _bpm: float = 174.0
 _current_bank = None   # Bank | None
 _curve_engine: CurveEngine = CurveEngine()
 _pending_curve_starts: set[int] = set()
+_cr_state: CallResponseState = default_state()
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
@@ -181,7 +190,7 @@ def _record_timing(name: str, value_ms: float) -> float:
 
 
 def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
-    global _runtime_debug
+    global _runtime_debug, _cr_state
     if not _engine:
         _runtime_debug = {
             "anchors_dropped_per_bar": {},
@@ -201,20 +210,84 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug = apply_anchor_withholding(bank, behaviour, progress)
     base_events = list(bank.all_events())
     landscape_position = _engine.landscape_position
-    bass_events = generate_bass(base_events, behaviour, landscape_position)
-    stab_debug: dict = {}
-    # Stab is explicitly derived from bass: bass = call, stab = response.
-    # Pass bass_events so stab timing is shifted-bass rhythm, not independent.
-    stab_events = generate_stabs_from_bass(
-        bass_events, base_events, behaviour, landscape_position, debug=stab_debug,
+
+    # Collect bars present in this bank
+    from thelmic.stabs import _time_to_bar_step
+    bars_present: list[int] = sorted({
+        _time_to_bar_step(e.time)[0]
+        for e in base_events
+        if _time_to_bar_step(e.time)[1] >= 0
+    })
+
+    # Advance call/response mode state bar-by-bar through this bank
+    bank_base = bank.bank_index * 16  # global bar offset for phrase boundary detection
+    for bar_in_bank in bars_present:
+        _cr_state = advance_mode(_cr_state, bank_base + bar_in_bank)
+
+    mode = _cr_state.force_mode if _cr_state.force_mode is not None else _cr_state.mode
+    source = next(
+        (e for e in base_events if e.layer in {"kick", "snare"}),
+        base_events[0] if base_events else None,
     )
+
+    bass_events: list = []
+    stab_events: list = []
+
+    if mode == Mode.STAB_LEADS:
+        # Stab leads in CALL_WINDOW (steps 0–7); bass responds in RESPONSE_WINDOW (8–15)
+        all_call_stabs: list = []
+        leader_steps_by_bar: dict[int, list[int]] = {}
+
+        for bar in bars_present:
+            call_evts, leader_steps = generate_stab_call(
+                abs_bar=bar, behaviour=behaviour,
+                landscape_position=landscape_position, source=source,
+            )
+            all_call_stabs.extend(call_evts)
+            if leader_steps:
+                leader_steps_by_bar[bar] = derive_response_steps(leader_steps)
+
+        bass_events = generate_bass_response_from_steps(
+            leader_steps_by_bar, base_events, behaviour, landscape_position,
+        )
+        stab_events = all_call_stabs
+
+        _log.debug(
+            "bank=%d mode=STAB_LEADS bars_in_mode=%d",
+            bank.bank_index, _cr_state.bars_in_mode,
+        )
+
+    else:  # Mode.BASS_LEADS
+        # Bass leads in CALL_WINDOW (steps 0–7); stab responds in RESPONSE_WINDOW (8–15)
+        bass_call_evts = generate_bass_call(base_events, behaviour, landscape_position)
+        bass_call_steps_by_bar: dict[int, list[int]] = {}
+        for e in bass_call_evts:
+            bar, step = _time_to_bar_step(e.time)
+            if step >= 0:
+                bass_call_steps_by_bar.setdefault(bar, []).append(step)
+
+        all_resp_stabs: list = []
+        for bar, call_steps in bass_call_steps_by_bar.items():
+            all_resp_stabs.extend(generate_stab_response_from_steps(
+                leader_steps=call_steps, abs_bar=bar,
+                behaviour=behaviour, landscape_position=landscape_position,
+                source=source,
+            ))
+
+        bass_events = bass_call_evts
+        stab_events = all_resp_stabs
+
+        _log.debug(
+            "bank=%d mode=BASS_LEADS bars_in_mode=%d",
+            bank.bank_index, _cr_state.bars_in_mode,
+        )
+
     appended_bass  = _append_events_to_bank(bank, bass_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
-    _runtime_debug["bass_events_per_bar"]  = _events_per_bar(appended_bass)
-    _runtime_debug["stab_events_per_bar"]  = _events_per_bar(appended_stabs)
-    _runtime_debug["stab_bass_root"]       = stab_debug.get("bass_root_note", 36)
-    _runtime_debug["stab_stab_root"]       = stab_debug.get("stab_root_note", 60)
-    _runtime_debug.update(stab_debug)
+    _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
+    _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
+    _runtime_debug["call_response_mode"]       = mode.value
+    _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
@@ -412,6 +485,12 @@ def _force_state_dict(include_bank: bool = True) -> dict:
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
+        "call_response": {
+            "mode": _cr_state.mode.value,
+            "bars_in_mode": _cr_state.bars_in_mode,
+            "mode_duration_bars": _cr_state.mode_duration_bars,
+            "force_mode": _cr_state.force_mode.value if _cr_state.force_mode else None,
+        },
         "runtime": {**_runtime_debug, "boundary_timing": _boundary_timing},
         "force": {
             "anticipation": round(fs.anticipation, 3),
@@ -873,6 +952,19 @@ async def _handle_message(msg: dict) -> None:
 
     elif kind == "stop":
         _playing = False
+        _cr_state = default_state()   # reset mode on stop
+        await _broadcast({"type": "state", **_force_state_dict()})
+
+    elif kind == "call_response_mode":
+        raw = msg.get("value")
+        import dataclasses
+        if raw is None:
+            _cr_state = dataclasses.replace(_cr_state, force_mode=None)
+        else:
+            try:
+                _cr_state = dataclasses.replace(_cr_state, force_mode=Mode(raw))
+            except ValueError:
+                pass
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "bpm":

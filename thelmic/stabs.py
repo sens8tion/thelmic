@@ -44,6 +44,11 @@ from typing import Optional
 
 from thelmic.bank_generator import MIDIEvent
 from thelmic.behaviour_field import BehaviourField
+from thelmic.call_response import (
+    CALL_WINDOW, RESPONSE_WINDOW,
+    RESPONSE_WINDOW_MIN, RESPONSE_WINDOW_MAX,
+    derive_response_steps,
+)
 from thelmic.rhythm import conformance_for_landscape
 
 # ---------------------------------------------------------------------------
@@ -223,6 +228,36 @@ SYNCOPATED_HOOK = StabMotif(
 )
 
 _MOTIFS = [LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK]
+
+# Call-window motifs — steps must be in CALL_WINDOW (0–7)
+CALL_EARLY = StabMotif(
+    steps=(2, 6),
+    intervals=(0, 3),
+    durations=(1, 1),
+    velocities=(88, 80),
+)
+
+CALL_SYNCO = StabMotif(
+    steps=(1, 5, 7),
+    intervals=(0, 5, 3),
+    durations=(1, 1, 1),
+    velocities=(90, 78, 85),
+)
+
+CALL_OFFBEAT = StabMotif(
+    steps=(2, 4, 6),
+    intervals=(0, 2, 5),
+    durations=(1, 1, 2),
+    velocities=(85, 78, 95),
+)
+
+_CALL_MOTIFS = [CALL_EARLY, CALL_SYNCO, CALL_OFFBEAT]
+
+
+def _select_call_motif(landscape_position: float, bank_idx: int) -> StabMotif:
+    """Pick a call-window motif deterministically (offset from response motif)."""
+    idx = (bank_idx + int(landscape_position * 10) + 1) % len(_CALL_MOTIFS)
+    return _CALL_MOTIFS[idx]
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +682,131 @@ def generate_stabs_from_bass(
             "stab_root_note": root,
         })
     return stab_events
+
+
+# ---------------------------------------------------------------------------
+# Dual-modal generators (call_response system)
+# ---------------------------------------------------------------------------
+
+def generate_stab_call(
+    abs_bar: int,
+    behaviour: BehaviourField,
+    landscape_position: float = 0.0,
+    source: Optional[MIDIEvent] = None,
+) -> tuple[list[MIDIEvent], list[int]]:
+    """Generate stab call events in CALL_WINDOW (steps 0–7, beats 1–2).
+
+    STAB_LEADS mode: stab fires as the leader in beats 1–2.
+
+    Returns (events, leader_steps) where:
+    - events: rendered MIDIEvent list for this bar
+    - leader_steps: call-window step indices (for derive_response_steps())
+
+    Motif is selected and varied deterministically from abs_bar.
+    Steps that drift out of CALL_WINDOW after variation are dropped.
+    """
+    bank_idx   = (abs_bar - 1) // 16
+    base_motif = _select_call_motif(landscape_position, bank_idx)
+    varied     = _varied_motif(base_motif, abs_bar)
+
+    # Filter to CALL_WINDOW — variation may push steps out
+    valid_indices = [i for i, s in enumerate(varied.steps) if s in CALL_WINDOW]
+    if not valid_indices:
+        return [], []
+
+    try:
+        call_motif = StabMotif(
+            steps=tuple(varied.steps[i] for i in valid_indices),
+            intervals=tuple(varied.intervals[i] for i in valid_indices),
+            durations=tuple(varied.durations[i] for i in valid_indices),
+            velocities=tuple(varied.velocities[i] for i in valid_indices),
+        )
+    except AssertionError:
+        return [], []
+
+    root   = MID_NOTE - 12 if landscape_position >= 0.67 else MID_NOTE
+    events = []
+    for i in range(len(call_motif)):
+        step     = call_motif.steps[i]
+        note     = max(0, min(127, root + call_motif.intervals[i]))
+        velocity = max(1, min(127, int(call_motif.velocities[i]
+                                       * max(0.5, behaviour.energy_level))))
+        ev = _make_stab_event(
+            source, _step_to_time(abs_bar, step),
+            note, velocity, call_motif.durations[i], behaviour,
+        )
+        events.append(ev)
+        _log_stab_event(ev, abs_bar, step)
+
+    leader_steps = list(call_motif.steps)
+
+    if _log.isEnabledFor(logging.DEBUG):
+        _log.debug(
+            "bar=%d STAB_CALL leader_steps=%s root=%d",
+            abs_bar, leader_steps, root,
+        )
+
+    return events, leader_steps
+
+
+def generate_stab_response_from_steps(
+    leader_steps: list[int],
+    abs_bar: int,
+    behaviour: BehaviourField,
+    landscape_position: float = 0.0,
+    source: Optional[MIDIEvent] = None,
+) -> list[MIDIEvent]:
+    """Generate stab response events in RESPONSE_WINDOW (steps 8–15).
+
+    BASS_LEADS mode: bass is the leader; stab answers in beats 3–4.
+
+    leader_steps: call-window steps (0–7) from the bass leader.
+    derive_response_steps() maps them to {8..15}.
+
+    Hard constraint: asserts every event has step >= RESPONSE_WINDOW_MIN.
+    """
+    response_steps = derive_response_steps(leader_steps)
+    if not response_steps:
+        return []
+
+    bank_idx   = (abs_bar - 1) // 16
+    base_motif = _select_motif(landscape_position, bank_idx)
+    root       = _derive_stab_root(36, landscape_position)
+
+    n = min(len(response_steps), len(base_motif))
+    try:
+        resp_motif = StabMotif(
+            steps=tuple(response_steps[:n]),
+            intervals=base_motif.intervals[:n],
+            durations=base_motif.durations[:n],
+            velocities=base_motif.velocities[:n],
+        )
+    except AssertionError:
+        return []
+
+    events = []
+    for i in range(len(resp_motif)):
+        step = resp_motif.steps[i]
+        assert step >= RESPONSE_WINDOW_MIN, (
+            f"stab response step {step} violates HARD RULE (< {RESPONSE_WINDOW_MIN})"
+        )
+        note     = max(0, min(127, root + resp_motif.intervals[i]))
+        velocity = max(1, min(127, int(resp_motif.velocities[i]
+                                       * max(0.5, behaviour.energy_level) * 0.85)))
+        ev = _make_stab_event(
+            source, _step_to_time(abs_bar, step),
+            note, velocity, resp_motif.durations[i], behaviour,
+        )
+        events.append(ev)
+        _log_stab_event(ev, abs_bar, step)
+
+    if _log.isEnabledFor(logging.DEBUG):
+        _log.debug(
+            "bar=%d STAB_RESPONSE leader=%s → resp_steps=%s root=%d",
+            abs_bar, leader_steps, list(resp_motif.steps), root,
+        )
+
+    return events
 
 
 def generate_stabs(
