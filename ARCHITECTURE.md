@@ -77,6 +77,9 @@ phrase_plan
 Generators consume `PhrasePlan`. They must not invent phrase structure
 independently once their planner phase has landed.
 
+`BehaviourField` affects rendering behaviour, intensity, deformation, and CC
+movement. It does not have authority over the plan's musical syntax.
+
 ---
 
 ## Live Control Flow
@@ -249,6 +252,7 @@ Allowed:
 - Phrase-level control/intensity movement.
 - Tension, anticipation, release proximity, thinning, riser, impact, landing,
   bass intensity, and stab intensity as control signals.
+- `silence` as a control signal for thinning/muting.
 - Intra-bar motion and event spikes as smaller additions to phrase-level values.
 - Lookahead preview that does not mutate live state.
 
@@ -258,6 +262,7 @@ Not allowed:
 - Choosing bass truth.
 - Choosing hook identity.
 - Inventing call/response syntax.
+- Owning or replacing `phrase_plan.silence_mask`.
 - Replacing `PhrasePlan.phrase_state` with pressure-curve shape labels.
 
 Impact reduction rule:
@@ -316,6 +321,8 @@ Manual overrides win only for the keys they explicitly control.
 
 The bank generator renders the current plan and supporting layers into MIDI
 events. It does not define the musical build order.
+
+BankGenerator is a renderer/composer, not a planner.
 
 Current implemented responsibilities:
 
@@ -497,5 +504,7 @@ phrase syntax, call/response, silence, or drop structure.
 - Do not change runtime behaviour when asked for documentation only.
 - Do not let generators invent syntax that belongs in `PhrasePlan`.
 - Do not let Pression become a note generator.
+- Search for stale phrases like `kick-first`, `add bass`, or `no interaction`
+  before finishing architecture edits.
 - Do not refactor and extend in the same session.
 - Commit before ending a completed session.
