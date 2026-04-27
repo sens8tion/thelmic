@@ -1213,7 +1213,15 @@
       anchor: '#c0a060',
       ghost:  '#444444',
       impact: '#e05050',
+      kick: '#b88a42',
+      snare: '#c0a060',
+      hat: '#7f8a8d',
+      anchor_withholding: '#202020',
+      bass: '#5aa05a',
+      stab: '#d48ad4',
     };
+    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'stab'];
+    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1255,6 +1263,28 @@
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
     }
 
+    function roleLaneForEvent(event) {
+      const lane = event.layer || event.role || '';
+      return INSTRUMENT_ROLES.includes(lane) ? lane : null;
+    }
+
+    function visualRoleForEvent(event) {
+      const deform = event.deformation || {};
+      if (event.active === false || deform.anchor_withholding) return 'anchor_withholding';
+      if (event.layer === 'bass' || event.role === 'bass') return 'bass';
+      if (event.layer === 'stab' || event.role === 'stab') return 'stab';
+      return event.role || event.layer || 'event';
+    }
+
+    function groupEventsByRole(events) {
+      const lanes = new Map();
+      INSTRUMENT_ROLES.forEach(role => {
+        const roleEvents = events.filter(event => roleLaneForEvent(event) === role);
+        if (roleEvents.length > 0) lanes.set(role, roleEvents);
+      });
+      return lanes;
+    }
+
     function playbackFraction() {
       if (!isPlaying || bankDurationMs <= 0) return 0;
       return Math.min(1, Math.max(0, (Date.now() - bankStartedAt) / bankDurationMs));
@@ -1287,8 +1317,8 @@
       document.getElementById('seq-bank-num').textContent = bankSlot ? `${bankSlot}/${bankTotal}` : '-';
 
       // Collect layers
-      const layers = [...new Set(events.map(e => e.layer))].sort();
-      if (layers.length === 0) {
+      const lanes = groupEventsByRole(events);
+      if (lanes.size === 0) {
         document.getElementById('seq-grid').innerHTML = '<div style="color:#444;font-size:11px;padding:8px 0">no events — press play</div>';
         document.getElementById('seq-legend').innerHTML = '';
         document.getElementById('deform-strips').innerHTML = '';
@@ -1297,13 +1327,16 @@
 
       // Build step maps per layer + per-name per-step intensity maps
       const stepMap = {};
-      layers.forEach(l => { stepMap[l] = new Array(TOTAL_STEPS).fill(null); });
+      lanes.forEach((_, role) => { stepMap[role] = new Array(TOTAL_STEPS).fill(null); });
       const deformByName = {};  // name → Float32Array(TOTAL_STEPS)
 
       events.forEach(e => {
         const step = timeToStep(e.time);
         if (step < 0 || step >= TOTAL_STEPS) return;
-        stepMap[e.layer][step] = e;
+        const laneRole = roleLaneForEvent(e);
+        if (!laneRole) return;
+        if (!stepMap[laneRole]) stepMap[laneRole] = new Array(TOTAL_STEPS).fill(null);
+        stepMap[laneRole][step] = e;
         const deformDict = e.deformation;
         if (deformDict && typeof deformDict === 'object') {
           for (const [name, intensity] of Object.entries(deformDict)) {
@@ -1313,105 +1346,145 @@
         }
       });
 
-      // Deformation strips — one row per active deformation type
+      // Deformation strips — update in-place when names haven't changed
       const stripsWrap = document.getElementById('deform-strips');
-      stripsWrap.innerHTML = '';
-      for (const [name, intensities] of Object.entries(deformByName)) {
-        const colour = deformationColours[name] || '#50a0dc';
-        const rgb = hexToRgb(colour);
+      const deformKeys = Object.keys(deformByName).sort().join(',');
 
-        const row = document.createElement('div');
-        row.className = 'deform-strip-row';
-
-        const label = document.createElement('div');
-        label.className = 'deform-strip-label';
-        label.textContent = name.replace(/_/g, ' ');
-        label.style.color = colour;
-        row.appendChild(label);
-
-        const strip = document.createElement('div');
-        strip.className = 'deform-strip';
-        for (let s = 0; s < RENDER_STEPS; s++) {
-          const cell = document.createElement('div');
-          cell.className = 'deform-cell';
-          const sourceStep = s % TOTAL_STEPS;
-          const d = intensities[sourceStep];
-          cell.dataset.step = sourceStep;
-          cell.dataset.renderStep = s;
-          cell.dataset.deformName = name;
+      if (stripsWrap.dataset.deformKeys === deformKeys) {
+        // Same deformations — update intensities in-place
+        stripsWrap.querySelectorAll('.deform-cell').forEach(cell => {
+          const name = cell.dataset.deformName;
+          const sourceStep = parseInt(cell.dataset.step);
+          const intensities = deformByName[name];
+          const d = intensities ? intensities[sourceStep] : 0;
           cell.dataset.baseIntensity = d;
-          if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-          else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
           if (d > 0) {
+            const colour = deformationColours[name] || '#50a0dc';
+            const rgb = hexToRgb(colour);
             const alpha = 0.15 + d * 0.85;
             cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
+          } else {
+            cell.style.background = '';
           }
-          strip.appendChild(cell);
+        });
+      } else {
+        // Deformation set changed — full rebuild
+        stripsWrap.dataset.deformKeys = deformKeys;
+        stripsWrap.innerHTML = '';
+        for (const [name, intensities] of Object.entries(deformByName)) {
+          const colour = deformationColours[name] || '#50a0dc';
+          const rgb = hexToRgb(colour);
+          const row = document.createElement('div');
+          row.className = 'deform-strip-row';
+          const label = document.createElement('div');
+          label.className = 'deform-strip-label';
+          label.textContent = name.replace(/_/g, ' ');
+          label.style.color = colour;
+          row.appendChild(label);
+          const strip = document.createElement('div');
+          strip.className = 'deform-strip';
+          for (let s = 0; s < RENDER_STEPS; s++) {
+            const cell = document.createElement('div');
+            cell.className = 'deform-cell';
+            const sourceStep = s % TOTAL_STEPS;
+            const d = intensities[sourceStep];
+            cell.dataset.step = sourceStep;
+            cell.dataset.renderStep = s;
+            cell.dataset.deformName = name;
+            cell.dataset.baseIntensity = d;
+            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
+            else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            if (d > 0) {
+              const alpha = 0.15 + d * 0.85;
+              cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
+            }
+            strip.appendChild(cell);
+          }
+          row.appendChild(strip);
+          stripsWrap.appendChild(row);
         }
-        row.appendChild(strip);
-        stripsWrap.appendChild(row);
       }
 
-      // Render lanes
+      // Render lanes — update in-place when structure is unchanged to avoid
+      // the full DOM rebuild that causes the visual flutter.
       const grid = document.getElementById('seq-grid');
-      grid.innerHTML = '';
-      layers.forEach(layer => {
-        const lane = document.createElement('div');
-        lane.className = 'seq-lane';
+      const laneKeys = [...lanes.keys()].join(',');
 
-        const label = document.createElement('div');
-        label.className = 'seq-lane-label';
-        label.textContent = layer;
-        lane.appendChild(label);
-
-        const row = document.createElement('div');
-        row.className = 'seq-lane-row';
-
-        for (let s = 0; s < RENDER_STEPS; s++) {
-          const cell = document.createElement('div');
-          cell.className = 'seq-cell';
-          const sourceStep = s % TOTAL_STEPS;
-          cell.dataset.step = sourceStep;
-          cell.dataset.renderStep = s;
-          cell.dataset.layer = layer;
-          if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-          else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
-
-          const ev = stepMap[layer][sourceStep];
-          if (ev) {
-            const baseColour = ROLE_COLOURS[ev.role] || '#888';
-            const dom = dominantDeform(ev.deformation);
-            const colour = dom
-              ? blendTowardsHex(baseColour, dom.colour, dom.intensity)
-              : baseColour;
-            cell.style.background = colour;
-            const alpha = 0.4 + ev.emphasis * 0.6;
-            cell.style.opacity = alpha.toFixed(2);
-            const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
-            cell.title = `${ev.role} vel:${ev.velocity} deform:${deformDesc}`;
-            // Store data for live curve colour updates in animation loop
-            cell.dataset.step      = sourceStep;
-            cell.dataset.role      = ev.role;
-            cell.dataset.emphasis  = ev.emphasis;
-            cell.dataset.baseColour = ROLE_COLOURS[ev.role] || '#888';
-            cell.dataset.deform    = JSON.stringify(ev.deformation || {});
-          } else {
-            cell.dataset.role = '';
-            cell.dataset.emphasis = '0.2';
-            cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
-            cell.dataset.deform = '{}';
-          }
-          row.appendChild(cell);
+      function _paintCell(cell, role, sourceStep, stepMap) {
+        const ev = stepMap[role] ? stepMap[role][sourceStep] : null;
+        if (ev) {
+          const visualRole = visualRoleForEvent(ev);
+          const baseColour = ROLE_COLOURS[visualRole] || ROLE_COLOURS[role] || '#888';
+          const dom = dominantDeform(ev.deformation);
+          const colour = dom ? blendTowardsHex(baseColour, dom.colour, dom.intensity) : baseColour;
+          cell.style.background = colour;
+          cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
+          cell.dataset.role      = visualRole;
+          cell.dataset.emphasis  = ev.emphasis;
+          cell.dataset.baseColour = baseColour;
+          cell.dataset.deform    = JSON.stringify(ev.deformation || {});
+          const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} deform:${deformDesc}`;
+        } else {
+          cell.style.background = '';
+          cell.style.opacity    = '';
+          cell.dataset.role     = '';
+          cell.dataset.emphasis = '0.2';
+          cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
+          cell.dataset.deform   = '{}';
+          cell.title = '';
         }
-        lane.appendChild(row);
-        grid.appendChild(lane);
-      });
+      }
+
+      if (grid.dataset.laneKeys === laneKeys) {
+        // Same lane structure — update cell properties in-place, no DOM rebuild
+        grid.querySelectorAll('.seq-lane').forEach(laneEl => {
+          const role = laneEl.dataset.role;
+          if (!role) return;
+          laneEl.querySelectorAll('.seq-cell').forEach(cell => {
+            _paintCell(cell, role, parseInt(cell.dataset.step), stepMap);
+          });
+        });
+      } else {
+        // Lane structure changed — full rebuild
+        grid.dataset.laneKeys = laneKeys;
+        grid.innerHTML = '';
+        lanes.forEach((roleEvents, role) => {
+          const lane = document.createElement('div');
+          lane.className = 'seq-lane';
+          lane.dataset.role = role;
+
+          const label = document.createElement('div');
+          label.className = 'seq-lane-label';
+          label.textContent = role.replace(/_/g, ' ');
+          lane.appendChild(label);
+
+          const row = document.createElement('div');
+          row.className = 'seq-lane-row';
+
+          for (let s = 0; s < RENDER_STEPS; s++) {
+            const cell = document.createElement('div');
+            cell.className = 'seq-cell';
+            const sourceStep = s % TOTAL_STEPS;
+            cell.dataset.step      = sourceStep;
+            cell.dataset.renderStep = s;
+            cell.dataset.layer     = role;
+            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
+            else if (sourceStep % STEPS === 0)  cell.classList.add('bar-start');
+            _paintCell(cell, role, sourceStep, stepMap);
+            row.appendChild(cell);
+          }
+          lane.appendChild(row);
+          grid.appendChild(lane);
+        });
+      }
 
       // Legend — roles + one entry per active deformation type
       const legend = document.getElementById('seq-legend');
       legend.innerHTML = '';
+      const renderedRoles = [...lanes.keys()];
       const legendItems = [
-        ...Object.entries(ROLE_COLOURS).map(([role, colour]) => ({ label: role, colour })),
+        ...renderedRoles.map(role => ({ label: role.replace(/_/g, ' '), colour: ROLE_COLOURS[role] || '#888' })),
         ...Object.entries(deformByName).map(([name]) => ({
           label: name.replace(/_/g, ' '),
           colour: deformationColours[name] || '#50a0dc',
