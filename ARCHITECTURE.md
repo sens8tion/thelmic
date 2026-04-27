@@ -18,6 +18,7 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 0 planner foundation | complete | `thelmic/phrase_plan.py` exists and exposes a debuggable `PhrasePlan` |
 | Phase 1 planned bass | complete | bass is rendered from `phrase_plan.bass_pattern` |
 | Phase 2 hook identity rendering | complete | hook is rendered from `phrase_plan.hook_pattern` |
+| Phase 3 phrase syntax compliance | complete | `PhrasePlan` enforces phrase_state, call_slots, response_slots, and silence_mask |
 
 Current rule:
 
@@ -147,7 +148,7 @@ Current consumption:
 - `bass_pattern` is consumed by planned bass rendering.
 - `hook_pattern` is consumed by first-class hook identity rendering.
 - `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` exist but are
-  not yet the sole authority for every generator.
+  enforced by the phrase syntax pass.
 - `pressure_curve` informs macro context but must not own note syntax.
 
 ---
@@ -221,7 +222,8 @@ Target contract:
 - Silence comes from `phrase_plan.silence_mask`.
 - Silence follows calls, occurs during `HOLD_SILENCE`, and precedes drops.
 - Silence may thin or omit bass, hook, percussion, and support layers as planned.
-- Event generators do not yet fully obey silence mask; this is pending compliance work.
+- Event generators are filtered by the syntax enforcement pass so masked regions
+  suppress event emission.
 
 ---
 
@@ -334,6 +336,7 @@ Current implemented responsibilities:
 - apply anchor withholding.
 - apply behaviour-driven dynamics.
 - append bass and stab events where current implementation supports them.
+- enforce `PhrasePlan` syntax with `thelmic/syntax_enforcer.py`.
 - expose debug/runtime counters.
 
 Current non-responsibilities:
@@ -385,6 +388,10 @@ runtime:
   anchors_dropped_per_bar:
   bass_events_per_bar:
   stab_events_per_bar:
+  events_blocked_by_silence:
+  events_outside_call_slots:
+  events_outside_response_slots:
+  syntax_filtered_events_total:
   boundary_timing:
 ```
 
@@ -412,6 +419,7 @@ thelmic/
 |   |-- bass.py                     # planned bass rendering from bass_pattern
 |   |-- hook.py                     # planned hook rendering from hook_pattern
 |   |-- stabs.py                    # stab/call-response support
+|   |-- syntax_enforcer.py          # PhrasePlan syntax filtering pass
 |   |-- rhythm.py                   # rhythm conformance helpers
 |   |-- deformations.py             # legacy deformation map pipeline
 |   |-- deformations_anchor.py      # anchor withholding
@@ -448,7 +456,7 @@ thelmic/
 | 0 | Planner foundation - done |
 | 1 | Planned bass truth - done |
 | 2 | Hook identity rendering - done |
-| 3 | Phrase syntax compliance |
+| 3 | Phrase syntax compliance - done |
 | 4 | Planner-owned call generation |
 | 5 | Planner-owned response generation |
 | 6 | Silence mask compliance |
