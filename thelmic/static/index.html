@@ -641,7 +641,7 @@
     }
     .pression-lane {
       display: grid;
-      grid-template-columns: 110px 1fr 36px;
+      grid-template-columns: 110px 1fr 36px 58px;
       align-items: center;
       gap: 8px;
       height: 18px;
@@ -675,6 +675,21 @@
       height: 18px;
       opacity: 0.6;
       pointer-events: none;
+    }
+    .pression-map-btn {
+      height: 18px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--dim);
+      font-size: 9px;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .pression-map-btn.active {
+      color: var(--text);
+      border-color: var(--accent);
+      background: rgba(180, 220, 255, 0.12);
     }
 
     /* ── Pressure curves ── */
@@ -1169,6 +1184,10 @@
       // only re-render static sparklines when full timeline arrives
       if (s.pression_bar_idx !== undefined) {
         _pressionCurrentBar = s.pression_bar_idx;
+      }
+      if (s.active_pression_mapping_lane !== undefined) {
+        _activePressionMappingLane = s.active_pression_mapping_lane;
+        updatePressionMappingButtons();
       }
       if (s.pression) {
         renderPressionLanes(s.pression);
@@ -1943,7 +1962,10 @@
     let _pressionColours  = {};     // {dim: colour}
     let _pressionCurrent  = {};     // {dim: int} current bar peak
     let _pressionCurrentBar = 0;
+    let _activePressionMappingLane = null;
     let _pressionCanvases = {};     // {dim: {canvas, ctx}}
+    let _pressionHistory = {};      // {dim: recorded int values}
+    let _pressionLastStep = null;
 
     const OVERLAY_COLOURS = {
       call_start:        '#6090c0',
@@ -1961,6 +1983,7 @@
       _pressionColours    = pression.colours  || {};
       _pressionCurrent    = pression.current  || {};
       _pressionCurrentBar = pression.current_bar || 0;
+      _activePressionMappingLane = pression.active_mapping_lane || null;
 
       const container = document.getElementById('pression-lanes');
       if (!container) return;
@@ -1988,21 +2011,51 @@
           valEl.id = `pv-${dim}`;
           valEl.textContent = '  0';
 
+          const mapBtn = document.createElement('button');
+          mapBtn.className = 'pression-map-btn';
+          mapBtn.type = 'button';
+          mapBtn.onclick = () => togglePressionMapping(dim);
+
           lane.appendChild(nameEl);
           lane.appendChild(sparkWrap);
           lane.appendChild(valEl);
+          lane.appendChild(mapBtn);
           container.appendChild(lane);
-          _pressionCanvases[dim] = { canvas, sparkWrap, valEl };
+          _pressionCanvases[dim] = { canvas, sparkWrap, valEl, mapBtn };
+          _pressionHistory[dim] = _pressionHistory[dim] || [];
         });
         container.dataset.dims = dims.join(',');
       }
 
       // Redraw static layer (step data) — cursor is drawn in animation loop
-      dims.forEach(dim => drawPressionStatic(dim));
+      updatePressionMappingButtons();
+      dims.forEach(dim => drawPressionHistory(dim));
+    }
+
+    function togglePressionMapping(dim) {
+      const next = _activePressionMappingLane === dim ? null : dim;
+      _activePressionMappingLane = next;
+      updatePressionMappingButtons();
+      send({ type: 'pression_mapping_lane', value: next });
+    }
+
+    function updatePressionMappingButtons() {
+      Object.entries(_pressionCanvases).forEach(([dim, entry]) => {
+        const btn = entry.mapBtn;
+        if (!btn) return;
+        const active = _activePressionMappingLane === dim;
+        btn.textContent = active ? 'Mapping' : 'Map';
+        btn.classList.toggle('active', active);
+        btn.title = active
+          ? 'Turn off Pression CC mapping for this lane'
+          : 'Map only this Pression CC';
+      });
     }
 
     // 256 total columns: 16 bars × 16 steps each
     const PRESSION_TOTAL_STEPS = 256;
+    const PRESSION_PREVIEW_STEPS = 32;
+    const PRESSION_PLAYHEAD_FRACTION = 0.76;
 
     function _currentStepInBank() {
       // Compute current absolute step in bank (0–255) from wall clock.
@@ -2013,85 +2066,77 @@
       return Math.min(PRESSION_TOTAL_STEPS - 1, Math.floor(elapsed / msPerStep));
     }
 
-    function drawPressionStatic(dim) {
-      // Draw the 256-column step-resolution background (no cursor).
+    function _pressionValueAtStep(dim, currentStep) {
+      const step = Math.max(0, Math.min(PRESSION_TOTAL_STEPS - 1, currentStep));
+      const bi = Math.floor(step / 16);
+      const si = step % 16;
+      const barData = _pressionTimeline[bi] || {};
+      const vals = barData[dim] || [];
+      return vals[si] || 0;
+    }
+
+    function drawPressionHistory(dim) {
+      // Draw recorded history left of a fixed playhead, plus read-only future preview.
       const entry = _pressionCanvases[dim];
       if (!entry) return;
-      const { canvas, sparkWrap } = entry;
+      const { canvas, sparkWrap, valEl } = entry;
 
       const W = sparkWrap.offsetWidth || 256;
       const H = 18;
       canvas.width  = W;
       canvas.height = H;
       const ctx = canvas.getContext('2d');
-
-      const bars   = _pressionTimeline.length;
-      if (bars === 0) { ctx.clearRect(0, 0, W, H); return; }
-
-      const totalSteps = bars * 16;
-      const stepW = W / totalSteps;
       const colour = _pressionColours[dim] || '#50a0dc';
+      const history = _pressionHistory[dim] || [];
+      const currentStep = _pressionLastStep ?? _currentStepInBank();
+      const playheadX = Math.floor(W * PRESSION_PLAYHEAD_FRACTION);
+      const historySteps = Math.max(1, Math.floor(PRESSION_TOTAL_STEPS * PRESSION_PLAYHEAD_FRACTION));
+      const previewSteps = PRESSION_PREVIEW_STEPS;
+      const historyStepW = playheadX / historySteps;
+      const previewW = Math.max(1, W - playheadX);
+      const previewStepW = previewW / Math.max(1, previewSteps);
 
       ctx.clearRect(0, 0, W, H);
 
-      // Draw each step as a column
-      for (let bi = 0; bi < bars; bi++) {
-        const barData = _pressionTimeline[bi] || {};
-        const vals    = barData[dim] || [];
-        for (let si = 0; si < 16; si++) {
-          const stepIdx = bi * 16 + si;
-          const val     = vals[si] || 0;
-          const h       = (val / 127) * H;
-          const x       = stepIdx * stepW;
-          // Bar boundary lines (every 16 steps)
-          if (si === 0 && bi > 0) {
-            ctx.fillStyle = '#333';
-            ctx.fillRect(x, 0, 1, H);
-          }
+      if (history.length > 0) {
+        const visible = history.slice(-historySteps);
+        const pad = Math.max(0, historySteps - visible.length);
+
+        visible.forEach((val, idx) => {
+          const h = (val / 127) * H;
+          const x = (pad + idx) * historyStepW;
           ctx.fillStyle = colour + 'a0';
-          ctx.fillRect(x + (si === 0 ? 1 : 0), H - h, Math.max(1, stepW - 0.5), h);
-        }
-        // Overlay markers at bar level
-        const overlays = barData.overlays || [];
-        overlays.forEach(ov => {
-          const stepIdx = bi * 16 + ov.step;
-          const x = stepIdx * stepW;
-          ctx.fillStyle = (OVERLAY_COLOURS[ov.kind] || '#ffffff') + 'cc';
-          ctx.fillRect(x, 0, Math.max(1, stepW), 2);
+          ctx.fillRect(x, H - h, Math.max(1, historyStepW - 0.5), h);
         });
       }
 
-      // Store static data for cursor overlay in animation loop
-      entry._staticDrawn = true;
+      for (let i = 0; i < previewSteps; i++) {
+        const val = _pressionValueAtStep(dim, currentStep + i);
+        const h = (val / 127) * H;
+        const x = playheadX + i * previewStepW;
+        ctx.fillStyle = colour + '55';
+        ctx.fillRect(x, H - h, Math.max(1, previewStepW - 0.5), h);
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fillRect(playheadX, 0, 1, H);
+
+      if (valEl) {
+        valEl.textContent = String(_pressionValueAtStep(dim, currentStep)).padStart(3, ' ');
+      }
     }
 
-    function drawPressionCursor(dim, currentStep) {
-      // Draw just the cursor overlay on top of the static layer.
-      const entry = _pressionCanvases[dim];
-      if (!entry || !entry._staticDrawn) return;
-      const { canvas, sparkWrap, valEl } = entry;
-
-      const W = sparkWrap.offsetWidth || 256;
-      const H = 18;
-      const totalSteps = _pressionTimeline.length * 16 || PRESSION_TOTAL_STEPS;
-      const stepW = W / totalSteps;
-
-      // Redraw static underneath (can't easily composite without a second canvas)
-      drawPressionStatic(dim);
-
-      // Cursor line at current step
-      const cx = currentStep * stepW;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.fillRect(cx, 0, Math.max(1, stepW), H);
-
-      // Update value display from current step
-      const bi = Math.floor(currentStep / 16);
-      const si = currentStep % 16;
-      const barData = _pressionTimeline[bi] || {};
-      const vals    = barData[dim] || [];
-      const val     = vals[si] || 0;
-      if (valEl) valEl.textContent = val.toString().padStart(3, ' ');
+    function recordPressionStep(currentStep) {
+      if (!isPlaying || currentStep === _pressionLastStep) return;
+      _pressionLastStep = currentStep;
+      Object.keys(_pressionCanvases).forEach(dim => {
+        const history = _pressionHistory[dim] || [];
+        history.push(_pressionValueAtStep(dim, currentStep));
+        if (history.length > PRESSION_TOTAL_STEPS) {
+          history.splice(0, history.length - PRESSION_TOTAL_STEPS);
+        }
+        _pressionHistory[dim] = history;
+      });
     }
 
     function animatePlayhead() {
@@ -2108,8 +2153,9 @@
       // Pression cursor — animate at step resolution using wall clock
       if (Object.keys(_pressionCanvases).length > 0) {
         const currentStep = _currentStepInBank();
+        recordPressionStep(currentStep);
         Object.keys(_pressionCanvases).forEach(dim => {
-          drawPressionCursor(dim, currentStep);
+          drawPressionHistory(dim);
         });
         const lbl = document.getElementById('pression-bar-label');
         if (lbl) {

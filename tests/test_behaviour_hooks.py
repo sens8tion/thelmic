@@ -102,13 +102,15 @@ class TestComputeBehaviourOverrides:
     def test_returns_empty_when_no_transition(self):
         f = _force(instability=1.0)
         result = compute_behaviour_overrides(None, f, {})
-        assert result == {}
+        assert result["ghost_inject"] == pytest.approx(0.4)
+        assert result["cc:0:74"] == pytest.approx(0.7)
 
     def test_returns_empty_when_transition_inactive(self):
         f = _force(instability=1.0)
         t = _transition(active=False)
         result = compute_behaviour_overrides(t, f, {})
-        assert result == {}
+        assert result["ghost_inject"] == pytest.approx(0.4)
+        assert result["cc:0:74"] == pytest.approx(0.7)
 
     def test_hook_fires_during_active_transition(self):
         f = _force(instability=1.0)
@@ -140,7 +142,9 @@ class TestComputeBehaviourOverrides:
         f = _force()
         manual = {"ghost_inject": 0.5, "cc:0:74": 0.3}
         result = compute_behaviour_overrides(None, f, manual)
-        assert result == manual
+        assert result["ghost_inject"] == pytest.approx(0.5)
+        assert result["cc:0:74"] == pytest.approx(0.3)
+        assert "gate_tightness" in result
 
     def test_empty_manual_with_active_transition_returns_hook_values(self):
         f = _force(instability=0.8)

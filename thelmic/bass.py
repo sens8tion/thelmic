@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Optional
 
 from thelmic.bank_generator import MIDIEvent
 from thelmic.behaviour_field import BehaviourField
+from thelmic.phrase_plan import PhrasePlan, PlanNote, ROOT_NOTE
 from thelmic.rhythm import conformance_for_landscape
 from thelmic.call_response import (
     CALL_WINDOW, RESPONSE_WINDOW_MIN,
@@ -15,6 +17,7 @@ OFFBEAT_TICKS = 12
 TICKS_PER_BAR = 96
 TICKS_PER_BEAT = 24
 TICKS_PER_STEP = 6
+ALLOWED_BASS_INTERVALS = {0, 7, 12}
 
 
 def _step_to_bass_time(bar: int, step: int) -> str:
@@ -23,6 +26,14 @@ def _step_to_bass_time(bar: int, step: int) -> str:
     beat = tick_in_bar // TICKS_PER_BEAT + 1
     tick = tick_in_bar % TICKS_PER_BEAT
     return f"{bar}.{beat}.{tick}"
+
+
+def _time_to_step(time_str: str) -> tuple[int, int]:
+    bar, beat, tick = _parse_time(time_str)
+    abs_tick_in_bar = (beat - 1) * TICKS_PER_BEAT + tick
+    if abs_tick_in_bar % TICKS_PER_STEP != 0:
+        return bar, -1
+    return bar, abs_tick_in_bar // TICKS_PER_STEP
 
 
 def _bars_in_events(events: list[MIDIEvent]) -> list[int]:
@@ -88,6 +99,94 @@ def _copy_bass_event(
         deformation={**event.deformation, "bass": behaviour.energy_level},
     )
     return bass_event
+
+
+def _source_for_planned_note(
+    events: list[MIDIEvent],
+    bar: int,
+    step: int,
+) -> Optional[MIDIEvent]:
+    fallback = next((e for e in events if getattr(e, "active", True)), None)
+    for event in events:
+        if not getattr(event, "active", True) or event.layer != "kick":
+            continue
+        event_bar, event_step = _time_to_step(event.time)
+        if event_bar == bar and event_step == step:
+            return event
+    return fallback
+
+
+def _kick_steps_by_bar(events: list[MIDIEvent]) -> dict[int, set[int]]:
+    result: dict[int, set[int]] = {}
+    for event in events:
+        if not getattr(event, "active", True) or event.layer != "kick":
+            continue
+        bar, step = _time_to_step(event.time)
+        if step >= 0:
+            result.setdefault(bar, set()).add(step)
+    return result
+
+
+def _planned_pitch(note: PlanNote, tonal_centre: int = ROOT_NOTE) -> int:
+    interval = note.pitch - tonal_centre
+    while interval < 0:
+        interval += 12
+    interval %= 12
+    if interval not in ALLOWED_BASS_INTERVALS:
+        return tonal_centre
+    octave = 12 if note.pitch - tonal_centre >= 12 else 0
+    return tonal_centre + interval + octave
+
+
+def generate_planned_bass(
+    events: list[MIDIEvent],
+    behaviour: BehaviourField,
+    plan: PhrasePlan,
+    tonal_centre: int = ROOT_NOTE,
+) -> list[MIDIEvent]:
+    """Render authored bass from the phrase plan, locked to active kick steps.
+
+    This is the Phase 1 truth layer: bass comes from the plan first, not from
+    stab/call-response material. Notes outside the kick grid are ignored.
+    """
+    kick_steps = _kick_steps_by_bar(events)
+    if not kick_steps:
+        return []
+
+    bass_events: list[MIDIEvent] = []
+    bars = sorted(kick_steps)
+    plan_bars = max((note.bar for note in plan.bass_pattern), default=1)
+    by_plan_bar: dict[int, list[PlanNote]] = {}
+    for note in plan.bass_pattern:
+        by_plan_bar.setdefault(note.bar, []).append(note)
+
+    for bar in bars:
+        plan_bar = ((bar - 1) % plan_bars) + 1
+        for note in by_plan_bar.get(plan_bar, []):
+            if note.step not in kick_steps.get(bar, set()):
+                continue
+            source = _source_for_planned_note(events, bar, note.step)
+            if source is None:
+                continue
+            velocity = _clamp_velocity(note.velocity * behaviour.anchor_velocity)
+            bass_event = replace(
+                source,
+                time=_step_to_bass_time(bar, note.step),
+                note=_planned_pitch(note, tonal_centre),
+                velocity=velocity,
+                duration=max(1, note.duration_steps) * 0.08,
+                layer="bass",
+                role="bass",
+                emphasis=0.85,
+                openness=0.0,
+                expected_weight=max(0.8, source.expected_weight),
+                should_resolve=False,
+                active=True,
+                deformation={**source.deformation, "bass": behaviour.energy_level},
+            )
+            bass_events.append(bass_event)
+
+    return bass_events
 
 
 def _is_selected_oak_kick(event: MIDIEvent) -> bool:

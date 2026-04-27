@@ -56,6 +56,216 @@ MIDI Out            (rtmidi, same pattern as dnb-seq)
 
 ---
 
+## Current Implementation Map
+
+This section records the implementation state of the current working tree. It
+supersedes older phase notes where those notes describe planned work that has
+since landed.
+
+### Live Control Flow
+
+Correct live flow:
+
+```text
+slider -> target_position
+transition_engine -> current_position
+force_engine -> force_state(current_position)
+behaviour_field -> derived from force_state + transition
+modules -> driven by behaviour_field
+manual overrides -> override per key only
+```
+
+Invariants:
+
+- `target_position` is intent only.
+- `current_position` is live landscape state.
+- `force_state` is derived from `current_position`, not `target_position`.
+- `BehaviourField` is the module-facing contract; musical modules must not consume
+  raw `ForceState` directly.
+- Manual pressure/CC overrides win per target only.
+
+Implemented files:
+
+- `thelmic/transition_engine.py`
+- `thelmic/force_engine.py`
+- `thelmic/behaviour_field.py`
+- `thelmic/behaviour_hooks.py`
+
+### BehaviourField
+
+`BehaviourField` currently exposes:
+
+```text
+ghost_intensity
+ghost_clustering
+anchor_drop_prob
+filter_target
+gate_tightness
+energy_level
+accent_strength
+ghost_velocity
+anchor_velocity
+anticipation
+instability
+release_pressure
+```
+
+Current module use:
+
+- ghost injection uses `ghost_intensity`, `ghost_clustering`, and ghost velocity.
+- anchor withholding uses `anchor_drop_prob`.
+- dynamics uses `ghost_velocity` and `anchor_velocity`.
+- filter CC output uses `filter_target`.
+
+### Planner Foundation
+
+Planner Phase 0 is implemented in `thelmic/phrase_plan.py`.
+
+The planner produces a visible/debuggable `PhrasePlan`:
+
+```text
+bass_pattern
+hook_pattern
+phrase_state
+call_slots
+response_slots
+silence_mask
+pressure_curve
+```
+
+Phrase states:
+
+```text
+RESOLVED_STABLE
+CALL_UNRESOLVED
+HOLD_SILENCE
+RESPONSE_RESOLVED
+DROP_RELOCK
+```
+
+The plan is exposed over WebSocket as `phrase_plan`.
+
+Important: not every generator consumes the full plan yet. Phase 1 has connected
+bass to the plan. Hook, silence, support compliance, and validation remain backlog.
+
+### Bass Truth Layer
+
+Planner Phase 1 is implemented.
+
+Bass is now first-class authored material:
+
+- `generate_planned_bass()` renders `PhrasePlan.bass_pattern`.
+- bass is locked to active kick-grid steps.
+- bass pitch is restricted to root / fifth / octave around tonal centre.
+- bass no longer depends on stab/lead material.
+- in `STAB_LEADS`, bass remains authored truth instead of becoming a stab-derived
+  response.
+- in `BASS_LEADS`, stabs may respond to authored bass call-window notes.
+
+Debug exposes:
+
+```yaml
+runtime:
+  bass_source: phrase_plan
+  bass_tonal_centre: 36
+```
+
+### Call / Response
+
+Current call/response is dual-modal:
+
+- `STAB_LEADS`: stab calls in the call window; bass remains authored truth.
+- `BASS_LEADS`: planned bass notes in the call window seed stab responses.
+
+The system still needs later planner compliance work so call/response windows come
+strictly from `PhrasePlan.call_slots` and `PhrasePlan.response_slots`.
+
+### Pression
+
+Pression is a CC/export system, not a note generator.
+
+Current stable CC lanes include global lanes:
+
+```text
+pressure
+impact
+density
+silence
+riser
+leadership
+call_intensity
+response_intensity
+landing_strength
+pre_warning
+```
+
+and stable instrument lanes:
+
+```text
+bass_intensity
+stab_intensity
+```
+
+Current Pression behaviour:
+
+- computes a bank-level CC timeline ahead of playback.
+- includes phrase-level metadata per lane:
+  - `current_value`
+  - `target_value`
+  - `phrase_position`
+  - `phrase_length_bars`
+  - `tension`
+  - `anticipation`
+  - `release_proximity`
+  - `thinning`
+- models drop as a phrase-level arrival:
+  - pressure/riser build
+  - density thins before arrival
+  - silence peaks before arrival
+  - riser holds/decays in the silent pre-drop gap
+  - impact and landing are withheld until the drop
+  - at the drop, silence collapses, impact/landing spike, density returns, riser
+    discharges.
+- exposes per-lane `Map` toggles; mapping mode mutes all other Pression CC lanes.
+- UI renders recorded history left of a fixed playhead and a non-mutating preview
+  to the right.
+
+### Grid / UI Rendering
+
+Main sequencer lanes are instrument lanes only:
+
+```text
+kick
+snare
+hat
+bass
+stab
+```
+
+Deformation/debug roles are not rendered as full instrument tracks.
+
+### Boundary Scheduling
+
+Playback precomputes upcoming bank work and uses lightweight boundary swaps.
+WebSocket state work is queued/deferred where possible. Timing instrumentation is
+available in `runtime.boundary_timing`.
+
+### Current Verification Surface
+
+Relevant tests:
+
+```text
+tests/test_behaviour_field.py
+tests/test_deformations_anchor.py
+tests/test_deformations_dynamics.py
+tests/test_bass.py
+tests/test_phrase_plan.py
+tests/test_pression.py
+tests/test_pressure_curves.py
+```
+
+---
+
 ## Layer Specifications
 
 ### 1. Force Engine
@@ -929,3 +1139,116 @@ transition:
 > The performer sets intent (destination).  
 > The system performs the journey.  
 > Behaviour hooks supply pressure automatically unless explicitly overridden.
+
+---
+
+## Musically Legible System Backlog
+
+This is the current forward architecture for making the generator musically legible.
+
+Core hierarchy:
+
+```text
+1. Bassline      = truth
+2. Hook          = identity
+3. Phrase syntax = structure
+4. Call/response = motion
+5. Silence       = punctuation
+6. Pressure      = anticipation
+7. Support       = compliance
+8. Drop          = alignment
+9. Validation    = enforcement
+```
+
+Global rules:
+
+- only one layer may destabilise the system at a time.
+- bass defines tonal meaning globally.
+- hook must remain recognisable at all times.
+- call must leave space.
+- response must fill that space.
+- silence must be intentional.
+- supporting layers must comply or be removed.
+
+### Planner Contract
+
+All generators should eventually consume `PhrasePlan`.
+
+Planner output:
+
+```text
+bass_pattern
+hook_pattern
+phrase_state
+call_slots
+response_slots
+silence_mask
+pressure_curve
+```
+
+No generator should independently define structure once its phase is complete.
+
+### Backlog Status
+
+| Phase | Status | Notes |
+|---|---|---|
+| 0 Planner foundation | done | `thelmic/phrase_plan.py`; visible as `phrase_plan`; no full generator compliance yet |
+| 1 Bassline first | done | planned bass is authored from `bass_pattern`, kick-grid locked, root/fifth/octave constrained |
+| 2 Hook layer | next | implement explicit `hook_pattern` rendering and recognisability checks |
+| 3 Phrase structure | partial | `phrase_state`, `call_slots`, `response_slots`, `silence_mask` exist; generators do not fully obey them yet |
+| 4 Call generator | partial | dual-modal bass/stab call logic exists; must be constrained by planner slots |
+| 5 Response generator | partial | stab responses can derive from planned bass calls; must be constrained by planner slots |
+| 6 Silence system | not started for notes | Pression models silence; event generators do not yet obey `silence_mask` |
+| 7 Pressure integration | partial | Pression handles macro CC/drop behaviour; structural decision-making must move out of Pression over time |
+| 8 Support compliance | partial | grid/debug separation exists; support-layer conflict checks not implemented |
+| 9 Drop construction | partial | Pression drop behaviour exists; note/event drop alignment not planner-driven yet |
+| 10 Validation layer | not started | no `validate_all()` enforcement pass yet |
+
+### Immediate Next Phase: Hook Identity
+
+Goal: introduce explicit hook generation without disturbing planned bass.
+
+Required:
+
+- generate a 2-5 note hook motif.
+- loop over 1-2 bars.
+- stay recognisable across the phrase.
+- avoid masking the bass.
+- store as `PhrasePlan.hook_pattern`.
+- expose/debug hook events distinctly from call/response stabs.
+
+Do not:
+
+- let call/response redefine hook identity.
+- add harmonic complexity as a substitute for memorability.
+- change Pression, transition, or rhythm generation unless necessary for hook output.
+
+### Later Compliance Target
+
+Final execution model:
+
+```python
+bass = generate_bass(plan)
+hook = generate_hook(plan, bass)
+
+phrase = define_phrase_structure(plan)
+
+call = generate_call(phrase, bass, hook)
+response = generate_response(phrase, call, bass)
+
+silence = insert_silence(phrase, call, response)
+pressure = generate_pressure(phrase, silence)
+
+support = generate_supporting_layers(bass, hook, call, response, silence, pressure)
+drop = construct_drop(bass, hook, pressure, silence)
+
+validate_all()
+```
+
+Final rule:
+
+```text
+Bass defines meaning.
+Hook defines identity.
+Everything else behaves relative to those two.
+```

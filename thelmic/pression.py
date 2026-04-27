@@ -40,6 +40,12 @@ if TYPE_CHECKING:
 
 STEPS_PER_BAR: int = 16
 BARS_PER_BANK: int = 16
+PHRASE_LENGTH_CHOICES: tuple[int, ...] = (4, 8, 12, 16)
+DEFAULT_PHRASE_LENGTH_BARS: int = 8
+DEFAULT_PHRASE_STRENGTH: float = 1.0
+PHRASE_LEVEL_WEIGHT: float = 0.7
+INTRA_BAR_WEIGHT: float = 0.2
+EVENT_SPIKE_WEIGHT: float = 0.1
 
 # ---------------------------------------------------------------------------
 # Dimensions
@@ -54,6 +60,8 @@ DIMENSION_NAMES: tuple[str, ...] = (
     "leadership",
     "call_intensity",
     "response_intensity",
+    "bass_intensity",
+    "stab_intensity",
     "landing_strength",
     "pre_warning",
 )
@@ -67,6 +75,8 @@ DIMENSION_COLOURS: dict[str, str] = {
     "leadership":         "#50a050",
     "call_intensity":     "#6090c0",
     "response_intensity": "#c060a0",
+    "bass_intensity":     "#4f7fd0",
+    "stab_intensity":     "#df7db8",
     "landing_strength":   "#e0a040",
     "pre_warning":        "#a04040",
 }
@@ -83,6 +93,8 @@ DEFAULT_CC_MAP: dict[str, tuple[int, int]] = {
     "response_intensity": (0, 27),
     "landing_strength":   (0, 28),
     "pre_warning":        (0, 29),
+    "bass_intensity":     (0, 30),
+    "stab_intensity":     (0, 31),
 }
 
 # ---------------------------------------------------------------------------
@@ -116,6 +128,31 @@ class PressionOverlay:
         return {"kind": self.kind, "step": self.step, "strength": self.strength}
 
 
+@dataclass(frozen=True)
+class PressionLanePhrase:
+    """Phrase-level lane movement for one Pression dimension."""
+    current_value: float
+    target_value: float
+    phrase_position: float
+    phrase_length_bars: int
+    tension: float = 0.0
+    anticipation: float = 0.0
+    release_proximity: float = 0.0
+    thinning: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "current_value": round(self.current_value, 3),
+            "target_value": round(self.target_value, 3),
+            "phrase_position": round(self.phrase_position, 3),
+            "phrase_length_bars": self.phrase_length_bars,
+            "tension": round(self.tension, 3),
+            "anticipation": round(self.anticipation, 3),
+            "release_proximity": round(self.release_proximity, 3),
+            "thinning": round(self.thinning, 3),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Per-bar pression data
 # ---------------------------------------------------------------------------
@@ -135,9 +172,12 @@ class PressionBar:
     leadership:         list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
     call_intensity:     list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
     response_intensity: list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
+    bass_intensity:     list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
+    stab_intensity:     list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
     landing_strength:   list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
     pre_warning:        list[int] = field(default_factory=lambda: [0] * STEPS_PER_BAR)
     overlays:           list[PressionOverlay] = field(default_factory=list)
+    phrase_state:       dict[str, PressionLanePhrase] = field(default_factory=dict)
 
     def at_step(self, step: int) -> dict[str, int]:
         """Return {dimension: value} for one step. Safe: clamps step to 0–15."""
@@ -152,11 +192,26 @@ class PressionBar:
         return {
             **{name: getattr(self, name) for name in DIMENSION_NAMES},
             "overlays": [o.to_dict() for o in self.overlays],
+            "phrase_state": {k: v.to_dict() for k, v in self.phrase_state.items()},
         }
 
 
 def empty_timeline() -> list[PressionBar]:
     return [PressionBar() for _ in range(BARS_PER_BANK)]
+
+
+# ---------------------------------------------------------------------------
+# Mapping mode helpers
+# ---------------------------------------------------------------------------
+
+# Triangle-wave test pulse: 0 → 127 → 0 over 16 steps.
+# Used when mapping mode is active to give a clear moving signal in Ableton
+# without waiting for musical content.  Values are never written to the
+# stored pression timeline — they replace per-call before CC injection.
+TEST_PULSE_VALUES: list[int] = [
+    int(s * 127 / 7) if s < 8 else int((15 - s) * 127 / 7)
+    for s in range(16)
+]
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +223,10 @@ def _i(v: float) -> int:
     return max(0, min(127, int(v * 127.0)))
 
 
+def _f(v: float) -> float:
+    return max(0.0, min(1.0, v))
+
+
 def _decay(values: list[float], decay: float = 0.6) -> list[float]:
     """Apply per-step exponential decay to a 16-element list."""
     result = [0.0] * STEPS_PER_BAR
@@ -175,6 +234,54 @@ def _decay(values: list[float], decay: float = 0.6) -> list[float]:
     for s in range(STEPS_PER_BAR):
         carry = max(values[s], carry * decay)
         result[s] = carry
+    return result
+
+
+def _smoothstep(t: float) -> float:
+    t = _f(t)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _valid_phrase_length(value: int) -> int:
+    return value if value in PHRASE_LENGTH_CHOICES else DEFAULT_PHRASE_LENGTH_BARS
+
+
+def _window_t(start: float, end: float, value: float) -> float:
+    if end <= start:
+        return 1.0 if value >= end else 0.0
+    return _f((value - start) / (end - start))
+
+
+def _drop_signals(phrase_position: float) -> dict[str, float]:
+    pos = _f(phrase_position)
+    tension = _smoothstep(pos)
+    anticipation = _smoothstep(_window_t(0.45, 1.0, pos))
+    release_proximity = _smoothstep(_window_t(0.72, 1.0, pos))
+    thinning = _smoothstep(_window_t(0.70, 0.96, pos))
+    post_drop = _f(1.0 - pos / 0.16)
+    early_mid = _f(1.0 - abs(pos - 0.45) / 0.45)
+    final_warning = _smoothstep(_window_t(0.86, 1.0, pos))
+    return {
+        "tension": tension,
+        "anticipation": anticipation,
+        "release_proximity": release_proximity,
+        "thinning": thinning,
+        "post_drop": post_drop,
+        "early_mid": early_mid,
+        "final_warning": final_warning,
+    }
+
+
+def _compose_phrase_lane(values: list[int], phrase_level: float) -> list[int]:
+    phrase = _f(phrase_level)
+    result: list[int] = []
+    for value in values:
+        local = max(0.0, min(1.0, value / 127.0))
+        composed = (
+            PHRASE_LEVEL_WEIGHT * phrase
+            + (INTRA_BAR_WEIGHT + EVENT_SPIKE_WEIGHT) * local
+        )
+        result.append(_i(composed))
     return result
 
 
@@ -226,6 +333,191 @@ def _events_at_steps(bar_events: list["MIDIEvent"]) -> dict[int, list["MIDIEvent
     return result
 
 
+def _choose_phrase_targets(
+    force: "ForceState",
+    behaviour: "BehaviourField",
+    transition: Optional["Transition"],
+    cr_mode: "Mode",
+    phrase_start_bar: int,
+) -> dict[str, float]:
+    """Choose musical phrase targets from current pressure and role context."""
+    from thelmic.call_response import Mode as CRMode
+
+    t_active = transition is not None and transition.active
+    t_progress = transition.progress if t_active else 0.0
+    t_remaining = transition.remaining if t_active else 1.0
+    t_velocity = transition.velocity if t_active else 0.0
+
+    nearing_release = _f((0.35 - t_remaining) / 0.35) if t_active else force.release_pressure
+    phrase_phase = (phrase_start_bar % BARS_PER_BANK) / max(1, BARS_PER_BANK - 1)
+    phrase_climax = _f(phrase_phase * 0.45 + nearing_release * 0.55)
+    energy = _f(behaviour.energy_level)
+
+    pressure = _f(
+        force.anticipation * 0.42
+        + force.release_pressure * 0.30
+        + t_progress * 0.14
+        + t_velocity * 0.08
+        + phrase_climax * 0.06
+    )
+    density = _f(
+        energy * 0.42
+        + force.instability * 0.24
+        + force.anticipation * 0.16
+        + phrase_climax * 0.12
+    )
+    silence = _f(nearing_release * 0.48 + force.release_pressure * 0.22 + (1.0 - density) * 0.20)
+    riser = _f(phrase_climax)
+    impact = _f(force.release_pressure * 0.62 + nearing_release * 0.25 + energy * 0.13)
+    leadership = 1.0 if cr_mode == CRMode.STAB_LEADS else 0.0
+    call = _f(
+        energy * 0.44
+        + force.anticipation * 0.24
+        + (1.0 - force.release_pressure) * 0.10
+        + phrase_climax * 0.12
+    )
+    response = _f(energy * 0.34 + force.release_pressure * 0.34 + phrase_climax * 0.20)
+    landing = _f(force.release_pressure * 0.58 + phrase_climax * 0.28 + energy * 0.14)
+    pre_warning = _f(nearing_release * 0.52 + t_velocity * 0.26 + force.anticipation * 0.22)
+
+    if cr_mode == CRMode.BASS_LEADS:
+        bass = call
+        stab = response
+    else:
+        bass = response
+        stab = call
+
+    return {
+        "pressure": _f(pressure + 0.18),
+        "impact": _f(impact * 0.55),
+        "density": _f(density + 0.10),
+        "silence": _f(silence + 0.08),
+        "riser": _f(riser + 0.18),
+        "leadership": leadership,
+        "call_intensity": call,
+        "response_intensity": response,
+        "bass_intensity": bass,
+        "stab_intensity": stab,
+        "landing_strength": _f(landing * 0.45),
+        "pre_warning": _f(pre_warning + 0.10),
+    }
+
+
+def _initial_phrase_values(targets: dict[str, float]) -> dict[str, float]:
+    """Start a bank from a quieter settled version of the first target."""
+    result = {}
+    for name in DIMENSION_NAMES:
+        target = targets.get(name, 0.0)
+        if name == "silence":
+            result[name] = _f(target * 0.65)
+        elif name == "leadership":
+            result[name] = target
+        else:
+            result[name] = _f(target * 0.45)
+    return result
+
+
+def _phrase_state_for_bank(
+    force: "ForceState",
+    behaviour: "BehaviourField",
+    transition: Optional["Transition"],
+    cr_mode: "Mode",
+    phrase_length_bars: int,
+    phrase_strength: float,
+) -> list[dict[str, PressionLanePhrase]]:
+    phrase_length = _valid_phrase_length(phrase_length_bars)
+    strength = _f(phrase_strength)
+    first_targets = _choose_phrase_targets(force, behaviour, transition, cr_mode, 0)
+    current_values = _initial_phrase_values(first_targets)
+    state_by_bar: list[dict[str, PressionLanePhrase]] = []
+
+    for phrase_start in range(0, BARS_PER_BANK, phrase_length):
+        desired = _choose_phrase_targets(
+            force, behaviour, transition, cr_mode, phrase_start
+        )
+        targets = {
+            name: _f(current_values.get(name, 0.0) + (desired.get(name, 0.0) - current_values.get(name, 0.0)) * strength)
+            for name in DIMENSION_NAMES
+        }
+
+        for offset in range(phrase_length):
+            if len(state_by_bar) >= BARS_PER_BANK:
+                break
+            phrase_position = offset / max(1, phrase_length)
+            signals = _drop_signals(phrase_position)
+            state_by_bar.append({
+                name: PressionLanePhrase(
+                    current_value=current_values.get(name, 0.0),
+                    target_value=targets.get(name, 0.0),
+                    phrase_position=phrase_position,
+                    phrase_length_bars=phrase_length,
+                    tension=signals["tension"],
+                    anticipation=signals["anticipation"],
+                    release_proximity=signals["release_proximity"],
+                    thinning=signals["thinning"],
+                )
+                for name in DIMENSION_NAMES
+            })
+
+        current_values = targets
+
+    return state_by_bar
+
+
+def _phrase_levels_for_bar(
+    phrase_state: dict[str, PressionLanePhrase],
+) -> dict[str, float]:
+    result: dict[str, float] = {}
+    for name, state in phrase_state.items():
+        t = _smoothstep(state.phrase_position)
+        base = state.current_value + (state.target_value - state.current_value) * t
+        signals = _drop_signals(state.phrase_position)
+        tension = signals["tension"]
+        anticipation = signals["anticipation"]
+        release_proximity = signals["release_proximity"]
+        thinning = signals["thinning"]
+        post_drop = signals["post_drop"]
+        early_mid = signals["early_mid"]
+        final_warning = signals["final_warning"]
+
+        if name == "pressure":
+            value = base + tension * 0.24 - post_drop * 0.22
+        elif name == "riser":
+            hold_pos = 0.72
+            hold_t = _smoothstep(hold_pos)
+            hold_base = (
+                state.current_value
+                + (state.target_value - state.current_value) * hold_t
+            )
+            hold_level = hold_base + _drop_signals(hold_pos)["anticipation"] * 0.42
+            build_level = base + anticipation * 0.42
+            gap = release_proximity * thinning
+            held_level = hold_level - thinning * 0.16
+            if gap > 0.2:
+                build_level = min(build_level, held_level)
+            value = build_level * (1.0 - gap) + held_level * gap
+            value -= post_drop * 0.55
+        elif name == "silence":
+            value = base + thinning * 0.48 - post_drop * 0.50
+        elif name == "impact":
+            gap = release_proximity * thinning
+            value = base * (1.0 - release_proximity * 0.55) * (1.0 - gap * 0.75) + post_drop * 0.70
+        elif name == "landing_strength":
+            gap = release_proximity * thinning
+            value = base * (1.0 - release_proximity * 0.45) * (1.0 - gap * 0.65) + post_drop * 0.78
+        elif name == "density":
+            value = base + early_mid * 0.16 - thinning * 0.38 + post_drop * 0.28
+        elif name in {"bass_intensity", "stab_intensity", "call_intensity", "response_intensity"}:
+            value = base + early_mid * 0.14 - thinning * 0.30 + post_drop * 0.24
+        elif name == "pre_warning":
+            value = base + final_warning * 0.46 - post_drop * 0.20
+        else:
+            value = base
+
+        result[name] = _f(value)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Per-bar computation
 # ---------------------------------------------------------------------------
@@ -239,6 +531,7 @@ def compute_pression_bar(
     bar_idx:     int,     # 0-based within bank (0–15)
     bank_idx:    int = 0,
     prev_density: float = 0.0,  # previous bar's density (for drop detection)
+    phrase_state: Optional[dict[str, PressionLanePhrase]] = None,
 ) -> PressionBar:
     """Compute one PressionBar at 16th-note resolution.
 
@@ -249,6 +542,8 @@ def compute_pression_bar(
 
     by_step  = _events_at_steps(bar_events)
     all_vels = [e.velocity for evts in by_step.values() for e in evts]
+    phrase_state = phrase_state or {}
+    phrase_levels = _phrase_levels_for_bar(phrase_state) if phrase_state else {}
 
     # --- Transition state ---
     t_active    = transition is not None and transition.active
@@ -357,6 +652,38 @@ def compute_pression_bar(
             resp_raw[s] = min(1.0, peak + bonus)
     response_intensity = [_i(v) for v in _decay(resp_raw, decay=0.6)]
 
+    pressure = _compose_phrase_lane(
+        pressure, phrase_levels.get("pressure", p_scalar)
+    )
+    impact = _compose_phrase_lane(
+        impact, phrase_levels.get("impact", max(impact_raw) if impact_raw else 0.0)
+    )
+    density = _compose_phrase_lane(
+        density, phrase_levels.get("density", density_scalar)
+    )
+    silence = _compose_phrase_lane(
+        silence, phrase_levels.get("silence", 1.0 - density_scalar)
+    )
+    riser = _compose_phrase_lane(
+        riser, phrase_levels.get("riser", riser_scalar)
+    )
+    leadership = _compose_phrase_lane(
+        leadership, phrase_levels.get("leadership", lead_val / 127.0)
+    )
+    call_intensity = _compose_phrase_lane(
+        call_intensity, phrase_levels.get("call_intensity", behaviour.energy_level)
+    )
+    response_intensity = _compose_phrase_lane(
+        response_intensity, phrase_levels.get("response_intensity", behaviour.energy_level)
+    )
+
+    if cr_mode == CRMode.BASS_LEADS:
+        bass_intensity = call_intensity
+        stab_intensity = response_intensity
+    else:
+        bass_intensity = response_intensity
+        stab_intensity = call_intensity
+
     # ── landing_strength ────────────────────────────────────────────────────
     # Spike at the final response note (steps 12–15), held to end of bar.
     land_raw = [0.0] * STEPS_PER_BAR
@@ -378,6 +705,12 @@ def compute_pression_bar(
     # Low in beats 1–2, accelerating rise through beats 3–4 when transition
     # is approaching completion. Creates clear anticipation signal.
     pre_warning = [_i(pw_scalar * _pre_warning_ramp(s)) for s in range(STEPS_PER_BAR)]
+    landing_strength = _compose_phrase_lane(
+        landing_strength, phrase_levels.get("landing_strength", final_vel)
+    )
+    pre_warning = _compose_phrase_lane(
+        pre_warning, phrase_levels.get("pre_warning", pw_scalar)
+    )
 
     # --- Event overlays ---
     overlays: list[PressionOverlay] = []
@@ -423,9 +756,12 @@ def compute_pression_bar(
         leadership=leadership,
         call_intensity=call_intensity,
         response_intensity=response_intensity,
+        bass_intensity=bass_intensity,
+        stab_intensity=stab_intensity,
         landing_strength=landing_strength,
         pre_warning=pre_warning,
         overlays=overlays,
+        phrase_state=phrase_state,
     )
 
 
@@ -439,6 +775,8 @@ def compute_bank_timeline(
     transition: Optional["Transition"],
     cr_mode:    "Mode",
     bank,       # Bank object with .all_events() and .bank_index
+    phrase_length_bars: int = DEFAULT_PHRASE_LENGTH_BARS,
+    phrase_strength: float = DEFAULT_PHRASE_STRENGTH,
 ) -> list[PressionBar]:
     """Compute pression for all 16 bars in a bank.
 
@@ -455,6 +793,15 @@ def compute_bank_timeline(
         if 0 <= idx < BARS_PER_BANK:
             events_by_bar[idx].append(e)
 
+    phrase_states = _phrase_state_for_bank(
+        force=force,
+        behaviour=behaviour,
+        transition=transition,
+        cr_mode=cr_mode,
+        phrase_length_bars=phrase_length_bars,
+        phrase_strength=phrase_strength,
+    )
+
     timeline: list[PressionBar] = []
     prev_density = 0.0
     for bar_idx in range(BARS_PER_BANK):
@@ -468,6 +815,7 @@ def compute_bank_timeline(
             bar_idx=bar_idx,
             bank_idx=bank.bank_index,
             prev_density=prev_density,
+            phrase_state=phrase_states[bar_idx],
         )
         prev_density = min(1.0, len([e for evts in _events_at_steps(bar_events).values()
                                      for e in evts]) / 24.0)

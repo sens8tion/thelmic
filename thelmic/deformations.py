@@ -224,13 +224,9 @@ def apply_deformations(
         """
         steps: list[tuple[str, object, float]] = []
         overrides = curve_overrides or {}
-        # Ghost inject: instability drives ghost density; attenuated in Oak.
-        # A pressure curve targeting "ghost_inject" scales instability.
-        oak_scale = min(1.0, landscape_position / 0.33) if landscape_position < 0.33 else 1.0
-        if "ghost_inject" in overrides:
-            ghost_intensity = overrides["ghost_inject"] * force.instability
-        else:
-            ghost_intensity = force.instability * oak_scale
+        ghost_intensity = overrides.get("ghost_inject", 0.0)
+        ghost_clustering = overrides.get("ghost_clustering", 0.0)
+        ghost_intensity = min(1.0, max(ghost_intensity, ghost_clustering))
         if ghost_intensity > 0.0:
             steps.append(("ghost_inject", deform_ghost_inject, ghost_intensity))
         return steps

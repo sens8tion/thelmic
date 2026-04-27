@@ -24,21 +24,21 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
-from thelmic.bass import (
-    generate_bass, generate_bass_call, generate_bass_response_from_steps,
-)
+from thelmic.bass import generate_planned_bass
 from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.call_response import (
-    CallResponseState, Mode, default_state, advance_mode, derive_response_steps,
+    CallResponseState, Mode, default_state, advance_mode,
 )
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
     DIMENSION_NAMES, DIMENSION_COLOURS, BARS_PER_BANK, empty_timeline,
+    TEST_PULSE_VALUES,
 )
 from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
 from thelmic.pressure_curves import CurveEngine
+from thelmic.phrase_plan import PhrasePlan, generate_phrase_plan
 from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
@@ -116,9 +116,11 @@ _current_bank = None   # Bank | None
 _curve_engine: CurveEngine = CurveEngine()
 _pending_curve_starts: set[int] = set()
 _cr_state: CallResponseState = default_state()
+_phrase_plan: PhrasePlan = generate_phrase_plan()
 _pression_timeline: list[PressionBar] = empty_timeline()
 _pression_cc_map:   dict[str, tuple[int, int]] = dict(DEFAULT_CC_MAP)
 _pression_bar_idx:  int = 0   # current bar being played (0-based within bank)
+_active_pression_mapping_lane: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
@@ -237,26 +239,18 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         base_events[0] if base_events else None,
     )
 
-    bass_events: list = []
+    bass_events: list = generate_planned_bass(base_events, behaviour, _phrase_plan)
     stab_events: list = []
 
     if mode == Mode.STAB_LEADS:
         # Stab leads in CALL_WINDOW (steps 0–7); bass responds in RESPONSE_WINDOW (8–15)
         all_call_stabs: list = []
-        leader_steps_by_bar: dict[int, list[int]] = {}
-
         for bar in bars_present:
             call_evts, leader_steps = generate_stab_call(
                 abs_bar=bar, behaviour=behaviour,
                 landscape_position=landscape_position, source=source,
             )
             all_call_stabs.extend(call_evts)
-            if leader_steps:
-                leader_steps_by_bar[bar] = derive_response_steps(leader_steps)
-
-        bass_events = generate_bass_response_from_steps(
-            leader_steps_by_bar, base_events, behaviour, landscape_position,
-        )
         stab_events = all_call_stabs
 
         _log.debug(
@@ -266,11 +260,10 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
 
     else:  # Mode.BASS_LEADS
         # Bass leads in CALL_WINDOW (steps 0–7); stab responds in RESPONSE_WINDOW (8–15)
-        bass_call_evts = generate_bass_call(base_events, behaviour, landscape_position)
         bass_call_steps_by_bar: dict[int, list[int]] = {}
-        for e in bass_call_evts:
+        for e in bass_events:
             bar, step = _time_to_bar_step(e.time)
-            if step >= 0:
+            if 0 <= step < 8:
                 bass_call_steps_by_bar.setdefault(bar, []).append(step)
 
         all_resp_stabs: list = []
@@ -281,7 +274,6 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
                 source=source,
             ))
 
-        bass_events = bass_call_evts
         stab_events = all_resp_stabs
 
         _log.debug(
@@ -295,6 +287,8 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
+    _runtime_debug["bass_source"] = "phrase_plan"
+    _runtime_debug["bass_tonal_centre"] = 36
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
@@ -323,6 +317,16 @@ def _prepare_regenerated_bank(bank_idx: int):
     _apply_behaviour_modules_to_bank(fresh, overrides)
     elapsed = _record_timing("next_bank_prepare_ms", (time.perf_counter() - t0) * 1000)
     return fresh, elapsed
+
+
+def _active_pression_cc_map() -> dict[str, tuple[int, int]]:
+    """Return the CC map allowed for Pression output right now."""
+    if _active_pression_mapping_lane is None:
+        return _pression_cc_map
+    pair = _pression_cc_map.get(_active_pression_mapping_lane)
+    if pair is None:
+        return {}
+    return {_active_pression_mapping_lane: pair}
 
 
 def _install_prepared_regeneration_when_ready(prepared: dict, bank, next_idx: int) -> None:
@@ -504,12 +508,14 @@ def _force_state_dict(include_bank: bool = True) -> dict:
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
+        "active_pression_mapping_lane": _active_pression_mapping_lane,
         "call_response": {
             "mode": _cr_state.mode.value,
             "bars_in_mode": _cr_state.bars_in_mode,
             "mode_duration_bars": _cr_state.mode_duration_bars,
             "force_mode": _cr_state.force_mode.value if _cr_state.force_mode else None,
         },
+        "phrase_plan": _phrase_plan.to_dict(),
         "pression": {
             "current_bar": _pression_bar_idx,
             "current": (_pression_timeline[_pression_bar_idx].bar_peak()
@@ -518,6 +524,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
             "timeline": [pb.to_dict() for pb in _pression_timeline],
             "cc_map": {k: list(v) for k, v in _pression_cc_map.items()},
             "colours": DIMENSION_COLOURS,
+            "active_mapping_lane": _active_pression_mapping_lane,
         },
         "runtime": {**_runtime_debug, "boundary_timing": _boundary_timing},
         "force": {
@@ -568,6 +575,8 @@ def _live_state_dict() -> dict:
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
         "pression_bar_idx": _pression_bar_idx,   # current bar, for UI cursor
+        "active_pression_mapping_lane": _active_pression_mapping_lane,
+        "phrase_plan": _phrase_plan.to_dict(),
         "runtime": {**_runtime_debug, "boundary_timing": _boundary_timing},
         "force": {
             "anticipation": round(fs.anticipation, 3),
@@ -748,7 +757,7 @@ def _playback_loop() -> None:
                 bar_end = _midi.play_bar_in_phrase_blocking(
                     phrase, bar_in_phrase, bpm=_bpm, bank_start=bank_start,
                     pression_bar=_pb,
-                    pression_cc_map=_pression_cc_map if _midi_cc else None,
+                    pression_cc_map=_active_pression_cc_map() if _midi_cc else None,
                     pression_cc_port=_midi_cc,
                 )
                 t_after_play = time.perf_counter()
@@ -967,7 +976,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _handle_message(msg: dict) -> None:
-    global _playing, _play_thread, _bpm
+    global _playing, _play_thread, _bpm, _active_pression_mapping_lane, _cr_state
 
     kind = msg.get("type")
 
@@ -1007,6 +1016,11 @@ async def _handle_message(msg: dict) -> None:
         for dim, pair in updates.items():
             if dim in DIMENSION_NAMES and isinstance(pair, (list, tuple)) and len(pair) == 2:
                 _pression_cc_map[dim] = (int(pair[0]), int(pair[1]))
+        await _broadcast({"type": "state", **_force_state_dict()})
+
+    elif kind == "pression_mapping_lane":
+        raw = msg.get("value")
+        _active_pression_mapping_lane = raw if raw in DIMENSION_NAMES else None
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "call_response_mode":
