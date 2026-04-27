@@ -22,8 +22,16 @@ def _velocity_scales(behaviour: BehaviourField) -> tuple[float, float]:
     return max(0.0, min(1.0, ghost)), max(0.0, min(1.0, anchor))
 
 
-def apply_behaviour_dynamics(bank: Bank, behaviour: BehaviourField) -> None:
+def apply_behaviour_dynamics(bank: Bank, behaviour: BehaviourField) -> int:
+    """Modulate ghost and anchor event velocities from BehaviourField.
+
+    Modifies only velocity and deformation metadata of existing events.
+    Never creates events.  Never changes event timing.  Never overrides silence.
+
+    Returns the count of events whose velocity was modulated.
+    """
     ghost_velocity, anchor_velocity = _velocity_scales(behaviour)
+    modulated = 0
     for event in bank.all_events():
         if not getattr(event, "active", True) or event.velocity <= 0:
             continue
@@ -32,6 +40,9 @@ def apply_behaviour_dynamics(bank: Bank, behaviour: BehaviourField) -> None:
         if _is_ghost_event(event):
             event.velocity = _clamp_velocity(original * ghost_velocity)
             event.deformation["behaviour_dynamics"] = ghost_velocity
+            modulated += 1
         elif _is_anchor_event(event):
             event.velocity = _clamp_velocity(original * anchor_velocity)
             event.deformation["behaviour_dynamics"] = anchor_velocity
+            modulated += 1
+    return modulated

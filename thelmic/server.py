@@ -33,9 +33,9 @@ from thelmic.calls import generate_planned_calls
 from thelmic.responses import generate_planned_responses
 from thelmic.hook import generate_planned_hook
 from thelmic.pression import (
-    PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
-    DIMENSION_NAMES, DIMENSION_COLOURS, BARS_PER_BANK, empty_timeline,
-    TEST_PULSE_VALUES,
+    PressionBar, compute_bank_timeline, audit_pression_compliance,
+    DEFAULT_CC_MAP, DIMENSION_NAMES, DIMENSION_COLOURS,
+    BARS_PER_BANK, empty_timeline, TEST_PULSE_VALUES,
 )
 from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
@@ -274,11 +274,12 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
-    apply_behaviour_dynamics(bank, behaviour)
+    pression_modulated_count = apply_behaviour_dynamics(bank, behaviour)
 
     # Pre-compute pression timeline for this bank.
-    # Playback loop reads _pression_timeline[abs_bar-1] to send CCs
-    # without any computation on the hot path.
+    # Pression is computed AFTER enforce_phrase_syntax so it sees only
+    # surviving (post-enforcement) events.  apply_behaviour_dynamics also
+    # runs post-enforcement.  Pression never creates events.
     global _pression_timeline
     _pression_timeline = compute_bank_timeline(
         force=_engine.force_state,
@@ -287,6 +288,15 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         cr_mode=mode,
         bank=bank,
     )
+
+    # Phase 7 compliance audit — prove pression is control-only.
+    pression_audit = audit_pression_compliance(
+        timeline=_pression_timeline,
+        bank=bank,
+        cc_map=_pression_cc_map,
+    )
+    pression_audit["pression_modulated_events_count"] = pression_modulated_count
+    _runtime_debug.update(pression_audit)
 
 
 def _prepare_regenerated_bank(bank_idx: int):

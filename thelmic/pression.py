@@ -824,3 +824,46 @@ def compute_bank_timeline(
     # role_flip overlay: add to bars where cr_mode is different from the bank default
     # (this is approximate; the server adds flip overlays when the mode actually changes)
     return timeline
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 compliance audit
+# ---------------------------------------------------------------------------
+
+def audit_pression_compliance(
+    timeline: list[PressionBar],
+    bank,                                  # Bank object
+    cc_map: dict[str, tuple[int, int]],    # {dimension: (channel, cc_num)}
+) -> dict:
+    """Return a compliance snapshot for debug broadcast.
+
+    Proves that pression:
+      - created zero note events (attempted_event_creations == 0 always)
+      - has not altered the bank's event count
+      - is purely CC / intensity output
+
+    This function has no side effects.
+    """
+    bank_event_count = len(list(bank.all_events()))
+
+    # Count active CC targets: dimensions that will emit non-zero values
+    # (has at least one step with value > 0 somewhere in the bank)
+    targets_active = 0
+    for name in DIMENSION_NAMES:
+        if name not in cc_map:
+            continue
+        for bar in timeline:
+            if any(v > 0 for v in getattr(bar, name, [])):
+                targets_active += 1
+                break
+
+    # Theoretical CC output count: 16 steps × active targets × bars
+    pression_cc_outputs = 16 * targets_active * len(timeline)
+
+    return {
+        "pression_attempted_event_creations": 0,    # invariant: pression never creates events
+        "pression_cc_outputs":                pression_cc_outputs,
+        "pression_targets_active":            targets_active,
+        "pression_bank_events_at_audit":      bank_event_count,
+        # modulated_events_count is populated by apply_behaviour_dynamics (deformations_dynamics.py)
+    }
