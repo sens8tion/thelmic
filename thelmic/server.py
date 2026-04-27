@@ -29,6 +29,7 @@ from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.call_response import (
     CallResponseState, Mode, default_state, advance_mode,
 )
+from thelmic.calls import generate_planned_calls
 from thelmic.hook import generate_planned_hook
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
@@ -43,7 +44,6 @@ from thelmic.phrase_plan import PhrasePlan, generate_phrase_plan
 from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
-    generate_stab_call, generate_stab_response_from_steps,
 )
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.transition_engine import TransitionEngine
@@ -244,42 +244,17 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
 
     bass_events: list = generate_planned_bass(base_events, behaviour, _phrase_plan)
     hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
-    stab_events: list = []
+    planned_calls = generate_planned_calls(base_events, behaviour, _phrase_plan)
+    stab_events: list = planned_calls.events
 
     if mode == Mode.STAB_LEADS:
-        # Stab leads in CALL_WINDOW (steps 0–7); bass responds in RESPONSE_WINDOW (8–15)
-        all_call_stabs: list = []
-        for bar in bars_present:
-            call_evts, leader_steps = generate_stab_call(
-                abs_bar=bar, behaviour=behaviour,
-                landscape_position=landscape_position, source=source,
-            )
-            all_call_stabs.extend(call_evts)
-        stab_events = all_call_stabs
-
         _log.debug(
             "bank=%d mode=STAB_LEADS bars_in_mode=%d",
             bank.bank_index, _cr_state.bars_in_mode,
         )
 
     else:  # Mode.BASS_LEADS
-        # Bass leads in CALL_WINDOW (steps 0–7); stab responds in RESPONSE_WINDOW (8–15)
-        bass_call_steps_by_bar: dict[int, list[int]] = {}
-        for e in bass_events:
-            bar, step = _time_to_bar_step(e.time)
-            if 0 <= step < 8:
-                bass_call_steps_by_bar.setdefault(bar, []).append(step)
-
-        all_resp_stabs: list = []
-        for bar, call_steps in bass_call_steps_by_bar.items():
-            all_resp_stabs.extend(generate_stab_response_from_steps(
-                leader_steps=call_steps, abs_bar=bar,
-                behaviour=behaviour, landscape_position=landscape_position,
-                source=source,
-            ))
-
-        stab_events = all_resp_stabs
-
+        # Phase 4 does not render responses; planned response ownership comes later.
         _log.debug(
             "bank=%d mode=BASS_LEADS bars_in_mode=%d",
             bank.bank_index, _cr_state.bars_in_mode,
@@ -292,6 +267,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
+    _runtime_debug.update(planned_calls.stats)
     _runtime_debug.update(syntax_stats)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode

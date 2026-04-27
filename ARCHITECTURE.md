@@ -19,6 +19,7 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 1 planned bass | complete | bass is rendered from `phrase_plan.bass_pattern` |
 | Phase 2 hook identity rendering | complete | hook is rendered from `phrase_plan.hook_pattern` |
 | Phase 3 phrase syntax compliance | complete | `PhrasePlan` enforces phrase_state, call_slots, response_slots, and silence_mask |
+| Phase 4 planner-owned call generation | complete | calls render from `phrase_plan.call_slots` with `role="call"` |
 
 Current rule:
 
@@ -203,7 +204,8 @@ Current call/response exists but is not yet fully planner-owned.
 
 Target contract:
 
-- Calls occur only in planned call slots.
+- Calls render only from `phrase_plan.call_slots`.
+- Calls use `role="call"`.
 - Responses occur only in planned response slots.
 - A response must be caused by a call.
 - No call means no response.
@@ -332,6 +334,7 @@ Current implemented responsibilities:
 - create base drum/archetype events.
 - render planned bass from `phrase_plan.bass_pattern`.
 - render planned hook from `phrase_plan.hook_pattern`.
+- render planned calls from `phrase_plan.call_slots`.
 - apply ghost injection.
 - apply anchor withholding.
 - apply behaviour-driven dynamics.
@@ -392,6 +395,10 @@ runtime:
   events_outside_call_slots:
   events_outside_response_slots:
   syntax_filtered_events_total:
+  planned_call_slots:
+  call_events_rendered:
+  call_events_suppressed:
+  call_events_outside_slots:
   boundary_timing:
 ```
 
@@ -418,6 +425,7 @@ thelmic/
 |   |-- bank_generator.py           # Bank, Phrase, MIDIEvent, BankGenerator
 |   |-- bass.py                     # planned bass rendering from bass_pattern
 |   |-- hook.py                     # planned hook rendering from hook_pattern
+|   |-- calls.py                    # planned call rendering from call_slots
 |   |-- stabs.py                    # stab/call-response support
 |   |-- syntax_enforcer.py          # PhrasePlan syntax filtering pass
 |   |-- rhythm.py                   # rhythm conformance helpers
@@ -457,7 +465,7 @@ thelmic/
 | 1 | Planned bass truth - done |
 | 2 | Hook identity rendering - done |
 | 3 | Phrase syntax compliance - done |
-| 4 | Planner-owned call generation |
+| 4 | Planner-owned call generation - done |
 | 5 | Planner-owned response generation |
 | 6 | Silence mask compliance |
 | 7 | Pressure integration as CC/control only |
