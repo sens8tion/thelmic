@@ -486,10 +486,174 @@ def _generate_test_pattern(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Bass → stab derivation
+# ---------------------------------------------------------------------------
+
+def extract_bass_steps(bass_events: list[MIDIEvent]) -> dict[int, list[int]]:
+    """Return {bar: [step, ...]} for all bass events, sorted ascending per bar."""
+    result: dict[int, list[int]] = {}
+    for e in bass_events:
+        bar, step = _time_to_bar_step(e.time)
+        if step >= 0:
+            result.setdefault(bar, []).append(step)
+    return {b: sorted(set(steps)) for b, steps in result.items()}
+
+
+def _derive_stab_steps(bass_steps: list[int]) -> list[int]:
+    """Derive stab step positions from a list of bass steps.
+
+    Rules:
+    - Each derived step follows its seed bass step by +2..+5
+    - Avoids the bass step positions
+    - Prefers offbeat steps; avoids beat steps if possible
+    - Returns at most 3 steps, sorted ascending
+    """
+    if not bass_steps:
+        return []
+
+    bass_set = set(bass_steps)
+    derived: list[int] = []
+
+    for bs in sorted(bass_steps)[:3]:
+        candidates = [
+            bs + off for off in range(2, 6)
+            if bs + off < STEPS_PER_BAR
+            and bs + off not in bass_set
+            and bs + off not in set(derived)
+        ]
+        if not candidates:
+            continue
+        offbeat = [c for c in candidates if c in OFFBEAT_STEPS]
+        non_beat = [c for c in candidates if c not in BEAT_STEPS]
+        chosen = (offbeat or non_beat or candidates)[0]
+        derived.append(chosen)
+
+    return sorted(derived)
+
+
+def _derive_stab_root(bass_note: int, landscape_position: float) -> int:
+    """Derive stab root note from bass note + landscape position.
+
+    Oak   (≤0.33): echo — same pitch class, two octaves up
+    Chaos (0.33–0.67): lift — two octaves up + perfect 5th
+    Nott  (≥0.67): resolve — two octaves up, minor 3rd (tension toward root)
+    """
+    two_octaves_up = bass_note + 24
+    if landscape_position <= 0.33:
+        return two_octaves_up           # C4 when bass_note=36
+    if landscape_position >= 0.67:
+        return two_octaves_up - 3       # A3 — minor 3rd, unresolved tension
+    return two_octaves_up + 7           # G4 — perfect 5th above, harmonic lift
+
+
+def generate_stabs_from_bass(
+    bass_events: list[MIDIEvent],
+    all_events: list[MIDIEvent],
+    behaviour: BehaviourField,
+    landscape_position: float = 0.0,
+    debug: dict | None = None,
+) -> list[MIDIEvent]:
+    """Generate stab events explicitly derived from bass events.
+
+    Flow:
+      bass_steps (per bar)
+        → _derive_stab_steps  (shift +2..+5, avoid collisions)
+        → apply motif intervals + velocities
+        → call/response rendering (first note on call bars, full on response)
+
+    The stab is the answer to the bass — same rhythm shifted later, harmonic
+    relationship determined by landscape position.
+    """
+    if STAB_TEST_PATTERN is not None:
+        return _generate_test_pattern(all_events, behaviour, landscape_position)
+
+    if not bass_events:
+        if debug is not None:
+            debug.update({"stabs_emitted": 0})
+        return []
+
+    bass_steps_by_bar = extract_bass_steps(bass_events)
+    if not bass_steps_by_bar:
+        return []
+
+    # Determine bass root note (all bass events use the same note)
+    bass_note = next((e.note for e in bass_events), 36)
+    root = _derive_stab_root(bass_note, landscape_position)
+
+    # Select motif (for intervals, durations, velocities)
+    min_bar = min(bass_steps_by_bar)
+    bank_idx = (min_bar - 1) // 16
+    base_motif = _select_motif(landscape_position, bank_idx)
+
+    source = next(
+        (e for e in all_events if e.layer in {"kick", "snare"}),
+        all_events[0] if all_events else None,
+    )
+
+    stab_events: list[MIDIEvent] = []
+    emitted = 0
+
+    for abs_bar in sorted(bass_steps_by_bar):
+        bar_in_pair  = (abs_bar - 1) % 2       # 0 = call, 1 = response
+        variation    = _varied_motif(base_motif, abs_bar)
+
+        if not _should_fire_in_bar(abs_bar, bar_in_pair, landscape_position):
+            continue
+
+        bass_steps = bass_steps_by_bar[abs_bar]
+        derived    = _derive_stab_steps(bass_steps)
+
+        if not derived:
+            continue
+
+        # Build a StabMotif from derived steps + selected motif's intervals
+        n = min(len(derived), len(variation))
+        try:
+            bar_motif = StabMotif(
+                steps=tuple(derived[:n]),
+                intervals=variation.intervals[:n],
+                durations=variation.durations[:n],
+                velocities=variation.velocities[:n],
+            )
+        except AssertionError:
+            continue   # out-of-range or unsorted — skip silently
+
+        render_motif = bar_motif.first_note_only() if bar_in_pair == 0 else bar_motif
+        vel_scale    = _velocity_scale(behaviour, bar_in_pair)
+
+        for i in range(len(render_motif)):
+            step     = render_motif.steps[i]
+            note     = max(0, min(127, root + render_motif.intervals[i]))
+            velocity = max(1, min(127, int(render_motif.velocities[i] * vel_scale)))
+            duration = render_motif.durations[i]
+            time_str = _step_to_time(abs_bar, step)
+            ev = _make_stab_event(source, time_str, note, velocity, duration, behaviour)
+            stab_events.append(ev)
+            emitted += 1
+            _log_stab_event(ev, abs_bar, step)
+
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug(
+                "bar=%d bass_steps=%s → stab_steps=%s | bass_note=%d → stab_root=%d intervals=%s",
+                abs_bar, bass_steps, list(render_motif.steps),
+                bass_note, root, list(render_motif.intervals),
+            )
+
+    if debug is not None:
+        debug.update({
+            "stabs_emitted": emitted,
+            "bass_root_note": bass_note,
+            "stab_root_note": root,
+        })
+    return stab_events
+
+
 def generate_stabs(
     events: list[MIDIEvent],
     behaviour: BehaviourField,
     landscape_position: float = 0.0,
 ) -> list[MIDIEvent]:
+    """Generate stabs from drum events only (no bass context — used in tests)."""
     calls = collect_call_events(events)
     return generate_stabs_from_calls(calls, events, behaviour, landscape_position)

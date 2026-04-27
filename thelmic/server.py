@@ -31,7 +31,7 @@ from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
 from thelmic.pressure_curves import CurveEngine
 from thelmic.rhythm import conformance_for_landscape
-from thelmic.stabs import collect_call_events, generate_stabs_from_calls
+from thelmic.stabs import collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass
 from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
@@ -202,17 +202,18 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     base_events = list(bank.all_events())
     landscape_position = _engine.landscape_position
     bass_events = generate_bass(base_events, behaviour, landscape_position)
-    calls = collect_call_events(base_events)
     stab_debug: dict = {}
-    stab_events = generate_stabs_from_calls(
-        calls, base_events, behaviour, landscape_position, debug=stab_debug,
+    # Stab is explicitly derived from bass: bass = call, stab = response.
+    # Pass bass_events so stab timing is shifted-bass rhythm, not independent.
+    stab_events = generate_stabs_from_bass(
+        bass_events, base_events, behaviour, landscape_position, debug=stab_debug,
     )
-    appended_bass = _append_events_to_bank(bank, bass_events)
+    appended_bass  = _append_events_to_bank(bank, bass_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
-    _runtime_debug["bass_events_per_bar"] = _events_per_bar(appended_bass)
-    _runtime_debug["stab_events_per_bar"] = _events_per_bar(appended_stabs)
-    _runtime_debug["call_events_per_bar"] = _events_per_bar(calls)
-    _runtime_debug["stab_responses_per_bar"] = _events_per_bar(appended_stabs)
+    _runtime_debug["bass_events_per_bar"]  = _events_per_bar(appended_bass)
+    _runtime_debug["stab_events_per_bar"]  = _events_per_bar(appended_stabs)
+    _runtime_debug["stab_bass_root"]       = stab_debug.get("bass_root_note", 36)
+    _runtime_debug["stab_stab_root"]       = stab_debug.get("stab_root_note", 60)
     _runtime_debug.update(stab_debug)
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance

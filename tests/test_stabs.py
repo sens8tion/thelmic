@@ -11,9 +11,11 @@ from thelmic import stabs as stabs_mod
 from thelmic.stabs import (
     StabMotif,
     LATE_ANSWER, PICKUP_CATCH, SYNCOPATED_HOOK,
-    generate_stabs, generate_stabs_from_calls, collect_call_events,
+    generate_stabs, generate_stabs_from_calls, generate_stabs_from_bass,
+    collect_call_events, extract_bass_steps,
     _step_to_time, _time_to_bar_step, _is_grid_aligned,
     _varied_motif, _select_motif, _should_fire_in_bar,
+    _derive_stab_steps, _derive_stab_root,
     TICKS_PER_STEP, STEPS_PER_BAR, OFFBEAT_STEPS, BEAT_STEPS,
 )
 
@@ -296,24 +298,134 @@ class TestMotifContinuity:
             has_offbeat = any(s in OFFBEAT_STEPS or s > 8 for s in motif.steps)
             assert has_offbeat, f"motif {motif.steps} has no offbeat steps"
 
-    def test_same_motif_across_bank(self):
+    def test_same_motif_base_step_across_bank(self):
         """All stabs in a bank should come from the same base motif."""
         events = _bank_events()
         b = _behaviour(energy_level=0.9)
         stabs = generate_stabs(events, b, landscape_position=0.5)
-        # The base motif is the same for the whole bank — first stab step
-        # should appear in multiple response bars
         resp_bar_steps: dict[int, list] = {}
         for s in stabs:
             bar, step = _time_to_bar_step(s.time)
-            bar_in_pair = (bar - 1) % 2
-            if bar_in_pair == 1:  # response bars
+            if (bar - 1) % 2 == 1:   # response bars
                 resp_bar_steps.setdefault(bar, []).append(step)
-        # All response bars should start with the same base motif step
         if len(resp_bar_steps) >= 2:
             bars = sorted(resp_bar_steps)
-            first_step_bar1 = resp_bar_steps[bars[0]][0]
-            first_step_bar2 = resp_bar_steps[bars[1]][0]
-            assert first_step_bar1 == first_step_bar2, (
-                "Response bars use different base motif starts — motif is not stable"
+            assert resp_bar_steps[bars[0]][0] == resp_bar_steps[bars[1]][0], (
+                "Response bars use different base motif starts"
             )
+
+
+# ---------------------------------------------------------------------------
+# Bass → stab derivation
+# ---------------------------------------------------------------------------
+
+class TestBassToStabDerivation:
+
+    def _bass_event(self, bar: int, step: int) -> MIDIEvent:
+        return MIDIEvent(
+            time=_step_to_time(bar, step), note=36, velocity=90,
+            duration=0.12, layer="bass", role="bass",
+            emphasis=0.7, openness=0.0, expected_weight=0.8, should_resolve=False,
+        )
+
+    def _bass_events(self, bar: int, steps: list[int]) -> list[MIDIEvent]:
+        return [self._bass_event(bar, s) for s in steps]
+
+    # extract_bass_steps
+    def test_extract_bass_steps_groups_by_bar(self):
+        events = self._bass_events(1, [0, 8]) + self._bass_events(2, [0, 4])
+        result = extract_bass_steps(events)
+        assert result[1] == [0, 8]
+        assert result[2] == [0, 4]
+
+    def test_extract_bass_steps_ignores_off_grid(self):
+        # Manually create an off-grid bass event
+        e = self._bass_event(1, 0)
+        object.__setattr__(e, "time", "1.1.3")   # force off-grid
+        result = extract_bass_steps([e])
+        assert 1 not in result or result.get(1) == []
+
+    # _derive_stab_steps
+    def test_derived_steps_are_after_bass_steps(self):
+        bass = [0, 8]
+        derived = _derive_stab_steps(bass)
+        for stab_step in derived:
+            assert any(stab_step > bs for bs in bass), (
+                f"stab step {stab_step} is not after any bass step"
+            )
+
+    def test_derived_steps_do_not_collide_with_bass(self):
+        bass = [0, 4, 8]
+        derived = _derive_stab_steps(bass)
+        assert not set(derived) & set(bass)
+
+    def test_derived_steps_are_in_range(self):
+        for bass_steps in [[0], [0, 8], [0, 4, 8, 12], [12], [14]]:
+            for s in _derive_stab_steps(bass_steps):
+                assert 0 <= s < STEPS_PER_BAR
+
+    def test_derived_steps_prefer_offbeat(self):
+        # Bass at [0, 8] — clean case, should give offbeat [2, 10]
+        derived = _derive_stab_steps([0, 8])
+        offbeat_count = sum(1 for s in derived if s in OFFBEAT_STEPS)
+        assert offbeat_count >= 1, f"Expected offbeat steps, got {derived}"
+
+    def test_derive_max_three_steps(self):
+        assert len(_derive_stab_steps([0, 4, 8, 12])) <= 3
+
+    def test_derived_steps_sorted_ascending(self):
+        for bass in [[0, 8], [4, 12], [2, 6, 10]]:
+            derived = _derive_stab_steps(bass)
+            assert derived == sorted(derived)
+
+    # _derive_stab_root
+    def test_oak_echo_is_two_octaves_up(self):
+        root = _derive_stab_root(36, 0.0)
+        assert root == 60   # C2 + 24 = C4
+
+    def test_chaos_lift_is_fifth_above(self):
+        root = _derive_stab_root(36, 0.5)
+        assert root == 67   # C4 + 7 = G4
+
+    def test_nott_resolve_is_minor_third_below_echo(self):
+        root = _derive_stab_root(36, 1.0)
+        assert root == 57   # C4 - 3 = A3
+
+    # generate_stabs_from_bass — end-to-end
+    def test_stabs_come_after_bass_in_same_bar(self):
+        bass = self._bass_events(2, [0, 8])   # response bar
+        all_events = _bank_events([2])
+        b = _behaviour(energy_level=0.9)
+        stabs = generate_stabs_from_bass(bass, all_events, b, landscape_position=0.5)
+        bass_steps_set = {0, 8}
+        for s in stabs:
+            bar, step = _time_to_bar_step(s.time)
+            assert step not in bass_steps_set, f"stab at step {step} collides with bass"
+
+    def test_stabs_are_grid_aligned(self):
+        bass = self._bass_events(2, [0, 8]) + self._bass_events(4, [0, 8])
+        all_events = _bank_events([2, 4])
+        b = _behaviour(energy_level=0.9)
+        stabs = generate_stabs_from_bass(bass, all_events, b, landscape_position=0.5)
+        for s in stabs:
+            assert _is_grid_aligned(s.time), f"stab at {s.time} off-grid"
+
+    def test_no_stabs_without_bass(self):
+        b = _behaviour()
+        stabs = generate_stabs_from_bass([], _bank_events(), b)
+        assert stabs == []
+
+    @pytest.mark.parametrize("pos", [0.0, 0.5, 1.0])
+    def test_stab_root_matches_landscape(self, pos):
+        bass = self._bass_events(2, [0, 8])
+        all_events = _bank_events([2])
+        b = _behaviour(energy_level=0.9)
+        expected_root = _derive_stab_root(36, pos)
+        stabs = generate_stabs_from_bass(bass, all_events, b, landscape_position=pos)
+        for s in stabs:
+            # Note = root + interval; interval[0] = 0 for first note
+            # So first note of response should have note = root
+            bar, step = _time_to_bar_step(s.time)
+            if (bar - 1) % 2 == 1:   # response bar, first note
+                # note should be root + some interval (0, 3, or 5)
+                assert s.note >= expected_root, f"stab note {s.note} below root {expected_root}"
