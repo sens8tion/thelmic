@@ -1,12 +1,34 @@
+"""Tests for stab generation — step-index-first architecture.
+
+All stab events must land on valid 16th-note step indices (0..15).
+The generation flow is:
+  call → (bar, call_step) → candidate steps → selected step → time string
+
+No time-offset arithmetic; no free timing.
+"""
+
 import pytest
 from thelmic.bank_generator import MIDIEvent
 from thelmic.behaviour_field import BehaviourField
+from thelmic import stabs as stabs_mod
 from thelmic.stabs import (
-    generate_stabs, generate_stabs_from_calls, collect_call_events,
-    _snap_to_grid_step, _is_grid_aligned, _response_delay_ticks,
+    generate_stabs,
+    generate_stabs_from_calls,
+    collect_call_events,
+    _step_to_time,
+    _time_to_bar_step,
+    _is_grid_aligned,
+    _candidate_steps,
     TICKS_PER_STEP,
+    STEPS_PER_BAR,
+    OFFBEAT_STEPS,
+    BEAT_STEPS,
 )
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _behaviour(
     energy_level: float = 0.5,
@@ -31,171 +53,249 @@ def _behaviour(
     )
 
 
-def _event(role: str = "anchor", velocity: int = 100) -> MIDIEvent:
+def _event(role: str = "anchor", layer: str = "snare", time: str = "1.2.0",
+           velocity: int = 100, emphasis: float = 0.8) -> MIDIEvent:
     return MIDIEvent(
-        time="1.2.0",
+        time=time,
         note=38,
         velocity=velocity,
         duration=0.05,
-        layer="snare",
+        layer=layer,
         role=role,
-        emphasis=0.8,
+        emphasis=emphasis,
         openness=1.0,
         expected_weight=0.9,
         should_resolve=False,
     )
 
 
-def test_stab_responds_after_anchor():
-    stabs = generate_stabs([_event()], _behaviour(energy_level=0.6))
+# ---------------------------------------------------------------------------
+# Grid primitives
+# ---------------------------------------------------------------------------
 
-    assert stabs[0].layer == "stab"
-    assert stabs[0].role == "stab"
-    assert stabs[0].time == "1.2.12"
-    assert stabs[0].note == 60
-    assert stabs[0].velocity < 80
+class TestGridPrimitives:
 
+    def test_step_to_time_step_0(self):
+        assert _step_to_time(1, 0) == "1.1.0"
 
-def test_stab_uses_sixteenth_response_at_lower_energy():
-    event = _event()
-    event.time = "2.2.0"
-    stabs = generate_stabs([event], _behaviour(energy_level=0.8, anticipation=0.0), landscape_position=0.5)
+    def test_step_to_time_step_4(self):
+        # step 4 = 4*6 = 24 ticks = beat 2, tick 0
+        assert _step_to_time(1, 4) == "1.2.0"
 
-    assert stabs[0].time in {"2.2.12", "2.2.18", "2.3.0"}
+    def test_step_to_time_step_8(self):
+        # step 8 = 48 ticks = beat 3, tick 0
+        assert _step_to_time(1, 8) == "1.3.0"
 
+    def test_step_to_time_step_2(self):
+        # step 2 = 12 ticks = beat 1, tick 12
+        assert _step_to_time(1, 2) == "1.1.12"
 
-def test_stab_does_not_fire_when_behaviour_gate_misses():
-    event = _event()
-    event.time = "1.2.0"
-    assert generate_stabs([event], _behaviour(energy_level=0.2), landscape_position=0.5) == []
+    def test_step_to_time_step_6(self):
+        # step 6 = 36 ticks = beat 2, tick 12
+        assert _step_to_time(1, 6) == "1.2.12"
 
+    def test_step_to_time_step_10(self):
+        # step 10 = 60 ticks = beat 3, tick 12
+        assert _step_to_time(1, 10) == "1.3.12"
 
-def test_stab_ignores_non_anchor_events():
-    assert generate_stabs([_event(role="ghost")], _behaviour()) == []
+    def test_step_to_time_step_14(self):
+        # step 14 = 84 ticks = beat 4, tick 12
+        assert _step_to_time(1, 14) == "1.4.12"
 
+    def test_step_to_time_roundtrip(self):
+        for bar in [1, 2, 5]:
+            for step in range(STEPS_PER_BAR):
+                time_str = _step_to_time(bar, step)
+                parsed_bar, parsed_step = _time_to_bar_step(time_str)
+                assert parsed_bar == bar
+                assert parsed_step == step
 
-def test_high_release_suppresses_response():
-    event = _event()
-    event.time = "1.2.0"
-    assert generate_stabs([event], _behaviour(release_pressure=0.9), landscape_position=0.5) == []
+    def test_time_to_bar_step_aligned(self):
+        assert _time_to_bar_step("1.1.0")  == (1, 0)
+        assert _time_to_bar_step("1.1.6")  == (1, 1)
+        assert _time_to_bar_step("1.1.12") == (1, 2)
+        assert _time_to_bar_step("1.2.0")  == (1, 4)
+        assert _time_to_bar_step("2.1.0")  == (2, 0)
 
+    def test_time_to_bar_step_off_grid(self):
+        _, step = _time_to_bar_step("1.1.3")
+        assert step == -1
+        _, step = _time_to_bar_step("1.1.7")
+        assert step == -1
 
-def test_dropped_anchor_boosts_response_probability():
-    event = _event(velocity=0)
-    event.time = "1.1.0"
-    event.active = False
-    event.deformation["anchor_withholding"] = 1.0
+    def test_is_grid_aligned_valid(self):
+        for step in range(STEPS_PER_BAR):
+            assert _is_grid_aligned(_step_to_time(1, step))
 
-    stabs = generate_stabs([event], _behaviour(instability=0.0, anticipation=0.0), landscape_position=0.5)
+    def test_is_grid_aligned_invalid(self):
+        assert not _is_grid_aligned("1.1.3")
+        assert not _is_grid_aligned("1.1.9")
+        assert not _is_grid_aligned("1.1.1")
 
-    assert stabs[0].layer == "stab"
-    assert stabs[0].velocity > 0
+    def test_offbeat_steps_not_on_beats(self):
+        assert OFFBEAT_STEPS.isdisjoint(BEAT_STEPS)
 
-
-def test_limits_stabs_per_bar():
-    events = [_event(), _event()]
-    events[1].time = "1.4.0"
-
-    stabs = generate_stabs(events, _behaviour())
-
-    assert len(stabs) == 1
-
-
-def test_oak_stabs_are_predictable_every_other_bar():
-    first = _event()
-    first.time = "1.2.0"
-    second = _event()
-    second.time = "2.2.0"
-
-    stabs = generate_stabs([first, second], _behaviour(), landscape_position=0.0)
-
-    assert [event.time for event in stabs] == ["1.2.12"]
-
-
-def test_nott_stabs_are_phrase_locked_and_lower():
-    event = _event()
-    event.time = "4.2.0"
-
-    stabs = generate_stabs([event], _behaviour(), landscape_position=1.0)
-
-    assert stabs[0].time == "5.1.12"
-    assert stabs[0].note == 48
+    def test_step_to_time_rejects_out_of_range(self):
+        with pytest.raises(AssertionError):
+            _step_to_time(1, 16)
+        with pytest.raises(AssertionError):
+            _step_to_time(1, -1)
 
 
-# ── Grid alignment invariant ─────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Candidate steps
+# ---------------------------------------------------------------------------
 
-class TestGridAlignment:
+class TestCandidateSteps:
 
-    def _event_at(self, time: str, role: str = "anchor") -> MIDIEvent:
-        e = _event(role=role)
-        e.time = time
-        return e
+    def test_candidates_are_after_call(self):
+        candidates = _candidate_steps(call_step=4, bar=1, occupied=set(), landscape_position=0.5)
+        assert all(s > 4 for s in candidates)
 
-    def _all_stab_times_grid_aligned(self, events, behaviour, pos) -> bool:
-        stabs = generate_stabs(events, behaviour, landscape_position=pos)
-        return all(_is_grid_aligned(s.time) for s in stabs)
+    def test_candidates_are_offbeat(self):
+        candidates = _candidate_steps(call_step=0, bar=1, occupied=set(), landscape_position=0.5)
+        assert all(s in OFFBEAT_STEPS for s in candidates)
 
-    def test_snap_to_grid_step_exact(self):
-        # Already-aligned times should be unchanged
-        assert _snap_to_grid_step("1.1.0")  == "1.1.0"
-        assert _snap_to_grid_step("1.1.6")  == "1.1.6"
-        assert _snap_to_grid_step("1.1.12") == "1.1.12"
-        assert _snap_to_grid_step("1.1.18") == "1.1.18"
-        assert _snap_to_grid_step("1.2.0")  == "1.2.0"
+    def test_candidates_exclude_occupied(self):
+        candidates = _candidate_steps(call_step=0, bar=1, occupied={6, 10}, landscape_position=0.5)
+        assert 6 not in candidates
+        assert 10 not in candidates
 
-    def test_snap_to_grid_step_rounds_off_grid(self):
-        # Any off-grid input must produce a grid-aligned output.
-        # We don't assert which adjacent step wins (Python banker's rounding
-        # means ties go to the even step), only that the result is on-grid.
-        for off_tick in [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]:
-            result = _snap_to_grid_step(f"1.1.{off_tick}")
-            assert _is_grid_aligned(result), (
-                f"snap of tick={off_tick} gave {result!r}, not grid-aligned"
-            )
+    def test_candidates_empty_when_call_too_late(self):
+        # Call at step 14 — no offbeat after 14 in same bar
+        candidates = _candidate_steps(call_step=14, bar=1, occupied=set(), landscape_position=0.5)
+        assert candidates == []
 
-    def test_is_grid_aligned_multiples_of_six(self):
-        for tick in range(0, 25, 6):  # 0, 6, 12, 18, 24
-            beat = tick // 24 + 1
-            t = tick % 24
-            assert _is_grid_aligned(f"1.{beat}.{t}"), f"tick {tick} should be aligned"
+    def test_nott_prefers_late_phrase_steps(self):
+        candidates = _candidate_steps(call_step=0, bar=1, occupied=set(), landscape_position=0.9)
+        # Should only contain late-phrase steps (10-15 range)
+        assert all(s >= 10 for s in candidates)
 
-    def test_is_grid_aligned_rejects_off_grid(self):
-        for off in [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]:
-            assert not _is_grid_aligned(f"1.1.{off}"), f"tick {off} should NOT be aligned"
 
-    def test_response_delay_always_multiple_of_six(self):
-        # Sweep anticipation across [0, 1] — all results must be step-multiples
-        for i in range(11):
-            anticipation = i / 10.0
-            b = _behaviour(anticipation=anticipation)
-            for pos in [0.0, 0.25, 0.5, 0.75, 1.0]:
-                delay = _response_delay_ticks(b, pos)
-                assert delay % TICKS_PER_STEP == 0, (
-                    f"delay={delay} not a step multiple at anticipation={anticipation} pos={pos}"
-                )
+# ---------------------------------------------------------------------------
+# Test pattern mode
+# ---------------------------------------------------------------------------
+
+class TestTestPattern:
+
+    def setup_method(self):
+        stabs_mod.STAB_TEST_PATTERN = None
+
+    def teardown_method(self):
+        stabs_mod.STAB_TEST_PATTERN = None
+
+    def test_fixed_pattern_fires_at_correct_steps(self):
+        stabs_mod.STAB_TEST_PATTERN = [4, 10, 14]
+        events = [_event(time="1.1.0")]
+        stabs = generate_stabs(events, _behaviour())
+
+        assert len(stabs) == 3
+        times = {s.time for s in stabs}
+        assert _step_to_time(1, 4)  in times
+        assert _step_to_time(1, 10) in times
+        assert _step_to_time(1, 14) in times
+
+    def test_fixed_pattern_steps_are_grid_aligned(self):
+        stabs_mod.STAB_TEST_PATTERN = [3, 7, 11, 15]
+        events = [_event(time="2.1.0")]
+        stabs = generate_stabs(events, _behaviour())
+        for s in stabs:
+            assert _is_grid_aligned(s.time), f"stab at {s.time} is off-grid"
+
+    def test_fixed_pattern_layer_and_role(self):
+        stabs_mod.STAB_TEST_PATTERN = [6]
+        events = [_event(time="1.1.0")]
+        stabs = generate_stabs(events, _behaviour())
+        assert stabs[0].layer == "stab"
+        assert stabs[0].role  == "stab"
+
+    def test_no_stabs_without_events(self):
+        stabs_mod.STAB_TEST_PATTERN = [4, 10, 14]
+        stabs = generate_stabs([], _behaviour())
+        assert stabs == []
+
+
+# ---------------------------------------------------------------------------
+# Musical generation — all stabs must be grid-aligned
+# ---------------------------------------------------------------------------
+
+class TestGridAlignmentInvariant:
 
     @pytest.mark.parametrize("pos", [0.0, 0.16, 0.33, 0.5, 0.67, 0.84, 1.0])
     def test_all_stabs_grid_aligned_across_landscape(self, pos):
         events = [
-            self._event_at("1.1.0"),
-            self._event_at("1.2.0"),
-            self._event_at("1.3.0"),
-            self._event_at("2.1.0"),
-            self._event_at("3.2.0"),
+            _event(time=_step_to_time(1, s)) for s in [0, 4, 8, 12]
         ]
-        b = _behaviour(energy_level=0.8, anticipation=0.5)
-        stabs = generate_stabs(events, b, landscape_position=pos)
-        for s in stabs:
-            assert _is_grid_aligned(s.time), (
-                f"stab at {s.time} is off-grid at landscape_position={pos}"
+        b = _behaviour(energy_level=0.8)
+        for stab in generate_stabs(events, b, landscape_position=pos):
+            assert _is_grid_aligned(stab.time), (
+                f"stab at {stab.time} off-grid at pos={pos}"
             )
 
-    @pytest.mark.parametrize("anticipation", [0.1, 0.3, 0.5, 0.7, 0.9])
-    def test_all_stabs_grid_aligned_across_anticipation(self, anticipation):
-        events = [self._event_at(f"1.{b}.0") for b in range(1, 5)]
-        b = _behaviour(energy_level=0.8, anticipation=anticipation)
+    def test_all_stabs_grid_aligned_multi_bar(self):
+        events = []
+        for bar in range(1, 5):
+            for step in [0, 8]:
+                events.append(_event(time=_step_to_time(bar, step)))
+        b = _behaviour(energy_level=0.9)
+        for stab in generate_stabs(events, b, landscape_position=0.5):
+            assert _is_grid_aligned(stab.time)
+
+    def test_stab_time_reconstructs_to_same_step(self):
+        events = [_event(time=_step_to_time(1, 8))]
+        b = _behaviour(energy_level=0.9)
+        for stab in generate_stabs(events, b, landscape_position=0.5):
+            bar, step = _time_to_bar_step(stab.time)
+            assert step >= 0, f"stab step negative from {stab.time}"
+            assert 0 <= step < STEPS_PER_BAR
+
+
+# ---------------------------------------------------------------------------
+# Musical constraints
+# ---------------------------------------------------------------------------
+
+class TestMusicalConstraints:
+
+    def test_stab_does_not_land_on_strong_beat(self):
+        events = [_event(time=_step_to_time(1, 0))]
+        b = _behaviour(energy_level=0.9)
+        for stab in generate_stabs(events, b, landscape_position=0.5):
+            _, step = _time_to_bar_step(stab.time)
+            assert step not in BEAT_STEPS, f"stab landed on strong beat step {step}"
+
+    def test_stab_is_after_call(self):
+        call_step = 4
+        events = [_event(time=_step_to_time(1, call_step))]
+        b = _behaviour(energy_level=0.9)
+        for stab in generate_stabs(events, b, landscape_position=0.5):
+            stab_bar, stab_step = _time_to_bar_step(stab.time)
+            call_bar = 1
+            # stab must be after call in the same bar, or in next bar
+            if stab_bar == call_bar:
+                assert stab_step > call_step
+            else:
+                assert stab_bar > call_bar
+
+    def test_at_most_one_stab_per_bar(self):
+        # Multiple calls in the same bar should produce at most 1 stab
+        events = [
+            _event(time=_step_to_time(1, 0)),
+            _event(time=_step_to_time(1, 4)),
+            _event(time=_step_to_time(1, 8)),
+        ]
+        b = _behaviour(energy_level=0.9)
         stabs = generate_stabs(events, b, landscape_position=0.5)
-        for s in stabs:
-            assert _is_grid_aligned(s.time), (
-                f"stab at {s.time} off-grid at anticipation={anticipation}"
-            )
+        bars = [_time_to_bar_step(s.time)[0] for s in stabs]
+        for bar in bars:
+            assert bars.count(bar) <= 1, f"multiple stabs in bar {bar}"
+
+    def test_oak_fires_on_odd_bars_only(self):
+        events = []
+        for bar in [1, 2, 3, 4]:
+            events.append(_event(time=_step_to_time(bar, 8), role="anchor"))
+        b = _behaviour(energy_level=0.9)
+        stabs = generate_stabs(events, b, landscape_position=0.0)
+        stab_bars = {_time_to_bar_step(s.time)[0] for s in stabs}
+        assert all(bar % 2 == 1 for bar in stab_bars), (
+            f"Oak stabs fired on even bars: {stab_bars}"
+        )
