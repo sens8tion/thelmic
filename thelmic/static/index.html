@@ -619,6 +619,64 @@
       display: block;
     }
 
+    /* ── Pression dimensions ── */
+    .pression-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .pression-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pression-bar-label {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+    }
+    .pression-lane {
+      display: grid;
+      grid-template-columns: 110px 1fr 36px;
+      align-items: center;
+      gap: 8px;
+      height: 18px;
+    }
+    .pression-lane-name {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-align: right;
+      color: var(--dim);
+      text-transform: lowercase;
+    }
+    .pression-sparkline {
+      height: 18px;
+      position: relative;
+    }
+    .pression-sparkline canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .pression-value {
+      font-size: 10px;
+      text-align: right;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .pression-overlay-dot {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      height: 18px;
+      opacity: 0.6;
+      pointer-events: none;
+    }
+
     /* ── Pressure curves ── */
     .curves-section {
       width: 100%;
@@ -873,6 +931,15 @@
   </div>
 
   <!-- Archetype lock -->
+  <!-- Pression Dimensions -->
+  <div class="pression-section" id="pression-section">
+    <div class="pression-header">
+      <h2 class="curves-heading">PRESSION DIMENSIONS</h2>
+      <span class="pression-bar-label" id="pression-bar-label">bar —</span>
+    </div>
+    <div id="pression-lanes"></div>
+  </div>
+
   <div class="archetype-section">
     <h2 class="seq-heading" style="border-top:none;padding-top:0">ARCHETYPE</h2>
     <div class="archetype-row">
@@ -1097,6 +1164,12 @@
 
       // Pressure curves
       stateReceivedAt = Date.now();
+
+      // Pression dimensions
+      if (s.pression) {
+        renderPressionLanes(s.pression);
+      }
+
       if (s.pressure_curves) {
         activeCurveTargets = s.pressure_curves.active_targets || {};
         curveCanvases = {};  // renderCurves will repopulate
@@ -1860,6 +1933,118 @@
     let bankStartedAt = 0;    // Date.now() ms when current bank began
     let bankDurationMs = 0;   // total bank duration in ms
     let latestBankCount = 0;
+
+    // ── Pression Dimensions ──────────────────────────────────────────────
+    let _pressionTimeline = [];     // list[{dim: [int×16], overlays: [...]}]
+    let _pressionColours  = {};     // {dim: colour}
+    let _pressionCurrent  = {};     // {dim: int} current bar peak
+    let _pressionCurrentBar = 0;
+    let _pressionCanvases = {};     // {dim: {canvas, ctx}}
+
+    const OVERLAY_COLOURS = {
+      call_start:        '#6090c0',
+      response_start:    '#c060a0',
+      landing:           '#e0a040',
+      role_flip:         '#50a050',
+      riser:             '#7a50c0',
+      silence_gap:       '#4a7a9a',
+      drop:              '#c05050',
+    };
+
+    function renderPressionLanes(pression) {
+      if (!pression) return;
+      _pressionTimeline   = pression.timeline || [];
+      _pressionColours    = pression.colours  || {};
+      _pressionCurrent    = pression.current  || {};
+      _pressionCurrentBar = pression.current_bar || 0;
+
+      const container = document.getElementById('pression-lanes');
+      if (!container) return;
+
+      const dims = Object.keys(_pressionColours);
+      // Build lanes on first render or if dims changed
+      if (container.dataset.dims !== dims.join(',')) {
+        container.innerHTML = '';
+        _pressionCanvases = {};
+        dims.forEach(dim => {
+          const lane = document.createElement('div');
+          lane.className = 'pression-lane';
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'pression-lane-name';
+          nameEl.textContent = dim.replace(/_/g, ' ');
+          nameEl.style.color = _pressionColours[dim] || '#666';
+
+          const sparkWrap = document.createElement('div');
+          sparkWrap.className = 'pression-sparkline';
+          const canvas = document.createElement('canvas');
+          sparkWrap.appendChild(canvas);
+
+          const valEl = document.createElement('div');
+          valEl.className = 'pression-value';
+          valEl.id = `pv-${dim}`;
+          valEl.textContent = '—';
+
+          lane.appendChild(nameEl);
+          lane.appendChild(sparkWrap);
+          lane.appendChild(valEl);
+          container.appendChild(lane);
+          _pressionCanvases[dim] = { canvas, sparkWrap, valEl };
+        });
+        container.dataset.dims = dims.join(',');
+      }
+
+      // Update bar label
+      const lbl = document.getElementById('pression-bar-label');
+      if (lbl) lbl.textContent = `bar ${_pressionCurrentBar + 1}`;
+
+      // Redraw all sparklines
+      dims.forEach(dim => drawPressionSparkline(dim, _pressionCurrentBar));
+    }
+
+    function drawPressionSparkline(dim, currentBar) {
+      const entry = _pressionCanvases[dim];
+      if (!entry) return;
+      const { canvas, sparkWrap, valEl } = entry;
+
+      const W = sparkWrap.offsetWidth || 200;
+      const H = 18;
+      canvas.width  = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+
+      // Each bar = one column of 16 steps; we show bar peaks across 16 bars
+      const bars = _pressionTimeline.length;
+      if (bars === 0) return;
+
+      const barW = W / bars;
+      const colour = _pressionColours[dim] || '#50a0dc';
+
+      // Draw peak value for each bar as a vertical bar
+      _pressionTimeline.forEach((barData, bi) => {
+        const vals = barData[dim] || [0];
+        const peak = Math.max(...vals);
+        const h    = (peak / 127) * H;
+        const x    = bi * barW;
+        ctx.fillStyle = bi === currentBar
+          ? colour
+          : colour + '60';   // dim other bars
+        ctx.fillRect(x, H - h, Math.max(1, barW - 1), h);
+
+        // Overlay dots
+        const overlays = barData.overlays || [];
+        overlays.forEach(ov => {
+          const dotColour = OVERLAY_COLOURS[ov.kind] || '#ffffff';
+          ctx.fillStyle = dotColour;
+          ctx.fillRect(x, 0, Math.max(1, barW - 1), 2);
+        });
+      });
+
+      // Current bar value
+      const curVal = _pressionCurrent[dim] || 0;
+      if (valEl) valEl.textContent = curVal.toString().padStart(3, ' ');
+    }
 
     function animatePlayhead() {
       const el = document.getElementById('playhead');

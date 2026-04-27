@@ -31,6 +31,10 @@ from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.call_response import (
     CallResponseState, Mode, default_state, advance_mode, derive_response_steps,
 )
+from thelmic.pression import (
+    PressionBar, compute_bank_timeline, DEFAULT_CC_MAP,
+    DIMENSION_NAMES, DIMENSION_COLOURS, BARS_PER_BANK, empty_timeline,
+)
 from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
@@ -112,6 +116,9 @@ _current_bank = None   # Bank | None
 _curve_engine: CurveEngine = CurveEngine()
 _pending_curve_starts: set[int] = set()
 _cr_state: CallResponseState = default_state()
+_pression_timeline: list[PressionBar] = empty_timeline()
+_pression_cc_map:   dict[str, tuple[int, int]] = dict(DEFAULT_CC_MAP)
+_pression_bar_idx:  int = 0   # current bar being played (0-based within bank)
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
@@ -292,6 +299,18 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
     apply_behaviour_dynamics(bank, behaviour)
+
+    # Pre-compute pression timeline for this bank.
+    # Playback loop reads _pression_timeline[abs_bar-1] to send CCs
+    # without any computation on the hot path.
+    global _pression_timeline
+    _pression_timeline = compute_bank_timeline(
+        force=_engine.force_state,
+        behaviour=behaviour,
+        transition=_transition_engine.transition if _transition_engine else None,
+        cr_mode=mode,
+        bank=bank,
+    )
 
 
 def _prepare_regenerated_bank(bank_idx: int):
@@ -490,6 +509,15 @@ def _force_state_dict(include_bank: bool = True) -> dict:
             "bars_in_mode": _cr_state.bars_in_mode,
             "mode_duration_bars": _cr_state.mode_duration_bars,
             "force_mode": _cr_state.force_mode.value if _cr_state.force_mode else None,
+        },
+        "pression": {
+            "current_bar": _pression_bar_idx,
+            "current": (_pression_timeline[_pression_bar_idx].bar_peak()
+                        if 0 <= _pression_bar_idx < len(_pression_timeline)
+                        else {d: 0 for d in DIMENSION_NAMES}),
+            "timeline": [pb.to_dict() for pb in _pression_timeline],
+            "cc_map": {k: list(v) for k, v in _pression_cc_map.items()},
+            "colours": DIMENSION_COLOURS,
         },
         "runtime": {**_runtime_debug, "boundary_timing": _boundary_timing},
         "force": {
@@ -733,6 +761,16 @@ def _playback_loop() -> None:
                     _send_behaviour_filter_cc(manual_overrides)
                 curves_ms = (time.perf_counter() - t0) * 1000
 
+                # ── Pression CC — bar-peak values from pre-computed timeline.
+                # Read-only; no computation on the hot path.
+                global _pression_bar_idx
+                _pression_bar_idx = abs_bar - 1   # 0-based within bank
+                if _midi_cc and 0 <= _pression_bar_idx < len(_pression_timeline):
+                    _pb = _pression_timeline[_pression_bar_idx]
+                    for _dim, (_ch, _cc) in _pression_cc_map.items():
+                        _peak = max(getattr(_pb, _dim, [0]))
+                        _midi_cc.send_cc(_ch, _cc, _peak / 127.0)
+
                 # ── Live state build + enqueue ──────────────────────────────
                 t0 = time.perf_counter()
                 live_msg = _live_state_dict()
@@ -953,6 +991,15 @@ async def _handle_message(msg: dict) -> None:
     elif kind == "stop":
         _playing = False
         _cr_state = default_state()   # reset mode on stop
+        await _broadcast({"type": "state", **_force_state_dict()})
+
+    elif kind == "pression_cc_map":
+        # Update CC mapping for one or more pression dimensions.
+        # Payload: {"value": {"pressure": [channel, cc_num], ...}}
+        updates = msg.get("value", {})
+        for dim, pair in updates.items():
+            if dim in DIMENSION_NAMES and isinstance(pair, (list, tuple)) and len(pair) == 2:
+                _pression_cc_map[dim] = (int(pair[0]), int(pair[1]))
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "call_response_mode":
