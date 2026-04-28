@@ -38,6 +38,114 @@ Everything else behaves relative to those two.
 
 ---
 
+## Phrase Authority Alignment Roadmap
+
+This roadmap is the active `feature/phrase-authority` alignment work. It is
+separate from the historical Phase 0-11 implementation table above.
+
+### Phase 1: Phrase Structure Foundation
+
+Status: started.
+
+Purpose:
+
+- Define the formal phrase model.
+- Treat drops as phrase starts.
+- Define phrase ends, phrase length, phrase index, phrase role/mode,
+  sub-phrase boundaries, sub-phrase roles, and active constraints.
+- Represent transformer sub-phrases as mutation zones, not event sources.
+
+Implemented foundation:
+
+- `thelmic/phrase_model.py`
+- phrase/sub-phrase data structures
+- phrase cursor/indexing logic
+- deterministic role assignment
+- tests for stable phrase boundaries and predictable cursor lookup
+
+### Phase 1.5: Canonical Timebase And Marker Alignment
+
+Status: planned next, before further musical rule work.
+
+Purpose:
+
+- Fix phrase alignment before hook, call/response, transformer, or drop rule
+  enforcement expands further.
+- Ensure phrase markers are driven by the same canonical timebase as
+  sequencer events.
+- Remove separate UI-only phrase marker calculations.
+
+Core requirement:
+
+```text
+Phrase boundaries must align exactly with musical bar starts and phrase starts.
+Sub-phrase boundaries must align inside phrase spans.
+Event generation and UI rendering must agree on phrase/sub-phrase position.
+```
+
+Canonical timebase:
+
+The system must define a single timebase authority that exposes:
+
+```text
+global_step
+musical_step
+bar_index
+phrase_index
+sub_phrase_index
+phrase_start_step
+sub_phrase_start_step
+```
+
+Phrase, sub-phrase, event generation, and UI rendering must derive from those
+values. UI marker placement must be based on musical time, not raw visual
+column index.
+
+Marker hierarchy:
+
+- Phrase boundary: strong full-height vertical marker.
+- Sub-phrase boundary: subtle, dimmer, thinner or partial-height marker.
+- Bar boundary: very faint grid line.
+- Drop/relock boundary: distinct colour or short marker. It must not use the
+  same visual language as a phrase boundary unless phrase authority says the
+  drop is also a phrase start.
+- Phrase label: shown at full phrase boundaries.
+- Sub-phrase role label: optional and small, only when it does not clutter the
+  grid.
+
+Structural distinction:
+
+- Phrase boundary = structural division.
+- Sub-phrase boundary = internal phrase subdivision.
+- Drop/relock boundary = musical event boundary, not necessarily a phrase
+  boundary unless phrase authority says so.
+
+Exit criteria:
+
+- Phrase markers align with actual phrase starts.
+- Sub-phrase markers sit inside phrase spans.
+- Event generation and UI agree on phrase/sub-phrase position.
+- No separate UI-only timing logic exists.
+- Hook, call/response, and drop logic can later consume the same phrase context
+  without translation.
+
+### Later Alignment Phases
+
+Planned after Phase 1.5:
+
+- Phase 2: phrase authority contract
+- Phase 3: hook alignment
+- Phase 4: call/response alignment
+- Phase 5: bass and stab rhythm conformance
+- Phase 6: silence, withholding, and pre-drop gap
+- Phase 7: drop alignment
+- Phase 8: transformer sub-phrase behaviour
+- Phase 9: UI phrase boundary overlay
+- Phase 10: compliance pass
+- Phase 11: regression and musical feel tests
+
+---
+
 ## Active System Architecture
 
 ```text
