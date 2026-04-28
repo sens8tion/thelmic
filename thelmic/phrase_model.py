@@ -232,6 +232,7 @@ class PhraseTimebasePoint:
             "sub_phrase_role": self.sub_phrase_role.value,
             "is_phrase_start": self.is_phrase_start,
             "is_sub_phrase_start": self.is_sub_phrase_start,
+            "is_subphrase_start": self.is_sub_phrase_start,
         }
 
 

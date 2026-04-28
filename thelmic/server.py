@@ -652,17 +652,7 @@ def _phrase_metadata_list() -> list:
     if _runtime_debug.get("survivor_events_final", 0) > 0:
         rules.append("survivor")
 
-    phrase_mode = (
-        PhraseMode.CALL_RESPONSE_MODE
-        if mode == PhraseMode.CALL_RESPONSE_MODE.value
-        else PhraseMode.HOOK_MODE
-    )
-    phrase_model = build_phrase_model(
-        drop_bars=tuple(1 + idx * BARS_PER_PHRASE for idx in range(PHRASES_PER_BANK)),
-        total_bars=PHRASES_PER_BANK * BARS_PER_PHRASE,
-        phrase_modes=tuple(phrase_mode for _ in range(PHRASES_PER_BANK)),
-        sub_phrase_bars=min(BARS_PER_PHRASE, 4),
-    )
+    phrase_model = _phrase_model_for_current_bank()
     marker_metadata = phrase_model.marker_metadata(steps_per_bar=STEPS_PER_BAR)
 
     metadata = []
@@ -712,6 +702,47 @@ def _phrase_metadata_list() -> list:
         "sub_phrase_markers": marker_metadata["sub_phrase_markers"],
     })
     return metadata
+
+
+def _phrase_model_for_current_bank():
+    from thelmic.bank_generator import BARS_PER_PHRASE, PHRASES_PER_BANK
+
+    mode = _phase11_state.phrase_mode.value
+    phrase_mode = (
+        PhraseMode.CALL_RESPONSE_MODE
+        if mode == PhraseMode.CALL_RESPONSE_MODE.value
+        else PhraseMode.HOOK_MODE
+    )
+    return build_phrase_model(
+        drop_bars=tuple(1 + idx * BARS_PER_PHRASE for idx in range(PHRASES_PER_BANK)),
+        total_bars=PHRASES_PER_BANK * BARS_PER_PHRASE,
+        phrase_modes=tuple(phrase_mode for _ in range(PHRASES_PER_BANK)),
+        sub_phrase_bars=min(BARS_PER_PHRASE, 4),
+    )
+
+
+def _phrase_context_steps() -> list[dict]:
+    """Resolved per-step phrase context for UI and later generator consumers.
+
+    The UI must render markers from these flags directly. It must not derive
+    phrase/sub-phrase positions from visual columns.
+    """
+    from thelmic.bank_generator import BARS_PER_PHRASE, PHRASES_PER_BANK
+
+    steps_per_bar = 16
+    total_steps = BARS_PER_PHRASE * PHRASES_PER_BANK * steps_per_bar
+    bank_index = _current_bank.bank_index if _current_bank is not None else 0
+    bank_start_step = bank_index * total_steps
+    phrase_model = _phrase_model_for_current_bank()
+    contexts: list[dict] = []
+    for musical_step in range(total_steps):
+        point = phrase_model.timebase_at_step(
+            bank_start_step + musical_step,
+            bank_start_step=bank_start_step,
+            steps_per_bar=steps_per_bar,
+        )
+        contexts.append(point.to_dict())
+    return contexts
 
 
 def _bank_events_list(bank) -> list:
@@ -824,6 +855,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
     if include_bank:
         d["bank_events"] = _bank_events_list(_current_bank)
         d["phrase_metadata"] = _phrase_metadata_list()
+        d["phrase_context"] = _phrase_context_steps()
     return d
 
 

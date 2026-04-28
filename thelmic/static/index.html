@@ -614,6 +614,40 @@
       color: #b080d0;
     }
 
+    .phrase-debug-row {
+      display: grid;
+      grid-template-columns: repeat(512, 1fr);
+      height: 16px;
+      width: 800%;
+      background: #080808;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      transform: translateX(0);
+      will-change: transform;
+      margin-bottom: 4px;
+      font-size: 7px;
+      color: #777;
+    }
+
+    .phrase-debug-cell {
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid transparent;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+
+    .phrase-debug-cell.bar-start { border-left: 1px solid #282828; }
+    .phrase-debug-cell.sub-phrase-start {
+      border-left: 1px solid rgba(160, 160, 160, 0.28);
+      color: #999;
+    }
+    .phrase-debug-cell.phrase-start {
+      border-left: 2px solid rgba(210, 180, 80, 0.75);
+      color: #d0b060;
+    }
+
     .sub-phrase-label {
       position: absolute;
       top: 0;
@@ -1011,6 +1045,7 @@
         <div class="playhead" id="playhead"></div>
         <!-- Phrase structure overlay — boundary markers, mode labels, rule badges -->
         <div class="phrase-overlay-wrap" id="phrase-overlay-wrap"></div>
+        <div class="phrase-debug-row" id="phrase-debug-row"></div>
         <!-- Deformation intensity strips — one row per active deformation type -->
         <div class="deform-strips-wrap" id="deform-strips"></div>
         <div class="seq-grid" id="seq-grid"></div>
@@ -1333,9 +1368,10 @@
 
       // Sequencer
       if (s.bank_events !== undefined) {
-        if (s.phrase_metadata !== undefined) updatePhraseTimebase(s.phrase_metadata);
+        if (s.phrase_context !== undefined) updatePhraseContext(s.phrase_context);
         renderSequencer(s.bank_events, bankSlot, bankTotal);
-        if (s.phrase_metadata !== undefined) renderPhraseOverlay(s.phrase_metadata);
+        renderPhraseDebugRow();
+        renderPhraseOverlay(s.phrase_metadata || []);
       }
     }
 
@@ -1475,6 +1511,7 @@
     let _phraseBoundarySteps = new Set();
     let _subPhraseBoundarySteps = new Set();
     let _dropBoundarySteps = new Set();
+    let _phraseContextByStep = [];
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1516,35 +1553,18 @@
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
     }
 
-    function _extractTimebase(phraseMeta) {
-      const entries = phraseMeta || [];
-      return entries.find(meta => meta && meta.type === 'timebase') || null;
-    }
-
-    function updatePhraseTimebase(phraseMeta) {
-      const timebase = _extractTimebase(phraseMeta);
-      const phrases = (phraseMeta || []).filter(meta => meta && meta.type !== 'timebase');
-      const phraseMarkers = timebase ? (timebase.phrase_markers || []) : phrases;
-      const subMarkers = timebase
-        ? (timebase.sub_phrase_markers || [])
-        : phrases.flatMap(meta => meta.sub_phrases || []);
-
-      _phraseBoundarySteps = new Set(
-        phraseMarkers
-          .map(marker => marker.musical_step ?? marker.start_step)
-          .filter(step => Number.isInteger(step))
-      );
-      _subPhraseBoundarySteps = new Set(
-        subMarkers
-          .map(marker => marker.musical_step ?? marker.start_step)
-          .filter(step => Number.isInteger(step) && !_phraseBoundarySteps.has(step))
-      );
-      _dropBoundarySteps = new Set(
-        phrases
-          .filter(meta => meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
-          .map(meta => meta.musical_step ?? meta.start_step)
-          .filter(step => Number.isInteger(step))
-      );
+    function updatePhraseContext(contextSteps) {
+      _phraseContextByStep = Array.isArray(contextSteps) ? contextSteps : [];
+      _phraseBoundarySteps = new Set();
+      _subPhraseBoundarySteps = new Set();
+      _dropBoundarySteps = new Set();
+      _phraseContextByStep.forEach(ctx => {
+        if (!ctx || !Number.isInteger(ctx.musical_step)) return;
+        if (ctx.is_phrase_start) _phraseBoundarySteps.add(ctx.musical_step);
+        if (ctx.is_sub_phrase_start || ctx.is_subphrase_start) {
+          _subPhraseBoundarySteps.add(ctx.musical_step);
+        }
+      });
     }
 
     function applyTimebaseClasses(cell, sourceStep) {
@@ -1603,7 +1623,7 @@
     function applyRollingViewport() {
       const viewport = rollingViewport();
       const translatePercent = (viewport.renderStart / RENDER_STEPS) * 100;
-      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap').forEach(row => {
+      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap, .phrase-debug-row').forEach(row => {
         row.style.transform = `translateX(-${translatePercent}%)`;
       });
       return viewport;
@@ -1828,26 +1848,20 @@
       if (!wrap) return;
       wrap.innerHTML = '';
 
-      if (!_phraseMetadata.length) return;
+      if (!_phraseContextByStep.length) return;
 
-      // Marker positions are musical steps supplied by the server timebase.
-      const RENDER_COLS = RENDER_STEPS;
-
-      updatePhraseTimebase(_phraseMetadata);
-      const timebase = _extractTimebase(_phraseMetadata);
       const phraseEntries = _phraseMetadata.filter(meta => meta && meta.type !== 'timebase');
-      const subPhraseMarkers = timebase
-        ? (timebase.sub_phrase_markers || [])
-        : phraseEntries.flatMap(meta => meta.sub_phrases || []);
+      const phraseByIndex = new Map(phraseEntries.map(meta => [meta.phrase_index, meta]));
 
-      subPhraseMarkers.forEach(sub => {
-        const subStep = sub.musical_step ?? sub.start_step;
+      _phraseContextByStep.forEach(sub => {
+        const subStep = sub.musical_step;
         if (!Number.isInteger(subStep) || _phraseBoundarySteps.has(subStep)) return;
+        if (!(sub.is_subphrase_start || sub.is_sub_phrase_start)) return;
         [subStep, subStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
           marker.className = 'phrase-marker sub-phrase-marker';
-          marker.style.left = ((col / RENDER_COLS) * 100) + '%';
-          const role = sub.label || sub.role;
+          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
+          const role = sub.sub_phrase_role || sub.subphrase_role;
           if (role) {
             const label = document.createElement('div');
             label.className = 'sub-phrase-label';
@@ -1858,18 +1872,20 @@
         });
       });
 
-      phraseEntries.forEach(meta => {
+      _phraseContextByStep.forEach(ctx => {
+        if (!ctx || !ctx.is_phrase_start) return;
+        const meta = phraseByIndex.get(ctx.phrase_index) || {};
         // Each phrase boundary appears twice (double-buffer render)
-        const phraseStep = meta.musical_step ?? meta.start_step;
+        const phraseStep = ctx.musical_step;
         [phraseStep, phraseStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
-          marker.className = 'phrase-marker' + (meta.mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
-          marker.style.left = ((col / RENDER_COLS) * 100) + '%';
+          marker.className = 'phrase-marker' + (ctx.phrase_mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
+          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
 
           // Label: "HOOK · two_step · peak"
           const parts = [];
-          if (meta.mode === 'HOOK_MODE') parts.push('HOOK');
-          else if (meta.mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
+          if (ctx.phrase_mode === 'HOOK_MODE') parts.push('HOOK');
+          else if (ctx.phrase_mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
           if (meta.archetype && meta.archetype !== '—')
             parts.push(meta.archetype.replace(/_/g, '·'));
           if (meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
@@ -1901,6 +1917,39 @@
     }
 
     // ── Pressure curves live state ──
+    function renderPhraseDebugRow() {
+      const row = document.getElementById('phrase-debug-row');
+      if (!row) return;
+      row.innerHTML = '';
+      if (!_phraseContextByStep.length) return;
+
+      for (let s = 0; s < RENDER_STEPS; s++) {
+        const sourceStep = s % TOTAL_STEPS;
+        const ctx = _phraseContextByStep[sourceStep];
+        const cell = document.createElement('div');
+        cell.className = 'phrase-debug-cell';
+        cell.dataset.step = sourceStep;
+        cell.dataset.renderStep = s;
+        if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+        applyTimebaseClasses(cell, sourceStep);
+        if (ctx) {
+          cell.title = [
+            `global_step=${ctx.global_step}`,
+            `musical_step=${ctx.musical_step}`,
+            `bar_index=${ctx.bar_index}`,
+            `phrase_index=${ctx.phrase_index}`,
+            `subphrase_index=${ctx.sub_phrase_index}`,
+            `is_phrase_start=${ctx.is_phrase_start}`,
+            `is_subphrase_start=${ctx.is_subphrase_start || ctx.is_sub_phrase_start}`,
+          ].join(' ');
+          if (ctx.is_phrase_start) cell.textContent = `P${ctx.phrase_index}`;
+          else if (ctx.is_subphrase_start || ctx.is_sub_phrase_start) cell.textContent = `s${ctx.sub_phrase_index}`;
+        }
+        row.appendChild(cell);
+      }
+      applyRollingViewport();
+    }
+
     let activeCurveTargets = {};   // {target: last-known value} from state
     let curveCanvases = {};        // {id: {canvas, sparkline, curve}}
     let curveProgressAtState = {}; // {id: progress at last state push}
