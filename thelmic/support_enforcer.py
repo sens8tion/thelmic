@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 
 from thelmic.bank_generator import Bank, MIDIEvent
 from thelmic.phrase_plan import PhrasePlan
-from thelmic.syntax_enforcer import time_to_bar_step, _plan_bar
+from thelmic.syntax_enforcer import can_survive_silence, time_to_bar_step, _plan_bar
 
 TICKS_PER_BEAT = 24
 TICKS_PER_STEP = 6
@@ -128,7 +128,7 @@ def _should_suppress_supporting(
     stats: SupportLayerStats,
 ) -> bool:
     """Return True (and update stats) if this supporting event must be removed."""
-    if event.role == "survivor" and bool(getattr(event, "survives_silence", False)):
+    if can_survive_silence(event):
         return False
 
     # 1. Silence check — should be 0 after Phase 6; counted for audit completeness.

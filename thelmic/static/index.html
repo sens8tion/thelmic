@@ -1316,9 +1316,10 @@
       bass: '#5aa05a',
       stab: '#d48ad4',
       hook: '#f0c85a',
+      survivor: '#9aa0a6',
     };
     const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'stab', 'hook'];
-    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
+    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics', 'survivor']);
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1362,7 +1363,8 @@
 
     function roleLaneForEvent(event) {
       const lane = event.layer || event.role || '';
-      return INSTRUMENT_ROLES.includes(lane) ? lane : null;
+      if (INSTRUMENT_ROLES.includes(lane)) return lane;
+      return OVERLAY_ROLES.has(lane) ? lane : null;
     }
 
     function visualRoleForEvent(event) {

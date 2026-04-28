@@ -97,6 +97,21 @@ def test_survivor_is_only_silence_exemption():
     assert stats["survivor_events_preserved_by_silence"] == 1
 
 
+def test_survives_silence_flag_alone_is_enough():
+    plan = _drop_plan()
+    flagged = replace(
+        _event("1.1.6", layer="survivor", role="timing_carrier", note=84),
+        survives_silence=True,
+        structural_authority=False,
+    )
+    bank = _bank(flagged)
+
+    stats = enforce_phrase_syntax(bank, plan)
+
+    assert bank.all_events() == [flagged]
+    assert stats["survivor_events_preserved_by_silence"] == 1
+
+
 def test_survivor_survives_support_compliance_after_syntax():
     plan = _drop_plan()
     survivor = replace(
@@ -113,9 +128,9 @@ def test_survivor_survives_support_compliance_after_syntax():
     assert support_stats["support_events_suppressed_by_silence"] == 0
 
 
-def test_unmarked_survivor_role_does_not_bypass_silence():
+def test_unmarked_non_survivor_role_does_not_bypass_silence():
     plan = _drop_plan()
-    unmarked = _event("1.1.6", layer="survivor", role="survivor", note=84)
+    unmarked = _event("1.1.6", layer="texture", role="timing_carrier", note=84)
     bank = _bank(unmarked)
 
     stats = enforce_phrase_syntax(bank, plan)
@@ -168,3 +183,30 @@ def test_survivor_events_do_not_continue_after_drop_step():
         and time_to_bar_step(event.time)[1] >= DROP_STEP
         for event in bank.all_events()
     )
+
+
+def test_survivor_reaches_final_output_while_normal_event_is_suppressed():
+    plan = _drop_plan()
+    normal = _event("1.1.0", layer="hook", role="hook", note=60)
+    bank = _bank(normal, _event("2.2.0", layer="kick", role="anchor"))
+
+    generation_stats = add_survivor_signal(bank, plan)
+    generated_survivors = [event for event in bank.all_events() if event.role == "survivor"]
+    assert generation_stats["survivor_events_before_drop"] > 0
+    assert generated_survivors
+
+    syntax_stats = enforce_phrase_syntax(bank, plan)
+    after_silence = [event for event in bank.all_events() if event.role == "survivor"]
+    assert after_silence
+    assert normal not in bank.all_events()
+    assert syntax_stats["events_blocked_by_silence"] == 1
+
+    enforce_supporting_layer_compliance(bank, plan)
+    after_support = [event for event in bank.all_events() if event.role == "survivor"]
+    assert after_support
+
+    enforce_drop_relock(bank, plan, syntax_stats=syntax_stats)
+    final_survivors = [event for event in bank.all_events() if event.role == "survivor"]
+    assert final_survivors
+    assert all(event.layer == "survivor" for event in final_survivors)
+    assert all(event.structural_authority is False for event in final_survivors)

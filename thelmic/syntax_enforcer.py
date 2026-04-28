@@ -110,8 +110,8 @@ def _role_kind(event: MIDIEvent) -> str | None:
     return None
 
 
-def _survives_silence(event: MIDIEvent) -> bool:
-    return event.role == "survivor" and bool(getattr(event, "survives_silence", False))
+def can_survive_silence(event: MIDIEvent) -> bool:
+    return event.role == "survivor" or bool(getattr(event, "survives_silence", False))
 
 
 def _state_allows_role(state: PhraseState | None, role_kind: str) -> bool:
@@ -138,7 +138,7 @@ def _should_filter_event(
     pbar = _plan_bar(bar, plan_bars)
     muted_steps = set(plan.silence_mask.muted_steps_by_bar.get(pbar, ()))
     if floor_step in muted_steps:
-        if _survives_silence(event):
+        if can_survive_silence(event):
             stats.survivor_events_preserved_by_silence += 1
             return False
         stats.events_blocked_by_silence += 1

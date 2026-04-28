@@ -197,6 +197,45 @@ def _events_per_bar(events: list) -> dict[int, int]:
     return counts
 
 
+def _survivor_events(bank) -> list:
+    return [
+        event for event in bank.all_events()
+        if event.role == "survivor" or getattr(event, "survives_silence", False)
+    ]
+
+
+def _survivor_signature(event) -> tuple:
+    return (
+        event.time, event.layer, event.role, event.note,
+        getattr(event, "survives_silence", False),
+    )
+
+
+def _survivor_trace_present(bank, signature: tuple | None) -> bool:
+    if signature is None:
+        return False
+    return any(_survivor_signature(event) == signature for event in _survivor_events(bank))
+
+
+def _survivor_trace_snapshot(bank, signature: tuple | None) -> dict:
+    for event in _survivor_events(bank):
+        if signature is None or _survivor_signature(event) == signature:
+            from thelmic.syntax_enforcer import time_to_bar_step
+            _, step = time_to_bar_step(event.time)
+            return {
+                "created_at_phase": "survivor_signal",
+                "step": step,
+                "role": event.role,
+                "survives_silence": getattr(event, "survives_silence", False),
+            }
+    return {
+        "created_at_phase": "survivor_signal",
+        "step": None,
+        "role": None,
+        "survives_silence": False,
+    }
+
+
 def _record_timing(name: str, value_ms: float) -> float:
     value = round(value_ms, 3)
     if value > _TIMING_WARN_MS:
@@ -263,11 +302,43 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
     survivor_stats = add_survivor_signal(bank, _phrase_plan)
+    survivor_after_generation = _survivor_events(bank)
+    survivor_signature = (
+        _survivor_signature(survivor_after_generation[0])
+        if survivor_after_generation else None
+    )
+    survivor_trace = _survivor_trace_snapshot(bank, survivor_signature)
+    survivor_trace["present_after_generation"] = _survivor_trace_present(
+        bank, survivor_signature
+    )
     syntax_stats   = enforce_phrase_syntax(bank, _phrase_plan)
+    survivor_trace["present_after_silence_suppression"] = _survivor_trace_present(
+        bank, survivor_signature
+    )
     support_stats  = enforce_supporting_layer_compliance(bank, _phrase_plan)
+    survivor_trace["present_after_support_enforcer"] = _survivor_trace_present(
+        bank, survivor_signature
+    )
     drop_stats     = enforce_drop_relock(
         bank, _phrase_plan, _drop_commit_state, syntax_stats
     )
+    survivor_trace["present_after_drop_relock"] = _survivor_trace_present(
+        bank, survivor_signature
+    )
+    survivor_trace["present_in_final_output"] = survivor_trace["present_after_drop_relock"]
+    survivor_trace["removed_by"] = None
+    survivor_trace["removal_reason"] = None
+    if survivor_signature is not None:
+        checks = [
+            ("silence_suppression", "present_after_silence_suppression"),
+            ("support_enforcer", "present_after_support_enforcer"),
+            ("drop_relock", "present_after_drop_relock"),
+        ]
+        for phase, key in checks:
+            if not survivor_trace[key]:
+                survivor_trace["removed_by"] = phase
+                survivor_trace["removal_reason"] = "survivor missing after pass"
+                break
     _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
@@ -277,6 +348,8 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug.update(support_stats)
     _runtime_debug.update(drop_stats)
     _runtime_debug.update(survivor_stats)
+    _runtime_debug["survivor_trace"] = survivor_trace
+    _runtime_debug["survivor_events_final"] = len(_survivor_events(bank))
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
     _runtime_debug["bass_source"] = "phrase_plan"
