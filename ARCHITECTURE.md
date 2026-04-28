@@ -20,6 +20,11 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 2 hook identity rendering | complete | hook is rendered from `phrase_plan.hook_pattern` |
 | Phase 3 phrase syntax compliance | complete | `PhrasePlan` enforces phrase_state, call_slots, response_slots, and silence_mask |
 | Phase 4 planner-owned call generation | complete | calls render from `phrase_plan.call_slots` with `role="call"` |
+| Phase 5 planner-owned response generation | complete | responses render from `phrase_plan.response_slots` with `role="response"` |
+| Phase 6 silence mask compliance | complete | `silence_mask` is a hard constraint across all layers |
+| Phase 7 Pression compliance | complete | Pression is audited as control-only and cannot create note events |
+| Phase 8 supporting layer compliance | complete | support layers are checked against bass/hook authority and silence |
+| Phase 9 drop construction | complete | `DROP_RELOCK` enforces bass/kick/hook relock and pre-drop contrast |
 
 Current rule:
 
@@ -58,6 +63,8 @@ Pressure / Pression
         |
 Supporting renderers
         |
+Drop relock
+        |
 Transport
         |
 MIDI out
@@ -74,6 +81,7 @@ phrase_plan
 -> silence_mask
 -> pressure_curve
 -> supporting layers
+-> drop_relock
 ```
 
 Generators consume `PhrasePlan`. They must not invent phrase structure
@@ -148,8 +156,10 @@ Current consumption:
 
 - `bass_pattern` is consumed by planned bass rendering.
 - `hook_pattern` is consumed by first-class hook identity rendering.
-- `phrase_state`, `call_slots`, `response_slots`, and `silence_mask` exist but are
-  enforced by the phrase syntax pass.
+- `call_slots` are consumed by planned call rendering.
+- `response_slots` are consumed by planned response rendering.
+- `phrase_state` and `silence_mask` are enforced by the syntax and compliance passes.
+- `DROP_RELOCK` is enforced by the drop relock pass.
 - `pressure_curve` informs macro context but must not own note syntax.
 
 ---
@@ -200,18 +210,24 @@ Implemented Phase 2 contract:
 
 ## Call / Response
 
-Current call/response exists but is not yet fully planner-owned.
+Call and response are planner-owned.
 
-Target contract:
+Implemented contract:
 
 - Calls render only from `phrase_plan.call_slots`.
 - Calls use `role="call"`.
-- Responses occur only in planned response slots.
-- A response must be caused by a call.
-- No call means no response.
+- Responses render only from `phrase_plan.response_slots`.
+- Responses use `role="response"`.
+- A response requires a valid preceding planned call.
+- No valid call means no response.
 - Calls must leave space.
 - Responses must fill or resolve that space.
 - Bass truth and hook identity must remain legible.
+
+Implemented files:
+
+- `thelmic/calls.py`
+- `thelmic/responses.py`
 
 ---
 
@@ -226,6 +242,52 @@ Target contract:
 - Silence may thin or omit bass, hook, percussion, and support layers as planned.
 - Event generators are filtered by the syntax enforcement pass so masked regions
   suppress event emission.
+- Silence is absolute. It overrides call slots, response slots, BehaviourField
+  output, deformation output, and generated notes.
+- Kick is not currently exempt; it is silenced like every other layer.
+
+Implemented in `thelmic/syntax_enforcer.py`.
+
+---
+
+## Supporting Layers
+
+Supporting layers are compliant consumers of the plan.
+
+Implemented contract:
+
+- Supporting layers may add texture, motion, emphasis, and colour.
+- Supporting layers must not invent phrase structure.
+- Supporting layers must not carry structural call/response roles outside the
+  planned call/response renderers.
+- Non-drum supporting layers must not collide with bass or hook authority.
+- Supporting layer compliance only suppresses; it never adds events to fill gaps.
+
+Implemented in `thelmic/support_enforcer.py`.
+
+---
+
+## Drop Relock
+
+`DROP_RELOCK` is implemented as a planned structural arrival, not random maximum
+activity.
+
+Implemented contract:
+
+- Drop regions are detected from `PhrasePlan.phrase_state == DROP_RELOCK`.
+- Bass, kick, and hook are asserted at the first non-muted drop step.
+- Bass uses the planned bass tonal authority.
+- Hook uses planned hook identity.
+- Kick aligns with bass and hook at the drop step.
+- Unresolved call/response material is suppressed in the drop bar.
+- Echo-style lower-velocity copies of authority material are suppressed.
+- Pre-drop contrast is checked from the preceding `HOLD_SILENCE` or low-density
+  bar.
+- Drop relock may add missing bass/kick/hook authority events, but only as
+  reassertions of planned identity at the structurally required arrival.
+- It does not add density to fill natural silence.
+
+Implemented in `thelmic/drop_enforcer.py`.
 
 ---
 
@@ -260,6 +322,8 @@ Allowed:
 - `silence` as a control signal for thinning/muting.
 - Intra-bar motion and event spikes as smaller additions to phrase-level values.
 - Lookahead preview that does not mutate live state.
+- Compliance audit proving Pression does not create notes, does not mutate banks,
+  does not override `silence_mask`, and does not own phrase syntax.
 
 Not allowed:
 
@@ -335,11 +399,15 @@ Current implemented responsibilities:
 - render planned bass from `phrase_plan.bass_pattern`.
 - render planned hook from `phrase_plan.hook_pattern`.
 - render planned calls from `phrase_plan.call_slots`.
+- render planned responses from `phrase_plan.response_slots`.
 - apply ghost injection.
 - apply anchor withholding.
 - apply behaviour-driven dynamics.
 - append bass and stab events where current implementation supports them.
 - enforce `PhrasePlan` syntax with `thelmic/syntax_enforcer.py`.
+- enforce supporting-layer compliance with `thelmic/support_enforcer.py`.
+- enforce drop construction with `thelmic/drop_enforcer.py`.
+- compute and audit Pression after event enforcement.
 - expose debug/runtime counters.
 
 Current non-responsibilities:
@@ -399,6 +467,28 @@ runtime:
   call_events_rendered:
   call_events_suppressed:
   call_events_outside_slots:
+  planned_response_slots:
+  response_events_rendered:
+  response_events_suppressed:
+  response_events_outside_slots:
+  response_events_without_call:
+  silence_regions_active:
+  events_blocked_by_silence_by_layer:
+  support_events_checked:
+  support_events_suppressed:
+  support_events_suppressed_by_silence:
+  support_events_suppressed_by_role:
+  support_events_suppressed_by_authority:
+  drop_regions_detected:
+  drop_relock_events_added:
+  drop_relock_events_adjusted:
+  drop_missing_contrast:
+  drop_illegal_events_suppressed:
+  pression_created_note_events:
+  pression_mutated_bank_events:
+  pression_overrode_silence_mask:
+  pression_authored_phrase_syntax:
+  pression_modulated_events_count:
   boundary_timing:
 ```
 
@@ -426,8 +516,11 @@ thelmic/
 |   |-- bass.py                     # planned bass rendering from bass_pattern
 |   |-- hook.py                     # planned hook rendering from hook_pattern
 |   |-- calls.py                    # planned call rendering from call_slots
+|   |-- responses.py                # planned response rendering from response_slots
 |   |-- stabs.py                    # stab/call-response support
 |   |-- syntax_enforcer.py          # PhrasePlan syntax filtering pass
+|   |-- support_enforcer.py         # supporting-layer compliance pass
+|   |-- drop_enforcer.py            # DROP_RELOCK construction/enforcement pass
 |   |-- rhythm.py                   # rhythm conformance helpers
 |   |-- deformations.py             # legacy deformation map pipeline
 |   |-- deformations_anchor.py      # anchor withholding
@@ -449,6 +542,11 @@ thelmic/
 |   |-- test_deformations_dynamics.py
 |   |-- test_phrase_plan.py
 |   |-- test_pression.py
+|   |-- test_pression_compliance.py
+|   |-- test_responses.py
+|   |-- test_silence.py
+|   |-- test_support_compliance.py
+|   |-- test_drop_enforcer.py
 |   `-- test_pressure_curves.py
 |
 |-- examples/
@@ -466,11 +564,11 @@ thelmic/
 | 2 | Hook identity rendering - done |
 | 3 | Phrase syntax compliance - done |
 | 4 | Planner-owned call generation - done |
-| 5 | Planner-owned response generation |
-| 6 | Silence mask compliance |
-| 7 | Pressure integration as CC/control only |
-| 8 | Supporting layer compliance |
-| 9 | Drop construction aligned to bass, hook, and silence |
+| 5 | Planner-owned response generation - done |
+| 6 | Silence mask compliance - done |
+| 7 | Pressure integration as CC/control only - done |
+| 8 | Supporting layer compliance - done |
+| 9 | Drop construction aligned to bass, hook, and silence - done |
 | 10 | Validation and enforcement |
 
 ---
