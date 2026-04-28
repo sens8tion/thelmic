@@ -17,8 +17,22 @@ LAYER_CHANNELS: dict[str, int] = {
     "bass":  3,
     "stab":  4,
     "hook":  5,
-    "survivor": 6,
+    "bassline": 7,
+    "sub":   8,
 }
+
+
+def is_grid_midi_event(event) -> bool:
+    """Return True when a final grid event should emit a MIDI note.
+
+    The rendered bank/grid is the final note bus. MIDI scheduling must not use
+    any hidden event source or alternate musical state.
+    """
+    return (
+        getattr(event, "active", True)
+        and getattr(event, "velocity", 0) > 0
+        and getattr(event, "layer", "") in LAYER_CHANNELS
+    )
 
 
 def list_output_ports() -> list[str]:
@@ -133,7 +147,7 @@ class MIDIOut:
         # action ∈ {"on", "off"}: send to self (notes port)
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if not getattr(event, "active", True) or event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_tick = event_to_abs_tick(event.time)
             if bar_start_tick <= t_tick < bar_end_tick:
@@ -218,7 +232,7 @@ class MIDIOut:
         # Build a flat sorted timeline of (abs_time_s, action, ch, note, vel)
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in bank.all_events():
-            if not getattr(event, "active", True) or event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration
@@ -271,7 +285,7 @@ class MIDIOut:
 
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if not getattr(event, "active", True) or event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration

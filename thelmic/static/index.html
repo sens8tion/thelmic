@@ -416,6 +416,25 @@
 
     .midi-status.connected { color: var(--oak); }
     .midi-status.error     { color: #a04040; }
+    .midi-channel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+      gap: 4px 8px;
+      color: var(--dim);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+    }
+    .midi-channel-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      padding: 3px 5px;
+      border-radius: 2px;
+    }
+    .midi-channel-item .layer { color: var(--text); }
+    .midi-channel-item .channel { color: var(--accent); }
 
     /* ── Sequencer ── */
     .seq-section {
@@ -696,7 +715,7 @@
     .curves-section {
       width: 100%;
       max-width: 640px;
-      display: flex;
+      display: none;
       flex-direction: column;
       gap: 10px;
       border-top: 1px solid var(--border);
@@ -864,12 +883,6 @@
     <h2>Controls</h2>
 
     <div class="control-row">
-      <label>groove lock</label>
-      <input type="range" id="ctrl-groove_lock" min="0" max="1000" value="800" step="1">
-      <div class="control-value" id="ctrlval-groove_lock">0.80</div>
-      <span class="force-rider" id="rider-groove_lock"></span>
-    </div>
-    <div class="control-row">
       <label>chaos limit</label>
       <input type="range" id="ctrl-chaos_limit" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-chaos_limit">1.00</div>
@@ -880,18 +893,6 @@
       <input type="range" id="ctrl-density_ceiling" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-density_ceiling">1.00</div>
       <span class="force-rider" id="rider-density_ceiling"></span>
-    </div>
-    <div class="control-row">
-      <label>variation rate</label>
-      <input type="range" id="ctrl-variation_rate" min="0" max="1000" value="500" step="1">
-      <div class="control-value" id="ctrlval-variation_rate">0.50</div>
-      <span class="force-rider" id="rider-variation_rate"></span>
-    </div>
-    <div class="control-row">
-      <label>kick dominance</label>
-      <input type="range" id="ctrl-kick_dominance" min="0" max="1000" value="700" step="1">
-      <div class="control-value" id="ctrlval-kick_dominance">0.70</div>
-      <span class="force-rider" id="rider-kick_dominance"></span>
     </div>
   </div>
 
@@ -983,6 +984,7 @@
       </select>
       <div class="midi-status" id="midi-cc-status">not connected</div>
     </div>
+    <div class="midi-channel-grid" id="midi-channel-grid"></div>
   </div>
 
   <!-- Transport -->
@@ -1065,7 +1067,7 @@
     }
 
     // ── Controls ──
-    const controlKeys = ['groove_lock', 'chaos_limit', 'density_ceiling', 'variation_rate', 'kick_dominance'];
+    const controlKeys = ['chaos_limit', 'density_ceiling'];
     const controlThrottles = {};
 
     controlKeys.forEach(key => {
@@ -1150,10 +1152,11 @@
       document.getElementById('bank-count').textContent = `bank: ${bankSlot} / ${bankTotal}`;
 
       // Archetype lock
-      updateArchetypeDisplay(s.selected_archetype, s.archetype);
+      updateArchetypeDisplay(s.selected_archetype, s.active_archetype || s.archetype);
 
       // MIDI port status
       const midiStatus = document.getElementById('midi-status');
+      syncSelectValue('midi-port-select', s.midi_port || '');
       if (s.midi_port) {
         midiStatus.textContent = s.midi_port;
         midiStatus.className = 'midi-status connected';
@@ -1162,12 +1165,16 @@
         midiStatus.className = 'midi-status';
       }
       const midiCCStatus = document.getElementById('midi-cc-status');
+      syncSelectValue('midi-cc-port-select', s.midi_cc_port || '');
       if (s.midi_cc_port) {
         midiCCStatus.textContent = s.midi_cc_port;
         midiCCStatus.className = 'midi-status connected';
       } else {
         midiCCStatus.textContent = 'not connected';
         midiCCStatus.className = 'midi-status';
+      }
+      if (s.midi_layer_channels) {
+        renderMidiLayerChannels(s.midi_layer_channels);
       }
 
       // Playhead timing
@@ -1193,7 +1200,7 @@
         renderPressionLanes(s.pression);
       }
 
-      if (s.pressure_curves) {
+      if (false && s.pressure_curves) {
         activeCurveTargets = s.pressure_curves.active_targets || {};
         curveCanvases = {};  // renderCurves will repopulate
         s.pressure_curves.curves.forEach(c => { curveProgressAtState[c.id] = c.progress; });
@@ -1223,6 +1230,18 @@
     }
 
     // ── MIDI ports ──
+    function syncSelectValue(id, value) {
+      const sel = document.getElementById(id);
+      if (!sel || document.activeElement === sel) return;
+      if (value && ![...sel.options].some(opt => opt.value === value)) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        sel.appendChild(opt);
+      }
+      sel.value = value || '';
+    }
+
     async function refreshPorts() {
       try {
         const res = await fetch('/api/midi-ports');
@@ -1251,6 +1270,28 @@
     function selectMidiCCPort() {
       const val = document.getElementById('midi-cc-port-select').value;
       if (val) send({ type: 'midi_cc_port', value: val });
+    }
+
+    function renderMidiLayerChannels(channels) {
+      const grid = document.getElementById('midi-channel-grid');
+      if (!grid) return;
+      const order = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
+      grid.innerHTML = '';
+      order
+        .filter(layer => Object.prototype.hasOwnProperty.call(channels, layer))
+        .forEach(layer => {
+          const item = document.createElement('div');
+          item.className = 'midi-channel-item';
+          const name = document.createElement('span');
+          name.className = 'layer';
+          name.textContent = layer.replace(/_/g, ' ');
+          const ch = document.createElement('span');
+          ch.className = 'channel';
+          ch.textContent = `ch ${Number(channels[layer]) + 1}`;
+          item.appendChild(name);
+          item.appendChild(ch);
+          grid.appendChild(item);
+        });
     }
 
     // Load ports on connect
@@ -1316,10 +1357,11 @@
       bass: '#5aa05a',
       stab: '#d48ad4',
       hook: '#f0c85a',
-      survivor: '#9aa0a6',
+      bassline: '#4fb06a',
+      sub: '#3f6fb0',
     };
-    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'stab', 'hook'];
-    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics', 'survivor']);
+    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
+    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1371,8 +1413,11 @@
       const deform = event.deformation || {};
       if (event.active === false || deform.anchor_withholding) return 'anchor_withholding';
       if (event.layer === 'bass' || event.role === 'bass') return 'bass';
+      if (event.layer === 'bassline' || event.role === 'bassline') return 'bassline';
+      if (event.layer === 'sub' || event.role === 'sub') return 'sub';
       if (event.layer === 'stab' || event.role === 'stab') return 'stab';
       if (event.layer === 'hook' || event.role === 'hook') return 'hook';
+      if (event.role === 'survivor') return event.layer || 'hat';
       return event.role || event.layer || 'event';
     }
 

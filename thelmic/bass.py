@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from thelmic.bank_generator import MIDIEvent
@@ -18,6 +18,30 @@ TICKS_PER_BAR = 96
 TICKS_PER_BEAT = 24
 TICKS_PER_STEP = 6
 ALLOWED_BASS_INTERVALS = {0, 7, 12}
+ALLOWED_BASSLINE_DURATIONS = {1, 2, 3, 4, 8, 16}
+
+
+@dataclass(frozen=True)
+class BasslinePattern:
+    pattern_type: str
+    steps: tuple[int, ...]
+    duration_steps: tuple[int, ...]
+    phrase_length_bars: int = 1
+
+    def __post_init__(self) -> None:
+        assert len(self.steps) == len(self.duration_steps)
+        assert all(0 <= step < 16 for step in self.steps)
+        assert all(duration in ALLOWED_BASSLINE_DURATIONS for duration in self.duration_steps)
+
+
+BASSLINE_PATTERNS: dict[str, BasslinePattern] = {
+    "offbeat_pulse": BasslinePattern("offbeat_pulse", (2, 6, 10, 14), (2, 2, 2, 2)),
+    "kick_answer": BasslinePattern("kick_answer", (2, 6, 10, 14), (2, 3, 2, 3)),
+    "held_fill": BasslinePattern("held_fill", (0, 12, 14), (8, 1, 2)),
+    "syncopated_cluster": BasslinePattern("syncopated_cluster", (2, 6, 11, 12, 14), (2, 2, 1, 1, 2)),
+    "driving_loop": BasslinePattern("driving_loop", (0, 4, 8, 12), (2, 2, 2, 2)),
+    "nott_hold": BasslinePattern("nott_hold", (0,), (16,), phrase_length_bars=2),
+}
 
 
 def _step_to_bass_time(bar: int, step: int) -> str:
@@ -138,16 +162,49 @@ def _planned_pitch(note: PlanNote, tonal_centre: int = ROOT_NOTE) -> int:
     return tonal_centre + interval + octave
 
 
+def _select_bassline_pattern(
+    landscape_position: float,
+    behaviour: BehaviourField,
+    bar: int,
+) -> BasslinePattern:
+    """Select a bounded genre-aligned bassline pattern."""
+    if landscape_position <= 0.33:
+        return BASSLINE_PATTERNS["driving_loop"]
+    if landscape_position >= 0.67:
+        if behaviour.energy_level > 0.75 and bar % 4 == 0:
+            return BASSLINE_PATTERNS["held_fill"]
+        return BASSLINE_PATTERNS["nott_hold"]
+    if behaviour.instability > 0.55 and bar % 4 == 0:
+        return BASSLINE_PATTERNS["syncopated_cluster"]
+    if behaviour.energy_level > 0.65:
+        return BASSLINE_PATTERNS["kick_answer"]
+    return BASSLINE_PATTERNS["offbeat_pulse"]
+
+
+def _planned_root_for_bar(
+    plan: PhrasePlan,
+    plan_bar: int,
+    tonal_centre: int,
+) -> int:
+    notes = [note for note in plan.bass_pattern if note.bar == plan_bar]
+    source = notes[0] if notes else (plan.bass_pattern[0] if plan.bass_pattern else None)
+    if source is None:
+        return tonal_centre
+    return _planned_pitch(source, tonal_centre)
+
+
 def generate_planned_bass(
     events: list[MIDIEvent],
     behaviour: BehaviourField,
     plan: PhrasePlan,
     tonal_centre: int = ROOT_NOTE,
+    landscape_position: float = 0.5,
 ) -> list[MIDIEvent]:
-    """Render authored bass from the phrase plan, locked to active kick steps.
+    """Render authored bassline from phrase-plan root intent.
 
     This is the Phase 1 truth layer: bass comes from the plan first, not from
-    stab/call-response material. Notes outside the kick grid are ignored.
+    stab/call-response material. Timing is rendered from constrained
+    genre-aligned pattern families rather than arbitrary plan steps.
     """
     kick_steps = _kick_steps_by_bar(events)
     if not kick_steps:
@@ -156,33 +213,37 @@ def generate_planned_bass(
     bass_events: list[MIDIEvent] = []
     bars = sorted(kick_steps)
     plan_bars = max((note.bar for note in plan.bass_pattern), default=1)
-    by_plan_bar: dict[int, list[PlanNote]] = {}
-    for note in plan.bass_pattern:
-        by_plan_bar.setdefault(note.bar, []).append(note)
 
     for bar in bars:
         plan_bar = ((bar - 1) % plan_bars) + 1
-        for note in by_plan_bar.get(plan_bar, []):
-            if note.step not in kick_steps.get(bar, set()):
-                continue
-            source = _source_for_planned_note(events, bar, note.step)
+        root = _planned_root_for_bar(plan, plan_bar, tonal_centre)
+        pattern = _select_bassline_pattern(landscape_position, behaviour, bar)
+        for index, step in enumerate(pattern.steps):
+            source = _source_for_planned_note(events, bar, step)
             if source is None:
                 continue
-            velocity = _clamp_velocity(note.velocity * behaviour.anchor_velocity)
+            accent = 1.08 if step in kick_steps.get(bar, set()) else 0.92
+            velocity = _clamp_velocity(104 * behaviour.anchor_velocity * accent)
+            duration_steps = pattern.duration_steps[index]
             bass_event = replace(
                 source,
-                time=_step_to_bass_time(bar, note.step),
-                note=_planned_pitch(note, tonal_centre),
+                time=_step_to_bass_time(bar, step),
+                note=root,
                 velocity=velocity,
-                duration=max(1, note.duration_steps) * 0.08,
-                layer="bass",
-                role="bass",
+                duration=duration_steps * 0.08,
+                layer="bassline",
+                role="bassline",
                 emphasis=0.85,
                 openness=0.0,
                 expected_weight=max(0.8, source.expected_weight),
                 should_resolve=False,
                 active=True,
-                deformation={**source.deformation, "bass": behaviour.energy_level},
+                deformation={
+                    **source.deformation,
+                    "bassline": behaviour.energy_level,
+                    f"bass_pattern:{pattern.pattern_type}": 1.0,
+                    "bass_phrase_length": float(pattern.phrase_length_bars),
+                },
             )
             bass_events.append(bass_event)
 

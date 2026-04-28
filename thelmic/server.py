@@ -24,6 +24,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import BankGenerator
+from thelmic.arrangement import (
+    arrangement_diagnostics, ensure_beat_bed, generate_sub_from_bassline,
+)
 from thelmic.bass import generate_planned_bass
 from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.call_response import (
@@ -62,11 +65,8 @@ DIMENSION_ROLES: dict[str, str] = {
     "control_vs_chaos":      "future",
     "resolution_likelihood": "display only",
     # Controls
-    "groove_lock":           "unused",
     "chaos_limit":           "clamps instability",
     "density_ceiling":       "clamps density",
-    "variation_rate":        "unused",
-    "kick_dominance":        "unused",
 }
 
 DEFORMATION_MODEL_DIMENSIONS: dict[str, str] = {
@@ -77,7 +77,7 @@ from thelmic.force_engine import ForceEngine
 from thelmic.intent import IntentInput
 from thelmic.landscape import territory_at
 from thelmic.archetypes import archetype_name_at
-from thelmic.midi_out import MIDIOut, list_output_ports
+from thelmic.midi_out import LAYER_CHANNELS, MIDIOut, is_grid_midi_event, list_output_ports
 from thelmic.archetypes import ARCHETYPE_BY_NAME
 
 import importlib.resources as _res
@@ -295,11 +295,37 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         base_events[0] if base_events else None,
     )
 
-    bass_events: list = generate_planned_bass(base_events, behaviour, _phrase_plan)
+    bassline_events: list = generate_planned_bass(
+        base_events, behaviour, _phrase_plan,
+        landscape_position=landscape_position,
+    )
     hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
-    planned_calls     = generate_planned_calls(base_events, behaviour, _phrase_plan)
-    planned_responses = generate_planned_responses(base_events, behaviour, _phrase_plan)
+    leader = _phase11_state.call_response_leader
+    leader_layer = "bassline" if leader == "bass" else leader
+
+    # Stab is the primary call/response voice. Bassline participates as the
+    # paired body of the exchange, using the same planner-owned slots.
+    planned_calls = generate_planned_calls(
+        base_events, behaviour, _phrase_plan, leader_layer="stab",
+    )
+    planned_responses = generate_planned_responses(
+        base_events, behaviour, _phrase_plan, leader_layer="stab",
+    )
+    bassline_calls = generate_planned_calls(
+        base_events, behaviour, _phrase_plan, leader_layer="bassline",
+    )
+    bassline_responses = generate_planned_responses(
+        base_events, behaviour, _phrase_plan, leader_layer="bassline",
+    )
+    if leader_layer == "bassline":
+        call_response_bassline_events = bassline_calls.events + bassline_responses.events
+    else:
+        call_response_bassline_events = bassline_responses.events
     stab_events: list = planned_calls.events + planned_responses.events
+    bassline_events.extend(call_response_bassline_events)
+    sub_events: list = generate_sub_from_bassline(
+        bassline_events, behaviour, landscape_position=landscape_position,
+    )
 
     _log.debug(
         "bank=%d mode=%s calls_rendered=%d responses_rendered=%d",
@@ -308,9 +334,11 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         planned_responses.stats.get("response_events_rendered", 0),
     )
 
-    appended_bass  = _append_events_to_bank(bank, bass_events)
+    appended_bassline = _append_events_to_bank(bank, bassline_events)
+    appended_sub   = _append_events_to_bank(bank, sub_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
+    beat_bed_stats = ensure_beat_bed(bank, _phrase_plan, _phase11_state)
     survivor_stats = add_survivor_signal(bank, _phrase_plan)
     survivor_after_generation = _survivor_events(bank)
     survivor_signature = (
@@ -363,9 +391,11 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
                 survivor_trace["removed_by"] = phase
                 survivor_trace["removal_reason"] = "survivor missing after pass"
                 break
-    _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
+    _runtime_debug["bassline_events_per_bar"]  = _events_per_bar(appended_bassline)
+    _runtime_debug["sub_events_per_bar"]       = _events_per_bar(appended_sub)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
+    _runtime_debug.update(beat_bed_stats)
     _runtime_debug.update(planned_calls.stats)
     _runtime_debug.update(planned_responses.stats)
     _runtime_debug.update(syntax_stats)
@@ -377,12 +407,18 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["survivor_events_final"] = len(_survivor_events(bank))
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
+    _runtime_debug["call_response_leader"] = _phase11_state.call_response_leader
+    _runtime_debug["pending_call_response_leader"] = _phase11_state.pending_call_response_leader
+    _runtime_debug["leader_committed_at_drop"] = _phase11_state.leader_committed_at_drop
+    _runtime_debug["build_length_bars"] = _phase11_state.build_length_bars
+    _runtime_debug["silence_length_bars"] = _phase11_state.silence_length_bars
     _runtime_debug["bass_source"] = "phrase_plan"
     _runtime_debug["bass_tonal_centre"] = 36
     _runtime_debug["hook_source"] = "phrase_plan"
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
+    _runtime_debug.update(arrangement_diagnostics(bank, _phase11_state))
     pression_modulated_count = apply_behaviour_dynamics(bank, behaviour)
 
     # Pre-compute pression timeline for this bank.
@@ -564,12 +600,18 @@ def _bank_events_list(bank) -> list:
         return []
     events = []
     for event in bank.all_events():
+        if event.layer == "survivor":
+            continue
         events.append({
             "time": event.time,
             "layer": event.layer,
             "role": event.role,
             "active": getattr(event, "active", True),
             "velocity": event.velocity,
+            "note": event.note,
+            "duration": event.duration,
+            "midi_send": is_grid_midi_event(event),
+            "midi_channel": LAYER_CHANNELS.get(event.layer),
             "emphasis": round(event.emphasis, 2),
             "survives_silence": getattr(event, "survives_silence", False),
             "structural_authority": getattr(event, "structural_authority", True),
@@ -610,6 +652,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
         "bpm": _bpm,
         "midi_port": _midi.port_name if _midi else None,
         "midi_cc_port": _midi_cc.port_name if _midi_cc else None,
+        "midi_layer_channels": dict(LAYER_CHANNELS),
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
         "active_archetype":   _active_archetype_name,
@@ -685,11 +728,18 @@ def _live_state_dict() -> dict:
         "bank_total": 4,
         "playing": _playing,
         "bpm": _bpm,
+        "midi_port": _midi.port_name if _midi else None,
+        "midi_cc_port": _midi_cc.port_name if _midi_cc else None,
+        "archetype": archetype_name_at(density=_engine.force_state.density),
+        "selected_archetype": _generator.selected_archetype,
+        "active_archetype": _active_archetype_name,
+        "pending_archetype": _pending_archetype_name,
         "quantize_bars": _quantize_bars,
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
         "phase11": _phase11_state.to_dict(),
+        "midi_layer_channels": dict(LAYER_CHANNELS),
         "pression_bar_idx": _pression_bar_idx,   # current bar, for UI cursor
         "active_pression_mapping_lane": _active_pression_mapping_lane,
         "phrase_plan": _phrase_plan.to_dict(),

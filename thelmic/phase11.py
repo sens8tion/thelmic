@@ -17,13 +17,19 @@ from thelmic.syntax_enforcer import time_to_bar_step, _plan_bar
 
 
 INSTRUMENT_PRIORITY: tuple[str, ...] = (
-    "kick", "bass", "snare", "hook", "stab", "hat", "ghost", "survivor",
+    "kick", "sub", "bassline", "bass", "snare", "hook", "stab", "hat", "ghost", "survivor",
 )
 PRIORITY_INDEX: dict[str, int] = {
     layer: index for index, layer in enumerate(INSTRUMENT_PRIORITY)
 }
-CORE_DROP_LAYERS: frozenset[str] = frozenset({"kick", "bass"})
+CORE_DROP_LAYERS: frozenset[str] = frozenset({"kick", "sub", "bassline"})
+BEAT_BED_LAYERS: frozenset[str] = frozenset({"kick", "snare", "hat"})
+IDENTITY_LAYERS: frozenset[str] = frozenset({"hook"})
+COEXISTENT_FOUNDATION_LAYERS: frozenset[str] = frozenset(
+    {"kick", "sub", "bassline", "bass", "snare", "hat"}
+)
 ALLOWED_PROGRESSIVE_STEP_DELTA: float = 0.2
+CALL_RESPONSE_LEADERS: tuple[str, ...] = ("stab", "bass", "hook", "snare")
 
 
 class SparsityMode(str, Enum):
@@ -216,6 +222,11 @@ class Phase11State:
     sparsity_level: float = 0.0
     sparsity_mode: SparsityMode = SparsityMode.SOFT
     structural_mutations: list[dict] = field(default_factory=list)
+    call_response_leader: str = "stab"
+    pending_call_response_leader: str = "stab"
+    leader_committed_at_drop: bool = False
+    build_length_bars: int = 8
+    silence_length_bars: int = 1
 
     def set_target(self, position: float) -> None:
         start = self.slider.actual_position
@@ -226,11 +237,13 @@ class Phase11State:
         duration = max(1.0, 12.0 * (1.0 - min(0.8, abs(gesture_velocity))))
         self.trajectory = plan_trajectory(start, position, gesture_velocity, duration)
         self._update_arrangement_state()
+        self._prepare_pending_call_response_leader()
 
     def set_immediate(self, position: float) -> None:
         self.slider.set_immediate(position)
         self.trajectory = plan_trajectory(position, position, 0.0, 0.0)
         self._update_arrangement_state()
+        self._prepare_pending_call_response_leader()
 
     def advance(self, bars: float = 1.0) -> float:
         actual = self.slider.advance(bars)
@@ -270,7 +283,27 @@ class Phase11State:
             )
             if self.trajectory.current_drop_index >= len(self.trajectory.drop_plan) - 1:
                 self.trajectory.active = False
+        self.call_response_leader = self.pending_call_response_leader
+        self.leader_committed_at_drop = True
+        self._prepare_pending_call_response_leader()
         self._update_arrangement_state()
+
+    def _prepare_pending_call_response_leader(self) -> None:
+        """Pick the next structural call/response leader.
+
+        Stab is intentionally dominant. The non-stab branch is deterministic
+        and rare so tests and playback remain repeatable while approximating
+        the requested 90/10 section split.
+        """
+        seed = int(self.slider.target_position * 1000)
+        seed += int(self.trajectory.distance * 1000)
+        seed += int(self.trajectory.velocity * 1000)
+        seed += self.trajectory.current_drop_index * 17
+        if seed % 10 != 0:
+            self.pending_call_response_leader = "stab"
+            return
+        alternatives = CALL_RESPONSE_LEADERS[1:]
+        self.pending_call_response_leader = alternatives[(seed // 10) % len(alternatives)]
 
     def _record_structural_change(self, change: StructuralChange) -> dict:
         entry = evaluate_structural_change(change)
@@ -283,7 +316,7 @@ class Phase11State:
         distance = self.trajectory.distance
         energy = self.slider.internal_motion()["energy_breathing"]
         if role == "peak":
-            self.dominant_instrument = "bass"
+            self.dominant_instrument = "bassline"
             self.sparsity_mode = SparsityMode.HARD
             self.sparsity_level = _clamp(0.55 + distance * 0.7)
         elif role == "intensify":
@@ -298,6 +331,12 @@ class Phase11State:
             self.dominant_instrument = None
             self.sparsity_mode = SparsityMode.SOFT
             self.sparsity_level = _clamp(0.10 + energy * 0.25)
+        self.build_length_bars = expected_build_length_bars(
+            self.slider.actual_position,
+            self.trajectory.distance,
+            self.trajectory.velocity,
+        )
+        self.silence_length_bars = 1
 
     def to_dict(self) -> dict:
         return {
@@ -306,8 +345,36 @@ class Phase11State:
             "dominant_instrument": self.dominant_instrument,
             "sparsity_mode": self.sparsity_mode.value,
             "sparsity_level": round(self.sparsity_level, 3),
+            "call_response_leader": self.call_response_leader,
+            "pending_call_response_leader": self.pending_call_response_leader,
+            "leader_committed_at_drop": self.leader_committed_at_drop,
+            "build_length_bars": self.build_length_bars,
+            "silence_length_bars": self.silence_length_bars,
             "structural_mutations": list(self.structural_mutations),
         }
+
+
+def expected_build_length_bars(
+    actual_position: float,
+    trajectory_distance: float = 0.0,
+    trajectory_velocity: float = 0.0,
+) -> int:
+    """Return an archetype-aligned build length diagnostic.
+
+    Build length is separate from Phase 10 silence length. It shapes the
+    expected tension runway without moving committed drop boundaries here.
+    """
+    position = _clamp(actual_position)
+    if position < 0.33:
+        low, high, preferred = 4, 8, 6
+    elif position < 0.67:
+        low, high, preferred = 2, 12, 6
+    else:
+        low, high, preferred = 8, 24, 16
+    distance_lift = trajectory_distance * (high - preferred)
+    velocity_compress = trajectory_velocity * (preferred - low)
+    value = preferred + distance_lift - velocity_compress
+    return int(round(max(low, min(high, value))))
 
 
 @dataclass
@@ -326,6 +393,35 @@ class PriorityStats:
 
 def _priority(layer: str) -> int:
     return PRIORITY_INDEX.get(layer, len(INSTRUMENT_PRIORITY))
+
+
+def _can_coexist_at_step(existing: MIDIEvent, candidate: MIDIEvent) -> bool:
+    """Return True for layers that intentionally share timing.
+
+    Priority still exists, but for the rhythmic/foundation bed a lower-priority
+    layer yields by becoming less forceful rather than disappearing. This keeps
+    kick/snare/hat populated while allowing bassline/sub to align at drops.
+    """
+    layers = {existing.layer, candidate.layer}
+    if layers.issubset(COEXISTENT_FOUNDATION_LAYERS):
+        return True
+    if candidate.layer in BEAT_BED_LAYERS and existing.layer in COEXISTENT_FOUNDATION_LAYERS:
+        return True
+    if existing.layer in BEAT_BED_LAYERS and candidate.layer in COEXISTENT_FOUNDATION_LAYERS:
+        return True
+    if candidate.layer in IDENTITY_LAYERS and existing.layer in COEXISTENT_FOUNDATION_LAYERS:
+        return True
+    return False
+
+
+def _soften_priority_yield(event: MIDIEvent) -> bool:
+    if event.layer in {"snare", "hat"}:
+        event.velocity = max(1, min(127, int(round(event.velocity * 0.78))))
+        return True
+    if event.layer == "hook":
+        event.velocity = max(1, min(127, int(round(event.velocity * 0.88))))
+        return True
+    return False
 
 
 def _is_drop_core(event: MIDIEvent, plan: PhrasePlan, plan_bars: int) -> bool:
@@ -376,6 +472,11 @@ def enforce_priority_and_sparsity(
             key = (bar, step)
             winner = by_step.get(key)
             if winner is not None and _priority(event.layer) > _priority(winner.layer):
+                if _can_coexist_at_step(winner, event):
+                    if _soften_priority_yield(event):
+                        stats.events_shifted_by_priority += 1
+                    kept.append(event)
+                    continue
                 if event.layer not in CORE_DROP_LAYERS and not getattr(event, "survives_silence", False):
                     stats.priority_conflicts_resolved += 1
                     continue

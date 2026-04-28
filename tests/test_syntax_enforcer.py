@@ -116,14 +116,17 @@ def test_responses_are_not_emitted_when_no_call_exists():
     assert stats["events_outside_response_slots"] == 1
 
 
-def test_bass_still_renders_from_phrase_plan_bass_pattern():
+def test_bassline_still_renders_from_phrase_plan_bass_pattern():
     kick = _event("1.1.0", layer="kick", role="anchor")
     plan = generate_phrase_plan()
 
     bass = generate_planned_bass([kick], _behaviour(), plan)
 
-    assert [(event.layer, event.time, event.note) for event in bass] == [
-        ("bass", "1.1.0", 36)
+    assert [(event.layer, event.note) for event in bass] == [
+        ("bassline", 36),
+        ("bassline", 36),
+        ("bassline", 36),
+        ("bassline", 36),
     ]
 
 

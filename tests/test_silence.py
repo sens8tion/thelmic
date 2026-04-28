@@ -183,8 +183,8 @@ class TestSilenceOverridesSlots:
 
 class TestBassAndHookSuppression:
 
-    def test_bass_suppressed_inside_silence(self):
-        """Bass events rendered in a silenced bar are removed by the enforcer."""
+    def test_bassline_suppressed_inside_silence(self):
+        """Bassline events rendered in a silenced bar are removed by the enforcer."""
         kick = _event("2.1.0", layer="kick", role="anchor")
         plan_full = generate_phrase_plan()
         bass = generate_planned_bass([kick], _behaviour(), plan_full)
@@ -203,7 +203,7 @@ class TestBassAndHookSuppression:
         ])
         stats = enforce_phrase_syntax(bank, plan)
         assert bank.all_events() == []
-        assert stats["events_blocked_by_silence_by_layer"].get("bass", 0) >= (
+        assert stats["events_blocked_by_silence_by_layer"].get("bassline", 0) >= (
             len([e for e in bass if e.time.startswith("2.")])
         )
 

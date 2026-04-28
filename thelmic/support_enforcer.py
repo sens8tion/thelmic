@@ -21,7 +21,7 @@ Checks applied to each supporting event:
                  tonal or identity authority.
 
 Supporting event definition:
-  Any event whose layer is not "bass" or "hook" AND whose role does not
+  Any event whose layer is not an authority layer AND whose role does not
   contain "call" or "response" (those are handled by Phase 4/5).
   Drum events (kick, snare, hat) are supporting but are exempt from
   authority collision suppression (kick + bass co-occurrence is normal).
@@ -43,7 +43,7 @@ TICKS_PER_BEAT = 24
 TICKS_PER_STEP = 6
 
 # Layers that are planner-owned first-class authority
-AUTHORITY_LAYERS: frozenset[str] = frozenset({"bass", "hook"})
+AUTHORITY_LAYERS: frozenset[str] = frozenset({"bass", "bassline", "sub", "hook"})
 
 # Drum layers are supporting but exempt from authority-collision suppression
 DRUM_LAYERS: frozenset[str] = frozenset({"kick", "snare", "hat"})

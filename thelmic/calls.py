@@ -85,6 +85,7 @@ def generate_planned_calls(
     events: list[MIDIEvent],
     behaviour: BehaviourField,
     plan: PhrasePlan,
+    leader_layer: str = "stab",
 ) -> PlannedCallResult:
     """Render planner-owned call events from PhrasePlan.call_slots."""
     bars = _bars_in_events(events)
@@ -124,7 +125,7 @@ def generate_planned_calls(
                 note=_call_pitch(index),
                 velocity=_call_velocity(index, behaviour),
                 duration=0.06,
-                layer="stab",
+                layer=leader_layer,
                 role="call",
                 emphasis=0.62,
                 openness=0.55,

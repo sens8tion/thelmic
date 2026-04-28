@@ -131,6 +131,7 @@ def generate_planned_responses(
     events: list[MIDIEvent],
     behaviour: BehaviourField,
     plan: PhrasePlan,
+    leader_layer: str = "stab",
 ) -> PlannedResponseResult:
     """Render planner-owned response events from PhrasePlan.response_slots."""
     bars = _bars_in_events(events)
@@ -184,7 +185,7 @@ def generate_planned_responses(
                 note=_response_pitch(index),
                 velocity=_response_velocity(index, behaviour),
                 duration=0.08,
-                layer="stab",
+                layer=leader_layer,
                 role="response",
                 emphasis=0.70,
                 openness=0.45,

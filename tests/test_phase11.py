@@ -96,15 +96,46 @@ def test_trajectory_planning_short_vs_long_movement():
     ]
 
 
-def test_priority_enforcement_keeps_higher_priority_conflict():
+def test_priority_enforcement_softens_beat_bed_conflict_instead_of_removing():
     bank = _bank(
         _event("1.1.0", layer="kick", note=36),
         _event("1.1.0", layer="hat", note=42),
     )
     stats = enforce_priority_and_sparsity(bank, _plan(), Phase11State())
 
-    assert [event.layer for event in bank.all_events()] == ["kick"]
-    assert stats["priority_conflicts_resolved"] == 1
+    assert [event.layer for event in bank.all_events()] == ["kick", "hat"]
+    assert stats["priority_conflicts_resolved"] == 0
+    assert stats["events_shifted_by_priority"] == 1
+
+
+def test_priority_enforcement_keeps_snare_populated_with_foundation_layers():
+    bank = _bank(
+        _event("1.2.0", layer="sub", note=24),
+        _event("1.2.0", layer="bassline", note=36),
+        _event("1.2.0", layer="snare", note=38),
+        _event("1.2.0", layer="hat", note=42),
+    )
+    stats = enforce_priority_and_sparsity(bank, _plan(), Phase11State())
+
+    assert [event.layer for event in bank.all_events()] == ["sub", "bassline", "snare", "hat"]
+    assert stats["priority_conflicts_resolved"] == 0
+    assert stats["events_shifted_by_priority"] == 2
+
+
+def test_priority_enforcement_keeps_hook_identity_audible_with_foundation_layers():
+    bank = _bank(
+        _event("1.1.0", layer="sub", note=24),
+        _event("1.1.0", layer="bassline", note=36),
+        _event("1.1.0", layer="hook", note=60, velocity=90),
+    )
+    stats = enforce_priority_and_sparsity(bank, _plan(), Phase11State())
+
+    hooks = [event for event in bank.all_events() if event.layer == "hook"]
+    assert len(hooks) == 1
+    assert hooks[0].velocity > 0
+    assert hooks[0].velocity < 90
+    assert stats["priority_conflicts_resolved"] == 0
+    assert stats["events_shifted_by_priority"] == 1
 
 
 def test_sparsity_dominance_thins_competing_layers_not_dominant():
@@ -143,12 +174,12 @@ def test_drop_presentation_preserves_phase10_kick_bass_reanchor():
         event.layer for event in bank.all_events()
         if time_to_bar_step(event.time) == (1, DROP_STEP)
     }
-    assert {"kick", "bass"}.issubset(drop_layers)
+    assert {"kick", "bassline"}.issubset(drop_layers)
 
 
 def test_instrument_priority_stack_is_stable():
     assert INSTRUMENT_PRIORITY == (
-        "kick", "bass", "snare", "hook", "stab", "hat", "ghost", "survivor",
+        "kick", "sub", "bassline", "bass", "snare", "hook", "stab", "hat", "ghost", "survivor",
     )
 
 

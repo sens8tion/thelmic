@@ -162,7 +162,7 @@ def test_drop_commit_is_applied_once_at_drop_step():
     assert commit_state.active_state == "drop_relock"
 
 
-def test_drop_reanchor_has_kick_and_bass_at_committed_step():
+def test_drop_reanchor_has_kick_and_bassline_at_committed_step():
     plan = _drop_plan()
     bank = _bank(_event("2.2.0", layer="hat", note=42))
 
@@ -170,8 +170,9 @@ def test_drop_reanchor_has_kick_and_bass_at_committed_step():
 
     assert stats["kick_at_drop"] == 1
     assert stats["bass_at_drop"] == 1
+    assert stats["bassline_at_drop"] == 1
     assert _has_layer_at(bank, 2, DROP_STEP, "kick")
-    assert _has_layer_at(bank, 2, DROP_STEP, "bass")
+    assert _has_layer_at(bank, 2, DROP_STEP, "bassline")
 
 
 def test_survivor_events_do_not_continue_after_drop_step():

@@ -93,6 +93,8 @@ class DropStats:
     active_state_after: str = ""
     kick_at_drop: int = 0
     bass_at_drop: int = 0
+    bassline_at_drop: int = 0
+    sub_at_drop: int = 0
 
     def to_dict(self) -> dict[str, int | str]:
         return {
@@ -110,6 +112,8 @@ class DropStats:
             "active_state_after":              self.active_state_after,
             "kick_at_drop":                    self.kick_at_drop,
             "bass_at_drop":                    self.bass_at_drop,
+            "bassline_at_drop":                self.bassline_at_drop,
+            "sub_at_drop":                     self.sub_at_drop,
         }
 
 
@@ -379,12 +383,12 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
 # Drop construction rules
 # ---------------------------------------------------------------------------
 
-def _ensure_bass_at_drop(
+def _ensure_bassline_at_drop(
     bank: Bank, plan: PhrasePlan, bar: int,
     bar_events: list[MIDIEvent], stats: DropStats,
 ) -> None:
-    """Assert bass tonal centre at the drop step (step 4)."""
-    if _has_layer_at_step(bar_events, bar, DROP_STEP, "bass"):
+    """Assert bassline tonal centre at the drop step (step 4)."""
+    if _has_layer_at_step(bar_events, bar, DROP_STEP, "bassline"):
         return  # already present
     pitch = _planned_pitch(plan, bar, "bass")
     if pitch is None:
@@ -398,16 +402,54 @@ def _ensure_bass_at_drop(
         note=pitch,
         velocity=DROP_BASS_VELOCITY,
         duration=0.14,
-        layer="bass",
-        role="bass",
+        layer="bassline",
+        role="bassline",
         emphasis=0.90,
         openness=0.0,
         expected_weight=1.0,
         should_resolve=False,
         active=True,
-        deformation={"drop_relock": 1.0},
+        deformation={"drop_relock": 1.0, "bassline": 1.0},
     )
     _append_to_bar(bank, bass_event)
+    stats.drop_relock_events_added += 1
+
+
+def _ensure_bass_at_drop(
+    bank: Bank, plan: PhrasePlan, bar: int,
+    bar_events: list[MIDIEvent], stats: DropStats,
+) -> None:
+    """Compatibility wrapper: drop truth is now the bassline lane."""
+    _ensure_bassline_at_drop(bank, plan, bar, bar_events, stats)
+
+
+def _ensure_sub_at_drop(
+    bank: Bank, plan: PhrasePlan, bar: int,
+    bar_events: list[MIDIEvent], stats: DropStats,
+) -> None:
+    """Assert sub foundation at the drop step."""
+    if _has_layer_at_step(bar_events, bar, DROP_STEP, "sub"):
+        return
+    pitch = _planned_pitch(plan, bar, "bass")
+    if pitch is None:
+        return
+    tmpl = _source_template(bank)
+    sub_event = replace(
+        tmpl,
+        time=_step_to_time(bar, DROP_STEP),
+        note=24 + ((pitch - 36) % 12),
+        velocity=104,
+        duration=0.08 * 16,
+        layer="sub",
+        role="sub",
+        emphasis=0.90,
+        openness=0.0,
+        expected_weight=1.0,
+        should_resolve=False,
+        active=True,
+        deformation={"drop_relock": 1.0, "sub": 1.0},
+    )
+    _append_to_bar(bank, sub_event)
     stats.drop_relock_events_added += 1
 
 
@@ -616,13 +658,17 @@ def enforce_drop_relock(
 
         # Structural presence at the drop step
         _ensure_bass_at_drop(bank, plan, bar, bar_events, stats)
+        _ensure_sub_at_drop(bank, plan, bar, bar_events, stats)
         _ensure_kick_at_drop(bank, bar, bar_events, stats)
         _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
         refreshed = _events_for_bar(bank, bar)
         if _has_layer_at_step(refreshed, bar, DROP_STEP, "kick"):
             stats.kick_at_drop += 1
-        if _has_layer_at_step(refreshed, bar, DROP_STEP, "bass"):
+        if _has_layer_at_step(refreshed, bar, DROP_STEP, "bassline"):
+            stats.bassline_at_drop += 1
             stats.bass_at_drop += 1
+        if _has_layer_at_step(refreshed, bar, DROP_STEP, "sub"):
+            stats.sub_at_drop += 1
 
         # Pre-drop contrast check
         _check_pre_drop_contrast(bank, plan, bar, plan_bars, stats)

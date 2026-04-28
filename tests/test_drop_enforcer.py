@@ -168,11 +168,11 @@ class TestDropRegionDetection:
 
 class TestDropPresence:
 
-    def test_bass_added_at_drop_step_when_missing(self):
+    def test_bassline_added_at_drop_step_when_missing(self):
         plan, bank = _plan_with_drop(drop_bar=2)
         enforce_drop_relock(bank, plan)
-        assert _has_layer_at(bank, 2, DROP_STEP, "bass"), (
-            f"Bass missing at bar=2 step={DROP_STEP}"
+        assert _has_layer_at(bank, 2, DROP_STEP, "bassline"), (
+            f"Bassline missing at bar=2 step={DROP_STEP}"
         )
 
     def test_kick_added_at_drop_step_when_missing(self):
@@ -206,17 +206,17 @@ class TestDropPresence:
                           and time_to_bar_step(e.time) == (2, DROP_STEP))
         assert count_after == count_before  # no duplicate added
 
-    def test_kick_bass_hook_all_at_same_step(self):
+    def test_kick_bassline_hook_all_at_same_step(self):
         """All three must align at the drop step for structural impact."""
         plan, bank = _plan_with_drop(drop_bar=2)
         enforce_drop_relock(bank, plan)
 
         kick_present = _has_layer_at(bank, 2, DROP_STEP, "kick")
-        bass_present = _has_layer_at(bank, 2, DROP_STEP, "bass")
+        bass_present = _has_layer_at(bank, 2, DROP_STEP, "bassline")
         hook_present = _has_layer_at(bank, 2, DROP_STEP, "hook")
 
         assert kick_present, "Kick missing at drop step"
-        assert bass_present, "Bass missing at drop step"
+        assert bass_present, "Bassline missing at drop step"
         assert hook_present, "Hook missing at drop step"
 
     def test_added_events_count_tracked(self):

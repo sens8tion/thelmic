@@ -106,9 +106,9 @@ def _default_phrase_state(bars: int) -> dict[int, PhraseState]:
 def _default_bass_pattern(bars: int) -> tuple[PlanNote, ...]:
     notes: list[PlanNote] = []
     for bar in range(1, bars + 1):
-        notes.append(PlanNote(bar=bar, step=0, pitch=ROOT_NOTE, velocity=108))
+        notes.append(PlanNote(bar=bar, step=0, pitch=ROOT_NOTE, velocity=108, duration_steps=8))
         if bar % 2 == 1:
-            notes.append(PlanNote(bar=bar, step=8, pitch=ROOT_NOTE, velocity=96))
+            notes.append(PlanNote(bar=bar, step=8, pitch=ROOT_NOTE, velocity=96, duration_steps=4))
     return tuple(notes)
 
 
