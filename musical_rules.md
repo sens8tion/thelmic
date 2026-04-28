@@ -47,6 +47,362 @@ stable bed → call introduces tension → response answers → silence thins �
 **[HARD]** The phrase plan is the planner's authority. Generators are renderers,
 not independent composers.
 
+**[HARD]** Musical rules do not define UI rendering behaviour. Grid drawing,
+lane visibility, colours, overlays, and browser controls belong to the UI layer
+and architecture notes, not to this document.
+
+---
+
+## Phrase Boundaries, Sub-Phrases, and Transformers
+
+### Core hierarchy
+
+**[HARD]** Musical time is organised by this hierarchy:
+
+```
+drop
+  -> phrase
+      -> sub-phrase
+          -> bar
+              -> beat
+                  -> step
+```
+
+### Phrase boundary
+
+**[HARD]** A phrase begins at a drop.
+
+```
+drop = phrase start
+```
+
+**[HARD]** A phrase ends immediately before the next drop.
+
+```
+phrase = drop -> next drop
+```
+
+**[HARD]** The pre-drop build and pre-drop silence are part of the phrase. They
+are not separate phrases.
+
+### Phrase mode lock
+
+**[HARD]** Each phrase has one active foreground mode:
+
+```
+HOOK_MODE
+or
+CALL_RESPONSE_MODE
+```
+
+**[HARD]** Phrase mode is structural. It may be planned before a drop, but it
+commits only at the drop.
+
+```
+active_phrase_mode must not change between drops
+```
+
+### Phrase-level structural identity
+
+**[HARD]** The following are phrase-level structural properties:
+
+```
+phrase_mode
+active_archetype
+call_response_leader
+bassline_pattern_identity
+sub_pattern_identity
+hook_identity
+dominant_instrument plan
+drop journey role
+```
+
+**[HARD]** Phrase-level structural properties may change instantaneously only
+at phrase start / drop. Between drops, they may only evolve progressively.
+
+### Sub-phrase boundaries
+
+**[PREF]** A phrase may contain sub-phrases. Sub-phrases should align to bar
+multiples:
+
+```
+4 bars
+8 bars
+16 bars
+```
+
+**[PREF]** Default sub-phrase length is 8 bars.
+
+**[ARCH]** Use 4-bar sub-phrases for Chaos / high-pressure movement.
+
+**[ARCH]** Use 16-bar sub-phrases for Nott / spacious movement.
+
+### Sub-phrase purpose
+
+**[PREF]** Sub-phrases allow controlled internal development without changing
+phrase identity.
+
+**[PREF]** Allowed at sub-phrase boundaries:
+
+```
+density shift
+sparsity change
+bassline variation
+hat pattern variation
+snare emphasis change
+hook repeat
+call/response variation
+dominant instrument emphasis shift
+pressure increase/decrease
+signature transformer activation
+```
+
+**[HARD]** Not allowed at sub-phrase boundaries:
+
+```
+phrase mode switch
+instant archetype snap
+complete hook replacement
+complete bassline replacement
+call_response_leader replacement
+drop commit
+```
+
+### Transformer sub-phrase role
+
+**[PREF]** A sub-phrase may act as a **transformer**.
+
+**[HARD]** A transformer progressively alters one or more musical signatures
+while preserving phrase continuity. It is not a drop and must not create an
+instantaneous structural knee.
+
+**[PREF]** A transformer may progressively alter:
+
+```
+hook signature
+call signature
+response signature
+bassline signature
+sub sustain/root emphasis
+beat-bed density/signature
+archetype bias
+sparsity profile
+dominant instrument emphasis
+```
+
+**[HARD]** A transformer must not instantly replace:
+
+```
+phrase mode
+active archetype
+hook identity
+call_response_leader
+bassline identity
+sub identity
+```
+
+Those are phrase-level structural changes and may snap only at a drop.
+
+**[PREF]** Transformer behaviour should operate as a ramp or morph:
+
+```
+source signature -> intermediate variations -> destination-leaning signature
+```
+
+Example:
+
+```
+hook A
+hook A'
+hook A''
+hook A leaning toward B
+```
+
+Not allowed outside a drop:
+
+```
+hook A -> hook B
+```
+
+### Transformer and archetype
+
+**[PREF]** A transformer may introduce archetype bias progressively.
+
+Allowed:
+
+```
+oak -> oak-with-chaos-bias -> stronger chaos bias
+```
+
+**[HARD]** Not allowed outside a drop:
+
+```
+oak -> chaos
+```
+
+The archetype snap remains drop-only.
+
+### Transformer and call/response
+
+**[PREF]** In `CALL_RESPONSE_MODE`, a transformer may:
+
+```
+increase response intensity
+alter response spacing
+change call density
+move call/response emphasis
+change timbral weight
+```
+
+**[HARD]** It must not:
+
+```
+replace call_response_leader
+turn call/response into hook mode
+```
+
+### Transformer and hook
+
+**[PREF]** In `HOOK_MODE`, a transformer may:
+
+```
+fragment hook
+shorten hook
+rhythmically displace hook repeat
+alter velocity contour
+prepare hook mutation
+```
+
+**[HARD]** It must not:
+
+```
+loop hook continuously
+replace hook identity outside drop
+activate call/response mode
+```
+
+### Hook placement
+
+**[HARD]** In `HOOK_MODE`, hook appears at phrase start.
+
+**[PREF]** In `HOOK_MODE`, hook may appear once more before the drop.
+
+**[PREF]** The second hook should normally land at a sub-phrase boundary or in
+the final sub-phrase before pre-drop silence.
+
+**[HARD]** The hook should not loop continuously through the phrase.
+
+**[PREF]** A transformer may prepare the second hook by progressively altering
+fragments, but must not turn the hook into continuous filler.
+
+### Call/response placement
+
+**[HARD]** In `CALL_RESPONSE_MODE`, call/response operates across sub-phrases.
+
+**[PREF]** Each sub-phrase may contain:
+
+```
+call region
+response region
+space / reset region
+```
+
+**[HARD]** The leader must remain stable across the whole phrase.
+
+**[PREF]** Variation is allowed at sub-phrase boundaries, but leader change is
+not.
+
+**[PREF]** A transformer may progressively reshape call/response behaviour
+inside the phrase.
+
+### Bass/sub phrase rules
+
+**[HARD]** Bassline and sub identity are phrase-level.
+
+**[HARD]** At phrase start/drop, bassline pattern and sub pattern may commit.
+
+**[PREF]** At sub-phrase boundaries, bassline may vary and sub may change
+sustain/root slowly.
+
+**[PREF]** Between sub-phrase boundaries, bass/sub should remain stable.
+
+**[PREF]** A transformer may progressively alter bass/sub emphasis, but must
+not replace identity outside drop.
+
+### Beat bed phrase rules
+
+**[PREF]** Kick/snare/hat should provide continuity across the phrase.
+
+**[PREF]** Sub-phrase boundaries may introduce:
+
+```
+hat density change
+snare ghosting change
+kick variation
+fill/reset
+```
+
+**[HARD]** The beat bed should not collapse unless sparsity explicitly requires
+it.
+
+**[PREF]** A transformer may progressively alter beat-bed density or emphasis.
+
+### Pre-drop placement
+
+**[HARD]** The final part of a phrase may become:
+
+```
+build
+then silence/survivor
+then drop
+```
+
+**[HARD]** Pre-drop silence is still inside the phrase.
+
+**[HARD]** The survivor signal carries timing until the next phrase begins at
+the drop.
+
+**[PREF]** A transformer may contribute to the build, but survivor/silence
+rules remain Phase 10-governed.
+
+### Diagnostics
+
+**[PREF]** Phrase and transformer diagnostics should expose:
+
+```
+phrase_id
+phrase_start_step
+phrase_end_step
+phrase_mode
+active_archetype
+sub_phrase_index
+sub_phrase_start_step
+sub_phrase_length_bars
+sub_phrase_role
+transformer_active
+transformer_target
+transformer_source_signature
+transformer_destination_bias
+transformer_progress
+phrase_rules
+sub_phrase_rules
+boundary_type
+```
+
+### Acceptance criteria
+
+**Acceptance:**
+- Every phrase starts at a drop.
+- Phrase mode stays locked until the next drop.
+- Sub-phrases align to 4/8/16 bar boundaries.
+- Sub-phrases allow development without identity reset.
+- Transformer sub-phrases can progressively alter signatures.
+- Transformers do not create instantaneous structural knees.
+- Hooks appear only at phrase start and optionally once later in hook mode.
+- Call/response leader does not change within phrase.
+- Bass/sub identities commit at phrase start/drop.
+- Archetype snap remains drop-only.
+
 ---
 
 ## Phrase Modes
