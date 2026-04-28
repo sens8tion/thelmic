@@ -128,6 +128,8 @@ def _should_suppress_supporting(
     stats: SupportLayerStats,
 ) -> bool:
     """Return True (and update stats) if this supporting event must be removed."""
+    if event.role == "survivor" and bool(getattr(event, "survives_silence", False)):
+        return False
 
     # 1. Silence check — should be 0 after Phase 6; counted for audit completeness.
     if _is_in_silence(event, plan, plan_bars):

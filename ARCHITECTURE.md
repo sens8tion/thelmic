@@ -25,7 +25,7 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 7 Pression compliance | complete | Pression is audited as control-only and cannot create note events |
 | Phase 8 supporting layer compliance | complete | support layers are checked against bass/hook authority and silence |
 | Phase 9 drop construction | complete | `DROP_RELOCK` enforces bass/kick/hook relock and pre-drop contrast |
-| Phase 10 survivor signal and atomic drop commit | design only | continuous timing carrier plus hard drop transaction boundary; not implemented |
+| Phase 10 survivor signal and atomic drop commit | complete | survivor events pass through pre-drop silence and drop commit state guards the relock boundary |
 | Phase 11 slider dynamics and structural trajectory | design only | slider as target/force inside a constrained dynamical system; not implemented |
 
 Current rule:
@@ -295,10 +295,10 @@ Implemented in `thelmic/drop_enforcer.py`.
 
 ## Phase 10-11 Design Specification
 
-This section is design only. It preserves the next system concepts so they can
-be implemented later from explicit implementation instructions.
+Phase 10 is implemented. Phase 11 remains design only and must not be
+implemented without explicit implementation instructions.
 
-Do not use this section as permission to:
+Do not use the Phase 11 material in this section as permission to:
 
 - Write or modify production code.
 - Add new files, modules, or classes.
@@ -393,6 +393,22 @@ Phase 10 outcome:
 
 - Continuous time perception from the survivor signal.
 - Discrete structural reset from the drop commit.
+
+Implemented Phase 10 contract:
+
+- Survivor events use `role="survivor"`, `layer="survivor"`,
+  `survives_silence=True`, and `structural_authority=False`.
+- Silence enforcement preserves only explicitly marked survivor events.
+- Supporting-layer compliance also preserves explicitly marked survivors.
+- Survivor ticks are high-register, low-velocity, and generated only before the
+  drop step.
+- `DropCommitState` tracks `active_state`, `pending_state`, and committed drop
+  ids so each drop boundary commits once.
+- Drop relock still asserts kick, bass, and hook at `DROP_STEP`.
+- Phase 10 diagnostics include `drop_step`, `survivor_events_before_drop`,
+  `normal_events_suppressed_before_drop`, `commit_applied`,
+  `active_state_before`, `pending_state`, `active_state_after`,
+  `kick_at_drop`, and `bass_at_drop`.
 
 ### Phase 11: Slider Dynamics And Structural Trajectory
 
@@ -795,7 +811,7 @@ thelmic/
 | 7 | Pressure integration as CC/control only - done |
 | 8 | Supporting layer compliance - done |
 | 9 | Drop construction aligned to bass, hook, and silence - done |
-| 10 | Survivor signal and atomic drop commit - design only, not implemented |
+| 10 | Survivor signal and atomic drop commit - done |
 | 11 | Slider dynamics and structural trajectory - design only, not implemented |
 
 ---

@@ -46,7 +46,7 @@ from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
 )
-from thelmic.drop_enforcer import enforce_drop_relock
+from thelmic.drop_enforcer import DropCommitState, add_survivor_signal, enforce_drop_relock
 from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.transition_engine import TransitionEngine
@@ -127,6 +127,7 @@ _pression_cc_map:   dict[str, tuple[int, int]] = dict(DEFAULT_CC_MAP)
 _pression_bar_idx:  int = 0   # current bar being played (0-based within bank)
 _active_pression_mapping_lane: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
+_drop_commit_state = DropCommitState()
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
     "next_bank_prepare_ms": 0.0,
@@ -261,9 +262,12 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     appended_bass  = _append_events_to_bank(bank, bass_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
+    survivor_stats = add_survivor_signal(bank, _phrase_plan)
     syntax_stats   = enforce_phrase_syntax(bank, _phrase_plan)
     support_stats  = enforce_supporting_layer_compliance(bank, _phrase_plan)
-    drop_stats     = enforce_drop_relock(bank, _phrase_plan)
+    drop_stats     = enforce_drop_relock(
+        bank, _phrase_plan, _drop_commit_state, syntax_stats
+    )
     _runtime_debug["bass_events_per_bar"]      = _events_per_bar(appended_bass)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
@@ -272,6 +276,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug.update(syntax_stats)
     _runtime_debug.update(support_stats)
     _runtime_debug.update(drop_stats)
+    _runtime_debug.update(survivor_stats)
     _runtime_debug["call_response_mode"]       = mode.value
     _runtime_debug["call_response_bars_in_mode"] = _cr_state.bars_in_mode
     _runtime_debug["bass_source"] = "phrase_plan"
@@ -389,7 +394,7 @@ async def _apply_and_preview() -> None:
     The playback loop will regenerate those same phrases at the next quantize
     boundary so MIDI catches up.
     """
-    global _current_bank
+    global _current_bank, _drop_commit_state
     if not (_generator and _engine and _current_bank):
         await _broadcast({"type": "state", **_force_state_dict()})
         return
@@ -404,6 +409,8 @@ async def _apply_and_preview() -> None:
         current_phrase_idx = -1   # not playing — regenerate everything
 
     with _preview_lock:
+        if not _playing:
+            _drop_commit_state = DropCommitState()
         overrides = _generation_curve_overrides()
         fresh = _generator.generate(
             _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
@@ -459,6 +466,8 @@ def _bank_events_list(bank) -> list:
             "active": getattr(event, "active", True),
             "velocity": event.velocity,
             "emphasis": round(event.emphasis, 2),
+            "survives_silence": getattr(event, "survives_silence", False),
+            "structural_authority": getattr(event, "structural_authority", True),
             "deformation": {k: round(v, 3) for k, v in event.deformation.items()},
         })
     return events
@@ -974,7 +983,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _handle_message(msg: dict) -> None:
-    global _playing, _play_thread, _bpm, _active_pression_mapping_lane, _cr_state
+    global _playing, _play_thread, _bpm, _active_pression_mapping_lane, _cr_state, _drop_commit_state
 
     kind = msg.get("type")
 
@@ -998,6 +1007,7 @@ async def _handle_message(msg: dict) -> None:
         with _play_lock:
             if not _playing:
                 _playing = True
+                _drop_commit_state = DropCommitState()
                 _play_thread = threading.Thread(target=_playback_loop, daemon=True)
                 _play_thread.start()
         await _broadcast({"type": "state", **_force_state_dict()})
@@ -1005,6 +1015,7 @@ async def _handle_message(msg: dict) -> None:
     elif kind == "stop":
         _playing = False
         _cr_state = default_state()   # reset mode on stop
+        _drop_commit_state = DropCommitState()
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "pression_cc_map":

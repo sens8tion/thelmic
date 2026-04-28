@@ -45,6 +45,8 @@ class MIDIEvent:
     expected_weight: float
     should_resolve: bool
     active: bool = True
+    survives_silence: bool = False
+    structural_authority: bool = True
     deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
 
 

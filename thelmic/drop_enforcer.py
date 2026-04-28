@@ -38,7 +38,7 @@ this pass ensures they are present at the structurally required moment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from thelmic.bank_generator import Bank, MIDIEvent, KICK_NOTE
 from thelmic.phrase_plan import PhrasePlan, PhraseState
@@ -55,6 +55,10 @@ DROP_STEP: int = 4
 DROP_BASS_VELOCITY:  int = 110
 DROP_KICK_VELOCITY:  int = 115
 DROP_HOOK_VELOCITY:  int = 90
+SURVIVOR_NOTE: int = 84
+SURVIVOR_MAX_VELOCITY: int = 24
+SURVIVOR_MIN_VELOCITY: int = 5
+SURVIVOR_DURATION: float = 0.025
 
 # A supporting event is an "echo" if its velocity is below this fraction
 # of the authority event at the same step/pitch
@@ -72,15 +76,49 @@ class DropStats:
     drop_relock_events_adjusted: int = 0
     drop_missing_contrast:       int = 0
     drop_illegal_events_suppressed: int = 0
+    drop_step: int = DROP_STEP
+    survivor_events_before_drop: int = 0
+    normal_events_suppressed_before_drop: int = 0
+    commit_applied: int = 0
+    active_state_before: str = ""
+    pending_state: str = ""
+    active_state_after: str = ""
+    kick_at_drop: int = 0
+    bass_at_drop: int = 0
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, int | str]:
         return {
             "drop_regions_detected":           self.drop_regions_detected,
             "drop_relock_events_added":        self.drop_relock_events_added,
             "drop_relock_events_adjusted":     self.drop_relock_events_adjusted,
             "drop_missing_contrast":           self.drop_missing_contrast,
             "drop_illegal_events_suppressed":  self.drop_illegal_events_suppressed,
+            "drop_step":                       self.drop_step,
+            "survivor_events_before_drop":     self.survivor_events_before_drop,
+            "normal_events_suppressed_before_drop": self.normal_events_suppressed_before_drop,
+            "commit_applied":                  self.commit_applied,
+            "active_state_before":             self.active_state_before,
+            "pending_state":                   self.pending_state,
+            "active_state_after":              self.active_state_after,
+            "kick_at_drop":                    self.kick_at_drop,
+            "bass_at_drop":                    self.bass_at_drop,
         }
+
+
+@dataclass
+class DropCommitState:
+    active_state: str = "resolved_stable"
+    pending_state: str = "drop_relock"
+    committed_drop_ids: set[str] = field(default_factory=set)
+
+    def commit_once(self, drop_id: str) -> tuple[bool, str, str, str]:
+        before = self.active_state
+        pending = self.pending_state
+        if drop_id in self.committed_drop_ids:
+            return False, before, pending, self.active_state
+        self.active_state = self.pending_state
+        self.committed_drop_ids.add(drop_id)
+        return True, before, pending, self.active_state
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +203,111 @@ def _bar_density(bank: Bank, bar: int) -> int:
         for e in phrase.events
         if time_to_bar_step(e.time)[0] == bar
     )
+
+
+def _existing_event_keys(bank: Bank) -> set[tuple[str, str, str]]:
+    return {
+        (event.time, event.layer, event.role)
+        for phrase in bank.phrases
+        for event in phrase.events
+    }
+
+
+def _survivor_velocity(tightening_factor: float) -> int:
+    span = SURVIVOR_MAX_VELOCITY - SURVIVOR_MIN_VELOCITY
+    return max(
+        SURVIVOR_MIN_VELOCITY,
+        min(SURVIVOR_MAX_VELOCITY, int(SURVIVOR_MAX_VELOCITY - span * tightening_factor)),
+    )
+
+
+def _survivor_step_selected(index: int, tightening_factor: float) -> bool:
+    if tightening_factor < 0.50:
+        return index % 4 == 0
+    if tightening_factor < 0.80:
+        return index % 2 == 0
+    return True
+
+
+def _pre_drop_survivor_positions(
+    plan: PhrasePlan, drop_bar: int, plan_bars: int,
+) -> list[tuple[int, int]]:
+    positions: list[tuple[int, int]] = []
+    prev_bar = drop_bar - 1
+    if prev_bar >= 1:
+        prev_pbar = _plan_bar(prev_bar, plan_bars)
+        prev_muted = tuple(plan.silence_mask.muted_steps_by_bar.get(prev_pbar, ()))
+        if plan.phrase_state.get(prev_pbar) == PhraseState.HOLD_SILENCE or prev_muted:
+            positions.extend((prev_bar, step) for step in prev_muted)
+
+    pbar = _plan_bar(drop_bar, plan_bars)
+    drop_muted = tuple(
+        step for step in plan.silence_mask.muted_steps_by_bar.get(pbar, ())
+        if step < DROP_STEP
+    )
+    positions.extend((drop_bar, step) for step in drop_muted)
+    return sorted(set(positions))
+
+
+def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
+    """Add a low-amplitude timing carrier inside pre-drop silence windows.
+
+    Survivor events are explicitly marked so Phase 6 silence enforcement can
+    preserve them. They carry no structural authority and never replace kick,
+    bass, hook, or groove events.
+    """
+    stats = {
+        "survivor_events_before_drop": 0,
+        "survivor_drop_regions": 0,
+    }
+    plan_bars = _plan_bars(plan)
+    existing = _existing_event_keys(bank)
+    template = _source_template(bank)
+
+    bank_bars = {
+        time_to_bar_step(event.time)[0]
+        for phrase in bank.phrases
+        for event in phrase.events
+        if time_to_bar_step(event.time)[0] >= 1
+    }
+    for drop_bar in sorted(bank_bars | set(range(1, plan_bars + 1))):
+        pbar = _plan_bar(drop_bar, plan_bars)
+        if plan.phrase_state.get(pbar) != PhraseState.DROP_RELOCK:
+            continue
+        positions = _pre_drop_survivor_positions(plan, drop_bar, plan_bars)
+        if not positions:
+            continue
+        stats["survivor_drop_regions"] += 1
+        total = max(1, len(positions) - 1)
+        for idx, (bar, step) in enumerate(positions):
+            tightening = idx / total
+            if not _survivor_step_selected(idx, tightening):
+                continue
+            time_str = _step_to_time(bar, step)
+            key = (time_str, "survivor", "survivor")
+            if key in existing:
+                continue
+            survivor = replace(
+                template,
+                time=time_str,
+                note=SURVIVOR_NOTE,
+                velocity=_survivor_velocity(tightening),
+                duration=SURVIVOR_DURATION,
+                layer="survivor",
+                role="survivor",
+                emphasis=0.05,
+                openness=0.0,
+                expected_weight=0.0,
+                should_resolve=False,
+                active=True,
+                survives_silence=True,
+                structural_authority=False,
+                deformation={"survivor_signal": round(tightening, 3)},
+            )
+            _append_to_bar(bank, survivor)
+            existing.add(key)
+            stats["survivor_events_before_drop"] += 1
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +484,12 @@ def _suppress_illegal_events(
 # Public API
 # ---------------------------------------------------------------------------
 
-def enforce_drop_relock(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
+def enforce_drop_relock(
+    bank: Bank,
+    plan: PhrasePlan,
+    commit_state: DropCommitState | None = None,
+    syntax_stats: dict | None = None,
+) -> dict[str, int | str]:
     """Enforce DROP_RELOCK construction and compliance.
 
     Must be called AFTER all Phase 3-8 passes have completed.
@@ -357,6 +505,12 @@ def enforce_drop_relock(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
     planned bass/hook identity at the structurally required step.
     """
     stats = DropStats()
+    if syntax_stats:
+        stats.normal_events_suppressed_before_drop = int(
+            syntax_stats.get("events_blocked_by_silence", 0)
+        )
+    if commit_state is None:
+        commit_state = DropCommitState()
     plan_bars = _plan_bars(plan)
 
     # Collect bars actually present in the bank, then add any bars that map
@@ -379,6 +533,15 @@ def enforce_drop_relock(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
             continue
 
         stats.drop_regions_detected += 1
+        committed, before, pending, after = commit_state.commit_once(
+            f"{bank.bank_index}:{bar}:{DROP_STEP}"
+        )
+        if stats.active_state_before == "":
+            stats.active_state_before = before
+            stats.pending_state = pending
+        if committed:
+            stats.commit_applied += 1
+        stats.active_state_after = after
 
         # Illegal event suppression runs first (before we add new events)
         _suppress_illegal_events(bank, plan, bar, plan_bars, stats)
@@ -390,6 +553,11 @@ def enforce_drop_relock(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
         _ensure_bass_at_drop(bank, plan, bar, bar_events, stats)
         _ensure_kick_at_drop(bank, bar, bar_events, stats)
         _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
+        refreshed = _events_for_bar(bank, bar)
+        if _has_layer_at_step(refreshed, bar, DROP_STEP, "kick"):
+            stats.kick_at_drop += 1
+        if _has_layer_at_step(refreshed, bar, DROP_STEP, "bass"):
+            stats.bass_at_drop += 1
 
         # Pre-drop contrast check
         _check_pre_drop_contrast(bank, plan, bar, plan_bars, stats)
