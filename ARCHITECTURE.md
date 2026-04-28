@@ -25,6 +25,8 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 7 Pression compliance | complete | Pression is audited as control-only and cannot create note events |
 | Phase 8 supporting layer compliance | complete | support layers are checked against bass/hook authority and silence |
 | Phase 9 drop construction | complete | `DROP_RELOCK` enforces bass/kick/hook relock and pre-drop contrast |
+| Phase 10 survivor signal and atomic drop commit | design only | continuous timing carrier plus hard drop transaction boundary; not implemented |
+| Phase 11 slider dynamics and structural trajectory | design only | slider as target/force inside a constrained dynamical system; not implemented |
 
 Current rule:
 
@@ -288,6 +290,230 @@ Implemented contract:
 - It does not add density to fill natural silence.
 
 Implemented in `thelmic/drop_enforcer.py`.
+
+---
+
+## Phase 10-11 Design Specification
+
+This section is design only. It preserves the next system concepts so they can
+be implemented later from explicit implementation instructions.
+
+Do not use this section as permission to:
+
+- Write or modify production code.
+- Add new files, modules, or classes.
+- Refactor phases 1-9.
+- Attempt partial implementation.
+- Infer missing behaviour and fill gaps.
+- Merge these concepts into existing runtime logic.
+
+### Phase 10: Survivor Signal And Atomic Drop Commit
+
+Phase 10 introduces two coordinated behaviours:
+
+- A continuous timing carrier that survives silence.
+- A hard structural boundary at the drop.
+
+The intended result is:
+
+```text
+continuity of time + discontinuity of structure
+```
+
+### Survivor Signal
+
+Problem:
+
+- Full silence removes anticipation.
+- Any clearly audible signal weakens the drop.
+
+The survivor signal solves this by persisting through silence while encoding
+timing inevitability. It should become perceptually minimal near the drop.
+
+Characteristics:
+
+- Survives silence suppression.
+- Has no low-frequency energy.
+- Has no dominant transient.
+- Density increases toward the drop.
+- Amplitude decreases toward the drop.
+- Subdivision tightens toward the drop.
+
+Conceptual model:
+
+```python
+survivor_lane = {
+    "immune_to_silence": True,
+    "max_density": N,
+    "low_freq_allowed": False,
+    "transient_strength": "minimal",
+}
+```
+
+Control signal:
+
+```text
+tightening_factor in [0, 1]
+
+subdivision = f(tightening_factor)
+density     = f(tightening_factor)
+amplitude   = inverse_f(tightening_factor)
+```
+
+The survivor signal is not a musical layer. It is a timing/phase carrier and
+must never compete with kick or bass at the drop. Just before the drop, tension
+should be felt, but not clearly heard.
+
+### Atomic Drop Commit
+
+Drop must become a transaction boundary:
+
+```text
+pre-drop -> speculative / pending state
+drop     -> atomic commit
+post-drop -> new active structure
+```
+
+At the drop step:
+
+- Structural state switches instantly.
+- Kick, bass, hook, and groove re-anchor.
+- No residual pre-drop structure remains.
+
+Constraints:
+
+- No structural bleed before drop.
+- No lag after drop.
+- No continuous morphing of structure.
+
+Foreshadowing may exist only as an extremely low-magnitude hint. It must not
+affect timing, structural placement, or identity.
+
+Phase 10 outcome:
+
+- Continuous time perception from the survivor signal.
+- Discrete structural reset from the drop commit.
+
+### Phase 11: Slider Dynamics And Structural Trajectory
+
+Phase 11 transforms the slider from a static control parameter into a dynamic
+system that drives structural evolution over time.
+
+Core principles:
+
+- Slider is not a value. It is a target position within a constraint field
+  inside a dynamical system.
+- The system evolves even when the slider is static.
+- Slider movement defines a structural journey across time.
+
+Two behaviour layers:
+
+- Position as constraint: archetype region, allowable behaviour, and variation
+  limits.
+- Internal motion as continuous behaviour: micro-variation, phrase evolution,
+  and energy cycles.
+
+Each position defines a basin of valid musical states. The system may move
+inside the basin, but must not escape it.
+
+Internal motion layers:
+
+- Micro, fast: timing variation, velocity modulation, ghosting.
+- Phrase, medium: call/response reshaping, motif evolution, density changes.
+- Energy, slow: pressure cycles, anticipation waves, pseudo build/release.
+
+These layers must not alter archetype, break structural rules, or drift
+identity.
+
+### Slider Inertia
+
+Slider movement should feel physical:
+
+- It does not snap instantly.
+- It may glide, lag, or overshoot.
+- It responds to gesture speed.
+
+User input becomes force applied to the system, not command.
+
+### Trajectory Model
+
+Slider movement defines a structural journey across time.
+
+Inputs:
+
+- Start position.
+- End position.
+- Distance.
+- Movement speed.
+
+Outputs:
+
+- Number of drops.
+- Spacing of drops.
+- Magnitude of structural changes.
+- Energy progression.
+
+Distance carries meaning:
+
+- Short distance means subtle evolution, fine-grained changes, and multiple
+  small adjustments.
+- Long distance means major transformation, multiple structural stages, and
+  clear identity shifts.
+
+Multi-drop planning is conceptual only at this stage. Future drop roles may
+include transition, intensify, peak, and resolve, but these are not implemented.
+
+Structural discreteness rule:
+
+```text
+Structure changes only at drop boundaries.
+```
+
+Between drops, continuous modulation is allowed. At a drop, structural state may
+change.
+
+Velocity influence:
+
+- Fast movement means fewer, larger changes and aggressive transitions.
+- Slow movement means more, smaller changes and smoother evolution.
+
+Trajectory feeds pressure, anticipation, and drop triggering. The intended
+experience is:
+
+```text
+I set something in motion that is unfolding.
+```
+
+### Phase 10-11 Combined Model
+
+```text
+USER INPUT (slider gesture)
+        |
+TRAJECTORY (distance + velocity)
+        |
+CONSTRAINT FIELD (position basin)
+        |
+DYNAMIC SYSTEM (multi-timescale motion)
+        |
+SURVIVOR SIGNAL (continuous timing)
+        |
+DROP EVENTS (atomic commits)
+        |
+STRUCTURAL EVOLUTION (multi-stage)
+```
+
+Key insight:
+
+```text
+The system is a bounded dynamical system that emits structured musical events.
+```
+
+Future implementation constraints:
+
+- Survivor signal must be isolated from musical layers.
+- Drop commit must override all prior phases.
+- Trajectory must not bypass drop boundaries.
+- Slider inertia must not break the constraint basin.
 
 ---
 
@@ -569,7 +795,8 @@ thelmic/
 | 7 | Pressure integration as CC/control only - done |
 | 8 | Supporting layer compliance - done |
 | 9 | Drop construction aligned to bass, hook, and silence - done |
-| 10 | Validation and enforcement |
+| 10 | Survivor signal and atomic drop commit - design only, not implemented |
+| 11 | Slider dynamics and structural trajectory - design only, not implemented |
 
 ---
 
