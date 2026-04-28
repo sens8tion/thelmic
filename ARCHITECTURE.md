@@ -26,7 +26,7 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 8 supporting layer compliance | complete | support layers are checked against bass/hook authority and silence |
 | Phase 9 drop construction | complete | `DROP_RELOCK` enforces bass/kick/hook relock and pre-drop contrast |
 | Phase 10 survivor signal and atomic drop commit | complete | survivor events pass through pre-drop silence and drop commit state guards the relock boundary |
-| Phase 11 slider dynamics and structural trajectory | design only | slider as target/force inside a constrained dynamical system; not implemented |
+| Phase 11 slider dynamics and structural trajectory | complete | slider dynamics, trajectory, priority, and sparsity shape arrangement without bypassing drop boundaries |
 
 Current rule:
 
@@ -295,10 +295,9 @@ Implemented in `thelmic/drop_enforcer.py`.
 
 ## Phase 10-11 Design Specification
 
-Phase 10 is implemented. Phase 11 remains design only and must not be
-implemented without explicit implementation instructions.
+Phase 10 and Phase 11 are implemented.
 
-Do not use the Phase 11 material in this section as permission to:
+Do not use this section as permission to:
 
 - Write or modify production code.
 - Add new files, modules, or classes.
@@ -530,6 +529,21 @@ Future implementation constraints:
 - Drop commit must override all prior phases.
 - Trajectory must not bypass drop boundaries.
 - Slider inertia must not break the constraint basin.
+
+Implemented Phase 11 contract:
+
+- `thelmic/phase11.py` owns `SliderDynamics`, `TrajectoryPlan`, `Phase11State`,
+  instrument priority, and sparsity enforcement.
+- Slider input updates a target position; playback advances an inertial actual
+  position that drives `ForceEngine.set_landscape_position()`.
+- Static internal motion is periodic and bounded by the current constraint
+  basin; it is not a random walk and does not author archetype changes.
+- Trajectory planning derives drop roles from gesture distance and velocity.
+- Priority and sparsity run as an arrangement-shaping pass before Phase 10
+  relock, so mandatory drop kick/bass/hook authority can still be reasserted.
+- Diagnostics expose slider target, actual position, slider velocity,
+  trajectory state, drop plan, current drop index, drop role, dominant
+  instrument, sparsity mode/level, and priority/sparsity counters.
 
 ---
 
@@ -812,7 +826,7 @@ thelmic/
 | 8 | Supporting layer compliance - done |
 | 9 | Drop construction aligned to bass, hook, and silence - done |
 | 10 | Survivor signal and atomic drop commit - done |
-| 11 | Slider dynamics and structural trajectory - design only, not implemented |
+| 11 | Slider dynamics, structural trajectory, priority, and sparsity - done |
 
 ---
 

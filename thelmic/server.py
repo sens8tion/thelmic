@@ -49,6 +49,7 @@ from thelmic.stabs import (
 from thelmic.drop_enforcer import DropCommitState, add_survivor_signal, enforce_drop_relock
 from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
+from thelmic.phase11 import Phase11State, enforce_priority_and_sparsity
 from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
@@ -128,6 +129,7 @@ _pression_bar_idx:  int = 0   # current bar being played (0-based within bank)
 _active_pression_mapping_lane: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _drop_commit_state = DropCommitState()
+_phase11_state = Phase11State()
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
     "next_bank_prepare_ms": 0.0,
@@ -324,9 +326,12 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     survivor_trace["present_after_support_enforcer"] = _survivor_trace_present(
         bank, survivor_signature
     )
+    priority_stats = enforce_priority_and_sparsity(bank, _phrase_plan, _phase11_state)
     drop_stats     = enforce_drop_relock(
         bank, _phrase_plan, _drop_commit_state, syntax_stats
     )
+    if drop_stats.get("commit_applied", 0):
+        _phase11_state.mark_drop_committed()
     survivor_stats["survivor_ticks_in_final_output"] = _survivor_tick_count(bank)
     survivor_trace["present_after_drop_relock"] = _survivor_trace_present(
         bank, survivor_signature
@@ -352,6 +357,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug.update(planned_responses.stats)
     _runtime_debug.update(syntax_stats)
     _runtime_debug.update(support_stats)
+    _runtime_debug.update(priority_stats)
     _runtime_debug.update(drop_stats)
     _runtime_debug.update(survivor_stats)
     _runtime_debug["survivor_trace"] = survivor_trace
@@ -505,12 +511,14 @@ async def _apply_and_preview() -> None:
 
 
 def _init_engine() -> None:
-    global _engine, _transition_engine, _controls, _intent, _generator, _midi
+    global _engine, _transition_engine, _controls, _intent, _generator, _midi, _phase11_state
     _engine = ForceEngine(landscape_position=0.0)
     _transition_engine = TransitionEngine(_engine)
     _controls = Controls()
     _intent = IntentInput(_engine, _transition_engine)
     _generator = BankGenerator(controls=_controls)
+    _phase11_state = Phase11State()
+    _phase11_state.set_immediate(_engine.landscape_position)
     # MIDI init is deferred — no port selected yet
     _midi = None
 
@@ -594,6 +602,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
+        "phase11": _phase11_state.to_dict(),
         "active_pression_mapping_lane": _active_pression_mapping_lane,
         "call_response": {
             "mode": _cr_state.mode.value,
@@ -660,6 +669,7 @@ def _live_state_dict() -> dict:
         "bank_started_at": _bank_started_at_ms,
         "bank_duration_ms": round((16 * 4 * 60000) / _bpm, 1),
         "transition": _transition_engine.state_dict() if _transition_engine else {},
+        "phase11": _phase11_state.to_dict(),
         "pression_bar_idx": _pression_bar_idx,   # current bar, for UI cursor
         "active_pression_mapping_lane": _active_pression_mapping_lane,
         "phrase_plan": _phrase_plan.to_dict(),
@@ -853,6 +863,8 @@ def _playback_loop() -> None:
                 t0 = time.perf_counter()
                 if _transition_engine:
                     _transition_engine.advance(bars=1)
+                if _engine:
+                    _engine.set_landscape_position(_phase11_state.advance(bars=1))
                 transition_ms = (time.perf_counter() - t0) * 1000
 
                 # ── Curve advance + CC ──────────────────────────────────────
@@ -1062,7 +1074,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _handle_message(msg: dict) -> None:
-    global _playing, _play_thread, _bpm, _active_pression_mapping_lane, _cr_state, _drop_commit_state
+    global _playing, _play_thread, _bpm, _active_pression_mapping_lane, _cr_state, _drop_commit_state, _phase11_state
 
     kind = msg.get("type")
 
@@ -1073,10 +1085,12 @@ async def _handle_message(msg: dict) -> None:
             # Do NOT regenerate the preview bank here: force dimensions must
             # reflect current_position (advanced per bar), not the target.
             _intent.set_axis(value)
+            _phase11_state.set_target(value)
             await _broadcast({"type": "state", **_force_state_dict()})
         else:
             # Stopped: set position immediately and regenerate preview
             _intent.set_axis_immediate(value)
+            _phase11_state.set_immediate(value)
             await _apply_and_preview()
 
     elif kind == "play":
@@ -1087,6 +1101,7 @@ async def _handle_message(msg: dict) -> None:
             if not _playing:
                 _playing = True
                 _drop_commit_state = DropCommitState()
+                _phase11_state.set_immediate(_engine.landscape_position)
                 _play_thread = threading.Thread(target=_playback_loop, daemon=True)
                 _play_thread.start()
         await _broadcast({"type": "state", **_force_state_dict()})
@@ -1095,6 +1110,7 @@ async def _handle_message(msg: dict) -> None:
         _playing = False
         _cr_state = default_state()   # reset mode on stop
         _drop_commit_state = DropCommitState()
+        _phase11_state.set_immediate(_engine.landscape_position)
         await _broadcast({"type": "state", **_force_state_dict()})
 
     elif kind == "pression_cc_map":
