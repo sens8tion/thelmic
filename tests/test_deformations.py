@@ -75,12 +75,18 @@ class TestGhostInject:
 
 
 class TestPipeline:
-    def test_ghost_inject_active_under_instability(self):
+    def test_ghost_inject_active_under_behaviour_override(self):
         force = ForceState(instability=1.0, density=0.5)
         arch = select_archetype(0.5)
         anchors = Anchors(kick=arch.kick_anchors, snare=arch.snare_anchors, hat=arch.hat_anchors)
         blend = to_blend(arch)
-        _, named_maps = apply_deformations(blend, anchors, force, landscape_position=0.5)
+        _, named_maps = apply_deformations(
+            blend,
+            anchors,
+            force,
+            landscape_position=0.5,
+            curve_overrides={"ghost_inject": 1.0},
+        )
         assert "ghost_inject" in named_maps
         dmap = named_maps["ghost_inject"]
         assert any(v > 0 for v in dmap.kick) or any(v > 0 for v in dmap.snare)
@@ -94,7 +100,7 @@ class TestPipeline:
         # No deformations should have run — maps dict should be empty
         assert named_maps == {}
 
-    def test_curve_override_scales_instability(self):
+    def test_curve_override_drives_ghost_intensity_directly(self):
         force = ForceState(instability=0.5, density=0.5)
         arch = select_archetype(0.5, "two_step")
         anchors = Anchors(kick=arch.kick_anchors, snare=arch.snare_anchors, hat=arch.hat_anchors)
@@ -104,7 +110,18 @@ class TestPipeline:
             curve_overrides={"ghost_inject": 1.0},
         )
         dmap = named_maps["ghost_inject"]
-        assert max(dmap.kick) == pytest.approx(0.5)
+        assert max(dmap.kick) == pytest.approx(1.0)
+
+    def test_ghost_clustering_can_drive_ghost_inject(self):
+        force = ForceState(instability=0.0, density=0.5)
+        arch = select_archetype(0.5, "two_step")
+        anchors = Anchors(kick=arch.kick_anchors, snare=arch.snare_anchors, hat=arch.hat_anchors)
+        blend = to_blend(arch)
+        _, named_maps = apply_deformations(
+            blend, anchors, force, landscape_position=0.0,
+            curve_overrides={"ghost_inject": 0.0, "ghost_clustering": 0.8},
+        )
+        assert "ghost_inject" in named_maps
 
     def test_deformation_colours_exported(self):
         from thelmic.deformations import DEFORMATION_COLOURS

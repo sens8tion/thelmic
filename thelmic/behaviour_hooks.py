@@ -29,6 +29,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+from thelmic.behaviour_field import compute_behaviour_field
 from thelmic.force_engine import ForceState, _clamp
 from thelmic.transition_engine import Transition
 
@@ -129,13 +130,19 @@ def compute_behaviour_overrides(
         dict[str, float] ready to pass as curve_overrides= to
         BankGenerator.generate() / apply_deformations().
     """
-    # Start with hook values (only if a transition is active)
-    result: dict[str, float] = {}
-    if transition is not None and transition.active:
-        for key, hook_fn in _HOOKS:
-            value = hook_fn(transition, force)
-            if value > 0.0:
-                result[key] = value
+    behaviour = compute_behaviour_field(force, transition if transition and transition.active else None)
+    result: dict[str, float] = {
+        "ghost_inject": behaviour.ghost_intensity,
+        "ghost_clustering": behaviour.ghost_clustering,
+        "anchor_drop": behaviour.anchor_drop_prob,
+        "cc:0:74": behaviour.filter_target,
+        "gate_tightness": behaviour.gate_tightness,
+        "energy_level": behaviour.energy_level,
+        "accent_strength": behaviour.accent_strength,
+        "ghost_velocity": behaviour.ghost_velocity,
+        "anchor_velocity": behaviour.anchor_velocity,
+    }
+    result = {key: value for key, value in result.items() if value > 0.0}
 
     # Manual overrides win for their specific keys, leave others untouched
     result.update(manual_overrides)

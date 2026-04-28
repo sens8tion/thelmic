@@ -416,6 +416,25 @@
 
     .midi-status.connected { color: var(--oak); }
     .midi-status.error     { color: #a04040; }
+    .midi-channel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+      gap: 4px 8px;
+      color: var(--dim);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+    }
+    .midi-channel-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      padding: 3px 5px;
+      border-radius: 2px;
+    }
+    .midi-channel-item .layer { color: var(--text); }
+    .midi-channel-item .channel { color: var(--accent); }
 
     /* ── Sequencer ── */
     .seq-section {
@@ -619,11 +638,84 @@
       display: block;
     }
 
+    /* ── Pression dimensions ── */
+    .pression-section {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .pression-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pression-bar-label {
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+    }
+    .pression-lane {
+      display: grid;
+      grid-template-columns: 110px 1fr 36px 58px;
+      align-items: center;
+      gap: 8px;
+      height: 18px;
+    }
+    .pression-lane-name {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-align: right;
+      color: var(--dim);
+      text-transform: lowercase;
+    }
+    .pression-sparkline {
+      height: 18px;
+      position: relative;
+    }
+    .pression-sparkline canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .pression-value {
+      font-size: 10px;
+      text-align: right;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .pression-overlay-dot {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      height: 18px;
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .pression-map-btn {
+      height: 18px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--dim);
+      font-size: 9px;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .pression-map-btn.active {
+      color: var(--text);
+      border-color: var(--accent);
+      background: rgba(180, 220, 255, 0.12);
+    }
+
     /* ── Pressure curves ── */
     .curves-section {
       width: 100%;
       max-width: 640px;
-      display: flex;
+      display: none;
       flex-direction: column;
       gap: 10px;
       border-top: 1px solid var(--border);
@@ -791,12 +883,6 @@
     <h2>Controls</h2>
 
     <div class="control-row">
-      <label>groove lock</label>
-      <input type="range" id="ctrl-groove_lock" min="0" max="1000" value="800" step="1">
-      <div class="control-value" id="ctrlval-groove_lock">0.80</div>
-      <span class="force-rider" id="rider-groove_lock"></span>
-    </div>
-    <div class="control-row">
       <label>chaos limit</label>
       <input type="range" id="ctrl-chaos_limit" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-chaos_limit">1.00</div>
@@ -807,18 +893,6 @@
       <input type="range" id="ctrl-density_ceiling" min="0" max="1000" value="1000" step="1">
       <div class="control-value" id="ctrlval-density_ceiling">1.00</div>
       <span class="force-rider" id="rider-density_ceiling"></span>
-    </div>
-    <div class="control-row">
-      <label>variation rate</label>
-      <input type="range" id="ctrl-variation_rate" min="0" max="1000" value="500" step="1">
-      <div class="control-value" id="ctrlval-variation_rate">0.50</div>
-      <span class="force-rider" id="rider-variation_rate"></span>
-    </div>
-    <div class="control-row">
-      <label>kick dominance</label>
-      <input type="range" id="ctrl-kick_dominance" min="0" max="1000" value="700" step="1">
-      <div class="control-value" id="ctrlval-kick_dominance">0.70</div>
-      <span class="force-rider" id="rider-kick_dominance"></span>
     </div>
   </div>
 
@@ -873,6 +947,15 @@
   </div>
 
   <!-- Archetype lock -->
+  <!-- Pression Dimensions -->
+  <div class="pression-section" id="pression-section">
+    <div class="pression-header">
+      <h2 class="curves-heading">PRESSION DIMENSIONS</h2>
+      <span class="pression-bar-label" id="pression-bar-label">bar —</span>
+    </div>
+    <div id="pression-lanes"></div>
+  </div>
+
   <div class="archetype-section">
     <h2 class="seq-heading" style="border-top:none;padding-top:0">ARCHETYPE</h2>
     <div class="archetype-row">
@@ -901,6 +984,7 @@
       </select>
       <div class="midi-status" id="midi-cc-status">not connected</div>
     </div>
+    <div class="midi-channel-grid" id="midi-channel-grid"></div>
   </div>
 
   <!-- Transport -->
@@ -983,7 +1067,7 @@
     }
 
     // ── Controls ──
-    const controlKeys = ['groove_lock', 'chaos_limit', 'density_ceiling', 'variation_rate', 'kick_dominance'];
+    const controlKeys = ['chaos_limit', 'density_ceiling'];
     const controlThrottles = {};
 
     controlKeys.forEach(key => {
@@ -1068,10 +1152,11 @@
       document.getElementById('bank-count').textContent = `bank: ${bankSlot} / ${bankTotal}`;
 
       // Archetype lock
-      updateArchetypeDisplay(s.selected_archetype, s.archetype);
+      updateArchetypeDisplay(s.selected_archetype, s.active_archetype || s.archetype);
 
       // MIDI port status
       const midiStatus = document.getElementById('midi-status');
+      syncSelectValue('midi-port-select', s.midi_port || '');
       if (s.midi_port) {
         midiStatus.textContent = s.midi_port;
         midiStatus.className = 'midi-status connected';
@@ -1080,12 +1165,16 @@
         midiStatus.className = 'midi-status';
       }
       const midiCCStatus = document.getElementById('midi-cc-status');
+      syncSelectValue('midi-cc-port-select', s.midi_cc_port || '');
       if (s.midi_cc_port) {
         midiCCStatus.textContent = s.midi_cc_port;
         midiCCStatus.className = 'midi-status connected';
       } else {
         midiCCStatus.textContent = 'not connected';
         midiCCStatus.className = 'midi-status';
+      }
+      if (s.midi_layer_channels) {
+        renderMidiLayerChannels(s.midi_layer_channels);
       }
 
       // Playhead timing
@@ -1097,7 +1186,21 @@
 
       // Pressure curves
       stateReceivedAt = Date.now();
-      if (s.pressure_curves) {
+
+      // Pression dimensions — update current bar index every bar;
+      // only re-render static sparklines when full timeline arrives
+      if (s.pression_bar_idx !== undefined) {
+        _pressionCurrentBar = s.pression_bar_idx;
+      }
+      if (s.active_pression_mapping_lane !== undefined) {
+        _activePressionMappingLane = s.active_pression_mapping_lane;
+        updatePressionMappingButtons();
+      }
+      if (s.pression) {
+        renderPressionLanes(s.pression);
+      }
+
+      if (false && s.pressure_curves) {
         activeCurveTargets = s.pressure_curves.active_targets || {};
         curveCanvases = {};  // renderCurves will repopulate
         s.pressure_curves.curves.forEach(c => { curveProgressAtState[c.id] = c.progress; });
@@ -1127,6 +1230,18 @@
     }
 
     // ── MIDI ports ──
+    function syncSelectValue(id, value) {
+      const sel = document.getElementById(id);
+      if (!sel || document.activeElement === sel) return;
+      if (value && ![...sel.options].some(opt => opt.value === value)) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = value;
+        sel.appendChild(opt);
+      }
+      sel.value = value || '';
+    }
+
     async function refreshPorts() {
       try {
         const res = await fetch('/api/midi-ports');
@@ -1155,6 +1270,28 @@
     function selectMidiCCPort() {
       const val = document.getElementById('midi-cc-port-select').value;
       if (val) send({ type: 'midi_cc_port', value: val });
+    }
+
+    function renderMidiLayerChannels(channels) {
+      const grid = document.getElementById('midi-channel-grid');
+      if (!grid) return;
+      const order = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
+      grid.innerHTML = '';
+      order
+        .filter(layer => Object.prototype.hasOwnProperty.call(channels, layer))
+        .forEach(layer => {
+          const item = document.createElement('div');
+          item.className = 'midi-channel-item';
+          const name = document.createElement('span');
+          name.className = 'layer';
+          name.textContent = layer.replace(/_/g, ' ');
+          const ch = document.createElement('span');
+          ch.className = 'channel';
+          ch.textContent = `ch ${Number(channels[layer]) + 1}`;
+          item.appendChild(name);
+          item.appendChild(ch);
+          grid.appendChild(item);
+        });
     }
 
     // Load ports on connect
@@ -1213,7 +1350,18 @@
       anchor: '#c0a060',
       ghost:  '#444444',
       impact: '#e05050',
+      kick: '#b88a42',
+      snare: '#c0a060',
+      hat: '#7f8a8d',
+      anchor_withholding: '#202020',
+      bass: '#5aa05a',
+      stab: '#d48ad4',
+      hook: '#f0c85a',
+      bassline: '#4fb06a',
+      sub: '#3f6fb0',
     };
+    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
+    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1255,6 +1403,33 @@
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
     }
 
+    function roleLaneForEvent(event) {
+      const lane = event.layer || event.role || '';
+      if (INSTRUMENT_ROLES.includes(lane)) return lane;
+      return OVERLAY_ROLES.has(lane) ? lane : null;
+    }
+
+    function visualRoleForEvent(event) {
+      const deform = event.deformation || {};
+      if (event.active === false || deform.anchor_withholding) return 'anchor_withholding';
+      if (event.layer === 'bass' || event.role === 'bass') return 'bass';
+      if (event.layer === 'bassline' || event.role === 'bassline') return 'bassline';
+      if (event.layer === 'sub' || event.role === 'sub') return 'sub';
+      if (event.layer === 'stab' || event.role === 'stab') return 'stab';
+      if (event.layer === 'hook' || event.role === 'hook') return 'hook';
+      if (event.role === 'survivor') return event.layer || 'hat';
+      return event.role || event.layer || 'event';
+    }
+
+    function groupEventsByRole(events) {
+      const lanes = new Map();
+      INSTRUMENT_ROLES.forEach(role => {
+        const roleEvents = events.filter(event => roleLaneForEvent(event) === role);
+        if (roleEvents.length > 0) lanes.set(role, roleEvents);
+      });
+      return lanes;
+    }
+
     function playbackFraction() {
       if (!isPlaying || bankDurationMs <= 0) return 0;
       return Math.min(1, Math.max(0, (Date.now() - bankStartedAt) / bankDurationMs));
@@ -1287,8 +1462,8 @@
       document.getElementById('seq-bank-num').textContent = bankSlot ? `${bankSlot}/${bankTotal}` : '-';
 
       // Collect layers
-      const layers = [...new Set(events.map(e => e.layer))].sort();
-      if (layers.length === 0) {
+      const lanes = groupEventsByRole(events);
+      if (lanes.size === 0) {
         document.getElementById('seq-grid').innerHTML = '<div style="color:#444;font-size:11px;padding:8px 0">no events — press play</div>';
         document.getElementById('seq-legend').innerHTML = '';
         document.getElementById('deform-strips').innerHTML = '';
@@ -1297,13 +1472,16 @@
 
       // Build step maps per layer + per-name per-step intensity maps
       const stepMap = {};
-      layers.forEach(l => { stepMap[l] = new Array(TOTAL_STEPS).fill(null); });
+      lanes.forEach((_, role) => { stepMap[role] = new Array(TOTAL_STEPS).fill(null); });
       const deformByName = {};  // name → Float32Array(TOTAL_STEPS)
 
       events.forEach(e => {
         const step = timeToStep(e.time);
         if (step < 0 || step >= TOTAL_STEPS) return;
-        stepMap[e.layer][step] = e;
+        const laneRole = roleLaneForEvent(e);
+        if (!laneRole) return;
+        if (!stepMap[laneRole]) stepMap[laneRole] = new Array(TOTAL_STEPS).fill(null);
+        stepMap[laneRole][step] = e;
         const deformDict = e.deformation;
         if (deformDict && typeof deformDict === 'object') {
           for (const [name, intensity] of Object.entries(deformDict)) {
@@ -1313,105 +1491,145 @@
         }
       });
 
-      // Deformation strips — one row per active deformation type
+      // Deformation strips — update in-place when names haven't changed
       const stripsWrap = document.getElementById('deform-strips');
-      stripsWrap.innerHTML = '';
-      for (const [name, intensities] of Object.entries(deformByName)) {
-        const colour = deformationColours[name] || '#50a0dc';
-        const rgb = hexToRgb(colour);
+      const deformKeys = Object.keys(deformByName).sort().join(',');
 
-        const row = document.createElement('div');
-        row.className = 'deform-strip-row';
-
-        const label = document.createElement('div');
-        label.className = 'deform-strip-label';
-        label.textContent = name.replace(/_/g, ' ');
-        label.style.color = colour;
-        row.appendChild(label);
-
-        const strip = document.createElement('div');
-        strip.className = 'deform-strip';
-        for (let s = 0; s < RENDER_STEPS; s++) {
-          const cell = document.createElement('div');
-          cell.className = 'deform-cell';
-          const sourceStep = s % TOTAL_STEPS;
-          const d = intensities[sourceStep];
-          cell.dataset.step = sourceStep;
-          cell.dataset.renderStep = s;
-          cell.dataset.deformName = name;
+      if (stripsWrap.dataset.deformKeys === deformKeys) {
+        // Same deformations — update intensities in-place
+        stripsWrap.querySelectorAll('.deform-cell').forEach(cell => {
+          const name = cell.dataset.deformName;
+          const sourceStep = parseInt(cell.dataset.step);
+          const intensities = deformByName[name];
+          const d = intensities ? intensities[sourceStep] : 0;
           cell.dataset.baseIntensity = d;
-          if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-          else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
           if (d > 0) {
+            const colour = deformationColours[name] || '#50a0dc';
+            const rgb = hexToRgb(colour);
             const alpha = 0.15 + d * 0.85;
             cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
+          } else {
+            cell.style.background = '';
           }
-          strip.appendChild(cell);
+        });
+      } else {
+        // Deformation set changed — full rebuild
+        stripsWrap.dataset.deformKeys = deformKeys;
+        stripsWrap.innerHTML = '';
+        for (const [name, intensities] of Object.entries(deformByName)) {
+          const colour = deformationColours[name] || '#50a0dc';
+          const rgb = hexToRgb(colour);
+          const row = document.createElement('div');
+          row.className = 'deform-strip-row';
+          const label = document.createElement('div');
+          label.className = 'deform-strip-label';
+          label.textContent = name.replace(/_/g, ' ');
+          label.style.color = colour;
+          row.appendChild(label);
+          const strip = document.createElement('div');
+          strip.className = 'deform-strip';
+          for (let s = 0; s < RENDER_STEPS; s++) {
+            const cell = document.createElement('div');
+            cell.className = 'deform-cell';
+            const sourceStep = s % TOTAL_STEPS;
+            const d = intensities[sourceStep];
+            cell.dataset.step = sourceStep;
+            cell.dataset.renderStep = s;
+            cell.dataset.deformName = name;
+            cell.dataset.baseIntensity = d;
+            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
+            else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            if (d > 0) {
+              const alpha = 0.15 + d * 0.85;
+              cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
+            }
+            strip.appendChild(cell);
+          }
+          row.appendChild(strip);
+          stripsWrap.appendChild(row);
         }
-        row.appendChild(strip);
-        stripsWrap.appendChild(row);
       }
 
-      // Render lanes
+      // Render lanes — update in-place when structure is unchanged to avoid
+      // the full DOM rebuild that causes the visual flutter.
       const grid = document.getElementById('seq-grid');
-      grid.innerHTML = '';
-      layers.forEach(layer => {
-        const lane = document.createElement('div');
-        lane.className = 'seq-lane';
+      const laneKeys = [...lanes.keys()].join(',');
 
-        const label = document.createElement('div');
-        label.className = 'seq-lane-label';
-        label.textContent = layer;
-        lane.appendChild(label);
-
-        const row = document.createElement('div');
-        row.className = 'seq-lane-row';
-
-        for (let s = 0; s < RENDER_STEPS; s++) {
-          const cell = document.createElement('div');
-          cell.className = 'seq-cell';
-          const sourceStep = s % TOTAL_STEPS;
-          cell.dataset.step = sourceStep;
-          cell.dataset.renderStep = s;
-          cell.dataset.layer = layer;
-          if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-          else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
-
-          const ev = stepMap[layer][sourceStep];
-          if (ev) {
-            const baseColour = ROLE_COLOURS[ev.role] || '#888';
-            const dom = dominantDeform(ev.deformation);
-            const colour = dom
-              ? blendTowardsHex(baseColour, dom.colour, dom.intensity)
-              : baseColour;
-            cell.style.background = colour;
-            const alpha = 0.4 + ev.emphasis * 0.6;
-            cell.style.opacity = alpha.toFixed(2);
-            const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
-            cell.title = `${ev.role} vel:${ev.velocity} deform:${deformDesc}`;
-            // Store data for live curve colour updates in animation loop
-            cell.dataset.step      = sourceStep;
-            cell.dataset.role      = ev.role;
-            cell.dataset.emphasis  = ev.emphasis;
-            cell.dataset.baseColour = ROLE_COLOURS[ev.role] || '#888';
-            cell.dataset.deform    = JSON.stringify(ev.deformation || {});
-          } else {
-            cell.dataset.role = '';
-            cell.dataset.emphasis = '0.2';
-            cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
-            cell.dataset.deform = '{}';
-          }
-          row.appendChild(cell);
+      function _paintCell(cell, role, sourceStep, stepMap) {
+        const ev = stepMap[role] ? stepMap[role][sourceStep] : null;
+        if (ev) {
+          const visualRole = visualRoleForEvent(ev);
+          const baseColour = ROLE_COLOURS[visualRole] || ROLE_COLOURS[role] || '#888';
+          const dom = dominantDeform(ev.deformation);
+          const colour = dom ? blendTowardsHex(baseColour, dom.colour, dom.intensity) : baseColour;
+          cell.style.background = colour;
+          cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
+          cell.dataset.role      = visualRole;
+          cell.dataset.emphasis  = ev.emphasis;
+          cell.dataset.baseColour = baseColour;
+          cell.dataset.deform    = JSON.stringify(ev.deformation || {});
+          const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} deform:${deformDesc}`;
+        } else {
+          cell.style.background = '';
+          cell.style.opacity    = '';
+          cell.dataset.role     = '';
+          cell.dataset.emphasis = '0.2';
+          cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
+          cell.dataset.deform   = '{}';
+          cell.title = '';
         }
-        lane.appendChild(row);
-        grid.appendChild(lane);
-      });
+      }
+
+      if (grid.dataset.laneKeys === laneKeys) {
+        // Same lane structure — update cell properties in-place, no DOM rebuild
+        grid.querySelectorAll('.seq-lane').forEach(laneEl => {
+          const role = laneEl.dataset.role;
+          if (!role) return;
+          laneEl.querySelectorAll('.seq-cell').forEach(cell => {
+            _paintCell(cell, role, parseInt(cell.dataset.step), stepMap);
+          });
+        });
+      } else {
+        // Lane structure changed — full rebuild
+        grid.dataset.laneKeys = laneKeys;
+        grid.innerHTML = '';
+        lanes.forEach((roleEvents, role) => {
+          const lane = document.createElement('div');
+          lane.className = 'seq-lane';
+          lane.dataset.role = role;
+
+          const label = document.createElement('div');
+          label.className = 'seq-lane-label';
+          label.textContent = role.replace(/_/g, ' ');
+          lane.appendChild(label);
+
+          const row = document.createElement('div');
+          row.className = 'seq-lane-row';
+
+          for (let s = 0; s < RENDER_STEPS; s++) {
+            const cell = document.createElement('div');
+            cell.className = 'seq-cell';
+            const sourceStep = s % TOTAL_STEPS;
+            cell.dataset.step      = sourceStep;
+            cell.dataset.renderStep = s;
+            cell.dataset.layer     = role;
+            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
+            else if (sourceStep % STEPS === 0)  cell.classList.add('bar-start');
+            _paintCell(cell, role, sourceStep, stepMap);
+            row.appendChild(cell);
+          }
+          lane.appendChild(row);
+          grid.appendChild(lane);
+        });
+      }
 
       // Legend — roles + one entry per active deformation type
       const legend = document.getElementById('seq-legend');
       legend.innerHTML = '';
+      const renderedRoles = [...lanes.keys()];
       const legendItems = [
-        ...Object.entries(ROLE_COLOURS).map(([role, colour]) => ({ label: role, colour })),
+        ...renderedRoles.map(role => ({ label: role.replace(/_/g, ' '), colour: ROLE_COLOURS[role] || '#888' })),
         ...Object.entries(deformByName).map(([name]) => ({
           label: name.replace(/_/g, ' '),
           colour: deformationColours[name] || '#50a0dc',
@@ -1788,6 +2006,188 @@
     let bankDurationMs = 0;   // total bank duration in ms
     let latestBankCount = 0;
 
+    // ── Pression Dimensions ──────────────────────────────────────────────
+    let _pressionTimeline = [];     // list[{dim: [int×16], overlays: [...]}]
+    let _pressionColours  = {};     // {dim: colour}
+    let _pressionCurrent  = {};     // {dim: int} current bar peak
+    let _pressionCurrentBar = 0;
+    let _activePressionMappingLane = null;
+    let _pressionCanvases = {};     // {dim: {canvas, ctx}}
+    let _pressionHistory = {};      // {dim: recorded int values}
+    let _pressionLastStep = null;
+
+    const OVERLAY_COLOURS = {
+      call_start:        '#6090c0',
+      response_start:    '#c060a0',
+      landing:           '#e0a040',
+      role_flip:         '#50a050',
+      riser:             '#7a50c0',
+      silence_gap:       '#4a7a9a',
+      drop:              '#c05050',
+    };
+
+    function renderPressionLanes(pression) {
+      if (!pression) return;
+      _pressionTimeline   = pression.timeline || [];
+      _pressionColours    = pression.colours  || {};
+      _pressionCurrent    = pression.current  || {};
+      _pressionCurrentBar = pression.current_bar || 0;
+      _activePressionMappingLane = pression.active_mapping_lane || null;
+
+      const container = document.getElementById('pression-lanes');
+      if (!container) return;
+
+      const dims = Object.keys(_pressionColours);
+      if (container.dataset.dims !== dims.join(',')) {
+        container.innerHTML = '';
+        _pressionCanvases = {};
+        dims.forEach(dim => {
+          const lane = document.createElement('div');
+          lane.className = 'pression-lane';
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'pression-lane-name';
+          nameEl.textContent = dim.replace(/_/g, ' ');
+          nameEl.style.color = _pressionColours[dim] || '#666';
+
+          const sparkWrap = document.createElement('div');
+          sparkWrap.className = 'pression-sparkline';
+          const canvas = document.createElement('canvas');
+          sparkWrap.appendChild(canvas);
+
+          const valEl = document.createElement('div');
+          valEl.className = 'pression-value';
+          valEl.id = `pv-${dim}`;
+          valEl.textContent = '  0';
+
+          const mapBtn = document.createElement('button');
+          mapBtn.className = 'pression-map-btn';
+          mapBtn.type = 'button';
+          mapBtn.onclick = () => togglePressionMapping(dim);
+
+          lane.appendChild(nameEl);
+          lane.appendChild(sparkWrap);
+          lane.appendChild(valEl);
+          lane.appendChild(mapBtn);
+          container.appendChild(lane);
+          _pressionCanvases[dim] = { canvas, sparkWrap, valEl, mapBtn };
+          _pressionHistory[dim] = _pressionHistory[dim] || [];
+        });
+        container.dataset.dims = dims.join(',');
+      }
+
+      // Redraw static layer (step data) — cursor is drawn in animation loop
+      updatePressionMappingButtons();
+      dims.forEach(dim => drawPressionHistory(dim));
+    }
+
+    function togglePressionMapping(dim) {
+      const next = _activePressionMappingLane === dim ? null : dim;
+      _activePressionMappingLane = next;
+      updatePressionMappingButtons();
+      send({ type: 'pression_mapping_lane', value: next });
+    }
+
+    function updatePressionMappingButtons() {
+      Object.entries(_pressionCanvases).forEach(([dim, entry]) => {
+        const btn = entry.mapBtn;
+        if (!btn) return;
+        const active = _activePressionMappingLane === dim;
+        btn.textContent = active ? 'Mapping' : 'Map';
+        btn.classList.toggle('active', active);
+        btn.title = active
+          ? 'Turn off Pression CC mapping for this lane'
+          : 'Map only this Pression CC';
+      });
+    }
+
+    // 256 total columns: 16 bars × 16 steps each
+    const PRESSION_TOTAL_STEPS = 256;
+    const PRESSION_PREVIEW_STEPS = 32;
+    const PRESSION_PLAYHEAD_FRACTION = 0.76;
+
+    function _currentStepInBank() {
+      // Compute current absolute step in bank (0–255) from wall clock.
+      // Same reference as bankStartedAt / bankDurationMs used by the playhead.
+      if (!isPlaying || bankDurationMs <= 0) return _pressionCurrentBar * 16;
+      const elapsed = Date.now() - bankStartedAt;
+      const msPerStep = bankDurationMs / PRESSION_TOTAL_STEPS;
+      return Math.min(PRESSION_TOTAL_STEPS - 1, Math.floor(elapsed / msPerStep));
+    }
+
+    function _pressionValueAtStep(dim, currentStep) {
+      const step = Math.max(0, Math.min(PRESSION_TOTAL_STEPS - 1, currentStep));
+      const bi = Math.floor(step / 16);
+      const si = step % 16;
+      const barData = _pressionTimeline[bi] || {};
+      const vals = barData[dim] || [];
+      return vals[si] || 0;
+    }
+
+    function drawPressionHistory(dim) {
+      // Draw recorded history left of a fixed playhead, plus read-only future preview.
+      const entry = _pressionCanvases[dim];
+      if (!entry) return;
+      const { canvas, sparkWrap, valEl } = entry;
+
+      const W = sparkWrap.offsetWidth || 256;
+      const H = 18;
+      canvas.width  = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      const colour = _pressionColours[dim] || '#50a0dc';
+      const history = _pressionHistory[dim] || [];
+      const currentStep = _pressionLastStep ?? _currentStepInBank();
+      const playheadX = Math.floor(W * PRESSION_PLAYHEAD_FRACTION);
+      const historySteps = Math.max(1, Math.floor(PRESSION_TOTAL_STEPS * PRESSION_PLAYHEAD_FRACTION));
+      const previewSteps = PRESSION_PREVIEW_STEPS;
+      const historyStepW = playheadX / historySteps;
+      const previewW = Math.max(1, W - playheadX);
+      const previewStepW = previewW / Math.max(1, previewSteps);
+
+      ctx.clearRect(0, 0, W, H);
+
+      if (history.length > 0) {
+        const visible = history.slice(-historySteps);
+        const pad = Math.max(0, historySteps - visible.length);
+
+        visible.forEach((val, idx) => {
+          const h = (val / 127) * H;
+          const x = (pad + idx) * historyStepW;
+          ctx.fillStyle = colour + 'a0';
+          ctx.fillRect(x, H - h, Math.max(1, historyStepW - 0.5), h);
+        });
+      }
+
+      for (let i = 0; i < previewSteps; i++) {
+        const val = _pressionValueAtStep(dim, currentStep + i);
+        const h = (val / 127) * H;
+        const x = playheadX + i * previewStepW;
+        ctx.fillStyle = colour + '55';
+        ctx.fillRect(x, H - h, Math.max(1, previewStepW - 0.5), h);
+      }
+
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fillRect(playheadX, 0, 1, H);
+
+      if (valEl) {
+        valEl.textContent = String(_pressionValueAtStep(dim, currentStep)).padStart(3, ' ');
+      }
+    }
+
+    function recordPressionStep(currentStep) {
+      if (!isPlaying || currentStep === _pressionLastStep) return;
+      _pressionLastStep = currentStep;
+      Object.keys(_pressionCanvases).forEach(dim => {
+        const history = _pressionHistory[dim] || [];
+        history.push(_pressionValueAtStep(dim, currentStep));
+        if (history.length > PRESSION_TOTAL_STEPS) {
+          history.splice(0, history.length - PRESSION_TOTAL_STEPS);
+        }
+        _pressionHistory[dim] = history;
+      });
+    }
+
     function animatePlayhead() {
       const el = document.getElementById('playhead');
       if (el && isPlaying && bankDurationMs > 0) {
@@ -1797,6 +2197,21 @@
       } else if (el) {
         applyRollingViewport();
         el.style.display = 'none';
+      }
+
+      // Pression cursor — animate at step resolution using wall clock
+      if (Object.keys(_pressionCanvases).length > 0) {
+        const currentStep = _currentStepInBank();
+        recordPressionStep(currentStep);
+        Object.keys(_pressionCanvases).forEach(dim => {
+          drawPressionHistory(dim);
+        });
+        const lbl = document.getElementById('pression-bar-label');
+        if (lbl) {
+          const bar = Math.floor(currentStep / 16) + 1;
+          const step = currentStep % 16;
+          lbl.textContent = `bar ${bar}  step ${step + 1}`;
+        }
       }
 
       // Animate transition graph playhead

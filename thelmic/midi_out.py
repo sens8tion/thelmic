@@ -14,7 +14,25 @@ LAYER_CHANNELS: dict[str, int] = {
     "kick":  0,
     "snare": 1,
     "hat":   2,
+    "bass":  3,
+    "stab":  4,
+    "hook":  5,
+    "bassline": 7,
+    "sub":   8,
 }
+
+
+def is_grid_midi_event(event) -> bool:
+    """Return True when a final grid event should emit a MIDI note.
+
+    The rendered bank/grid is the final note bus. MIDI scheduling must not use
+    any hidden event source or alternate musical state.
+    """
+    return (
+        getattr(event, "active", True)
+        and getattr(event, "velocity", 0) > 0
+        and getattr(event, "layer", "") in LAYER_CHANNELS
+    )
 
 
 def list_output_ports() -> list[str]:
@@ -46,6 +64,8 @@ class MIDIOut:
         self._midiout = rtmidi.MidiOut()
         self._port_open = False
         self._port_name: Optional[str] = None
+        self.last_send_ms: float = 0.0
+        self.last_cleanup_ms: float = 0.0
         self._open_port(port_name)
 
     def _open_port(self, port_name: Optional[str]) -> None:
@@ -97,47 +117,84 @@ class MIDIOut:
         bar_in_phrase: int,
         bpm: float,
         bank_start: float,
+        pression_bar=None,        # Optional[PressionBar] — step-level CC values
+        pression_cc_map=None,     # Optional[dict[str, tuple[int,int]]]
+        pression_cc_port=None,    # Optional[MIDIOut] — separate port for pression CCs
     ) -> float:
         """Play one bar from a phrase, blocking until the bar ends.
 
-        bar_in_phrase: 0-indexed bar within the phrase (0..BARS_PER_PHRASE-1).
-        bank_start:    perf_counter time the bank began.
+        bar_in_phrase:    0-indexed bar within the phrase (0..BARS_PER_PHRASE-1).
+        bank_start:       perf_counter time the bank began.
+        pression_bar:     PressionBar with 16-step CC values per dimension.
+        pression_cc_map:  {dimension: (channel, cc_num)} mapping.
+        pression_cc_port: MIDIOut to use for pression CCs (may differ from self).
+
+        Pression CCs are injected into the same sorted timeline as note events,
+        so they fire at exactly the right step position — same clock as notes.
 
         Returns the expected bar-end time (= bank_start + bar_end_tick * spt).
         """
         seconds_per_tick = 60.0 / (bpm * TICKS_PER_BEAT)
         ticks_per_bar    = TICKS_PER_BEAT * BEATS_PER_BAR
+        ticks_per_step   = ticks_per_bar // 16   # 6 ticks per 16th note
 
         abs_bar_idx    = phrase.phrase_index * BARS_PER_PHRASE + bar_in_phrase
         bar_start_tick = abs_bar_idx * ticks_per_bar
         bar_end_tick   = bar_start_tick + ticks_per_bar
+        bar_end_s      = bar_end_tick * seconds_per_tick
 
+        # ── Note events ──────────────────────────────────────────────────────
+        # action ∈ {"on", "off"}: send to self (notes port)
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_tick = event_to_abs_tick(event.time)
             if bar_start_tick <= t_tick < bar_end_tick:
                 t_on  = t_tick * seconds_per_tick
-                t_off = t_on + event.duration
+                t_off = min(t_on + event.duration, bar_end_s)
                 ch    = LAYER_CHANNELS.get(event.layer, 0)
                 timeline.append((t_on,  "on",  ch, event.note, event.velocity))
                 timeline.append((t_off, "off", ch, event.note, 0))
 
+        # ── Pression CC events ────────────────────────────────────────────────
+        # action = "cc": send to pression_cc_port (separate CC port)
+        if pression_bar is not None and pression_cc_map and pression_cc_port:
+            from thelmic.pression import DIMENSION_NAMES
+            for step in range(16):
+                step_tick = bar_start_tick + step * ticks_per_step
+                t_step    = step_tick * seconds_per_tick
+                for dim in DIMENSION_NAMES:
+                    ch_cc = pression_cc_map.get(dim)
+                    if ch_cc is None:
+                        continue
+                    ch, cc_num = ch_cc
+                    vals = getattr(pression_bar, dim, None)
+                    if vals and step < len(vals):
+                        timeline.append((t_step, "cc", ch, cc_num, vals[step]))
+
         timeline.sort(key=lambda x: x[0])
 
-        for t_rel, action, ch, note, vel in timeline:
+        # ── Playback loop ─────────────────────────────────────────────────────
+        send_ms = 0.0
+        for t_rel, action, ch, note_or_cc, vel_or_val in timeline:
             target_time = bank_start + t_rel
             now = time.perf_counter()
             if target_time > now:
                 time.sleep(target_time - now)
+            t_send = time.perf_counter()
             if action == "on":
-                self.send_note_on(ch, note, vel)
-            else:
-                self.send_note_off(ch, note)
+                self.send_note_on(ch, note_or_cc, vel_or_val)
+            elif action == "off":
+                self.send_note_off(ch, note_or_cc)
+            elif action == "cc" and pression_cc_port is not None:
+                pression_cc_port.send_cc(ch, note_or_cc, vel_or_val / 127.0)
+            send_ms += (time.perf_counter() - t_send) * 1000
+        self.last_send_ms = round(send_ms, 3)
 
         bar_end_abs = bank_start + bar_end_tick * seconds_per_tick
         remaining   = bar_end_abs - time.perf_counter()
+        self.last_cleanup_ms = 0.0
         if remaining > 0:
             time.sleep(remaining)
 
@@ -175,7 +232,7 @@ class MIDIOut:
         # Build a flat sorted timeline of (abs_time_s, action, ch, note, vel)
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in bank.all_events():
-            if event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration
@@ -228,7 +285,7 @@ class MIDIOut:
 
         timeline: list[tuple[float, str, int, int, int]] = []
         for event in phrase.events:
-            if event.velocity == 0:
+            if not is_grid_midi_event(event):
                 continue
             t_on  = event_to_abs_tick(event.time) * seconds_per_tick
             t_off = t_on + event.duration
