@@ -410,6 +410,9 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["call_response_leader"] = _phase11_state.call_response_leader
     _runtime_debug["pending_call_response_leader"] = _phase11_state.pending_call_response_leader
     _runtime_debug["leader_committed_at_drop"] = _phase11_state.leader_committed_at_drop
+    _runtime_debug["phrase_mode"] = _phase11_state.phrase_mode.value
+    _runtime_debug["pending_phrase_mode"] = _phase11_state.pending_phrase_mode.value
+    _runtime_debug["phrase_mode_committed_at_drop"] = _phase11_state.phrase_mode_committed_at_drop
     _runtime_debug["build_length_bars"] = _phase11_state.build_length_bars
     _runtime_debug["silence_length_bars"] = _phase11_state.silence_length_bars
     _runtime_debug["bass_source"] = "phrase_plan"
@@ -595,6 +598,80 @@ def _open_midi_cc_port(port_name: Optional[str]) -> str:
     return _midi_cc.port_name
 
 
+def _phrase_metadata_list() -> list:
+    """Generate phrase-level structural metadata for the UI overlay.
+
+    One entry per phrase (4 phrases per bank).  Data comes from generator
+    state, not inferred by the UI — the UI renders what the generator emits.
+    """
+    from thelmic.bank_generator import BARS_PER_PHRASE, PHRASES_PER_BANK
+    STEPS_PER_BAR = 16
+
+    mode       = _phase11_state.phrase_mode.value
+    archetype  = _active_archetype_name or "—"
+    drop_role  = getattr(_phase11_state.trajectory, "drop_role", None) or "stable"
+    dom_inst   = _phase11_state.dominant_instrument
+    sp_mode    = _phase11_state.sparsity_mode.value
+    sp_level   = _phase11_state.sparsity_level
+    cr_leader  = _phase11_state.call_response_leader
+
+    # Shared rules across all phrases in this bank (all share the same committed mode)
+    rules: list[str] = []
+    if mode == "HOOK_MODE":
+        rules.append("hook-mode")
+    elif mode == "CALL_RESPONSE_MODE":
+        rules.append("call-response")
+        if cr_leader == "stab":
+            rules.append("stab-leads")
+        elif cr_leader:
+            rules.append(f"{cr_leader}-leads")
+
+    beat_bed = _runtime_debug.get("beat_bed_presence", {})
+    if beat_bed and all(beat_bed.values()):
+        rules.append("beat-bed")
+
+    if _runtime_debug.get("bassline_active", False):
+        rules.append("bassline")
+
+    if _runtime_debug.get("sub_active", False):
+        rules.append("sub-hold")
+
+    if sp_level > 0.15:
+        rules.append(f"sparsity-{sp_mode}")
+
+    if dom_inst:
+        rules.append(f"dominant-{dom_inst}")
+
+    if drop_role and drop_role not in ("none", "stable"):
+        rules.append(drop_role)
+
+    if _phase11_state.build_length_bars >= 12:
+        rules.append("long-build")
+
+    if _runtime_debug.get("survivor_events_final", 0) > 0:
+        rules.append("survivor")
+
+    metadata = []
+    for phrase_idx in range(PHRASES_PER_BANK):
+        start_step = phrase_idx * BARS_PER_PHRASE * STEPS_PER_BAR
+        end_step   = start_step + BARS_PER_PHRASE * STEPS_PER_BAR - 1
+        metadata.append({
+            "phrase_id":            f"ph{phrase_idx}",
+            "phrase_index":         phrase_idx,
+            "start_step":           start_step,
+            "end_step":             end_step,
+            "mode":                 mode,
+            "archetype":            archetype,
+            "drop_role":            drop_role,
+            "rules":                list(rules),
+            "dominant_instrument":  dom_inst,
+            "sparsity_mode":        sp_mode,
+            "sparsity_level":       round(sp_level, 2),
+            "call_response_leader": cr_leader,
+        })
+    return metadata
+
+
 def _bank_events_list(bank) -> list:
     if bank is None:
         return []
@@ -704,6 +781,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
     }
     if include_bank:
         d["bank_events"] = _bank_events_list(_current_bank)
+        d["phrase_metadata"] = _phrase_metadata_list()
     return d
 
 

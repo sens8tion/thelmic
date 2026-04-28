@@ -550,6 +550,78 @@
       border-left: 1px solid #555;
     }
 
+    /* ── Phrase overlay ── */
+    .phrase-overlay-wrap {
+      position: absolute;    /* out of flow — no layout artifact */
+      top: 0;
+      left: 0;
+      width: 800%;           /* same coordinate space as .seq-lane-row */
+      height: 0;
+      pointer-events: none;
+      z-index: 3;
+      overflow: visible;
+      will-change: transform;
+    }
+
+    .phrase-marker {
+      position: absolute;
+      top: 0;
+      height: 200px;     /* tall enough to span all visible lanes */
+      width: 0;
+      border-left: 2px solid rgba(180, 150, 60, 0.55);
+      overflow: visible;
+    }
+
+    .phrase-marker.mode-cr {
+      border-left-color: rgba(150, 100, 190, 0.45);
+    }
+
+    .phrase-label {
+      position: absolute;
+      top: 0;
+      left: 4px;
+      font-size: 8px;
+      white-space: nowrap;
+      color: #c0a060;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      background: rgba(0, 0, 0, 0.78);
+      padding: 1px 4px;
+      border-radius: 1px;
+      line-height: 1.4;
+    }
+
+    .phrase-marker.mode-cr .phrase-label {
+      color: #b080d0;
+    }
+
+    .phrase-badges {
+      position: absolute;
+      top: 15px;
+      left: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-width: 80px;
+    }
+
+    .phrase-badge {
+      font-size: 7px;
+      padding: 1px 3px;
+      border-radius: 1px;
+      background: rgba(20, 20, 20, 0.88);
+      color: #555;
+      white-space: nowrap;
+      border: 1px solid #2a2a2a;
+      line-height: 1.3;
+    }
+
+    .phrase-badge.mode-hook   { color: #d4a820; border-color: #4a380a; }
+    .phrase-badge.mode-cr     { color: #9060b8; border-color: #3a1a5a; }
+    .phrase-badge.tag-drop    { color: #c04040; border-color: #501010; }
+    .phrase-badge.tag-build   { color: #50a050; border-color: #1a4a1a; }
+    .phrase-badge.tag-rhythm  { color: #5080a0; border-color: #1a2a3a; }
+
     /* Role base colours — blended toward deformation colour in JS */
     .seq-cell.role-anchor  { background: #c0a060; }
     .seq-cell.role-ghost   { background: #444; }
@@ -903,6 +975,8 @@
     <div class="seq-scroll">
       <div class="seq-content" id="seq-content">
         <div class="playhead" id="playhead"></div>
+        <!-- Phrase structure overlay — boundary markers, mode labels, rule badges -->
+        <div class="phrase-overlay-wrap" id="phrase-overlay-wrap"></div>
         <!-- Deformation intensity strips — one row per active deformation type -->
         <div class="deform-strips-wrap" id="deform-strips"></div>
         <div class="seq-grid" id="seq-grid"></div>
@@ -1226,6 +1300,7 @@
       // Sequencer
       if (s.bank_events !== undefined) {
         renderSequencer(s.bank_events, bankSlot, bankTotal);
+        if (s.phrase_metadata !== undefined) renderPhraseOverlay(s.phrase_metadata);
       }
     }
 
@@ -1452,7 +1527,7 @@
     function applyRollingViewport() {
       const viewport = rollingViewport();
       const translatePercent = (viewport.renderStart / RENDER_STEPS) * 100;
-      document.querySelectorAll('.seq-lane-row, .deform-strip').forEach(row => {
+      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap').forEach(row => {
         row.style.transform = `translateX(-${translatePercent}%)`;
       });
       return viewport;
@@ -1648,6 +1723,80 @@
         legend.appendChild(item);
       });
       applyRollingViewport();
+    }
+
+    // ── Phrase overlay ──
+
+    let _phraseMetadata = [];
+
+    // Badge tag classification
+    function _badgeClass(rule) {
+      if (rule === 'hook-mode' || rule === 'hook-start' || rule === 'hook-repeat')
+        return 'mode-hook';
+      if (rule === 'call-response' || rule.endsWith('-leads'))
+        return 'mode-cr';
+      if (rule === 'survivor' || rule.includes('drop') || rule === 'intensify' || rule === 'peak')
+        return 'tag-drop';
+      if (rule.includes('build') || rule === 'resolve')
+        return 'tag-build';
+      if (rule === 'beat-bed' || rule === 'bassline' || rule === 'sub-hold')
+        return 'tag-rhythm';
+      return '';
+    }
+
+    function renderPhraseOverlay(phraseMeta) {
+      _phraseMetadata = phraseMeta || [];
+      const wrap = document.getElementById('phrase-overlay-wrap');
+      if (!wrap) return;
+      wrap.innerHTML = '';
+
+      if (!_phraseMetadata.length) return;
+
+      // Total render columns = 512 (TOTAL_STEPS × 2)
+      // seq-content width is set by the deform strips (800% of scroll container).
+      // A phrase boundary at render column C is at left = (C / 512) * 100% of seq-content.
+      const RENDER_COLS = 512;
+      const PHRASE_STEPS = 64;  // 4 bars × 16 steps
+
+      _phraseMetadata.forEach(meta => {
+        // Each phrase boundary appears twice (double-buffer render)
+        [meta.start_step, meta.start_step + 256].forEach(col => {
+          const marker = document.createElement('div');
+          marker.className = 'phrase-marker' + (meta.mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
+          marker.style.left = ((col / RENDER_COLS) * 100) + '%';
+
+          // Label: "HOOK · two_step · peak"
+          const parts = [];
+          if (meta.mode === 'HOOK_MODE') parts.push('HOOK');
+          else if (meta.mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
+          if (meta.archetype && meta.archetype !== '—')
+            parts.push(meta.archetype.replace(/_/g, '·'));
+          if (meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
+            parts.push(meta.drop_role);
+
+          const label = document.createElement('div');
+          label.className = 'phrase-label';
+          label.textContent = parts.join(' · ');
+          marker.appendChild(label);
+
+          // Badges (up to 5, deduped)
+          if (meta.rules && meta.rules.length > 0) {
+            const badgeWrap = document.createElement('div');
+            badgeWrap.className = 'phrase-badges';
+            meta.rules.slice(0, 5).forEach(rule => {
+              const b = document.createElement('div');
+              b.className = 'phrase-badge';
+              const cls = _badgeClass(rule);
+              if (cls) b.classList.add(cls);
+              b.textContent = rule;
+              badgeWrap.appendChild(b);
+            });
+            marker.appendChild(badgeWrap);
+          }
+
+          wrap.appendChild(marker);
+        });
+      });
     }
 
     // ── Pressure curves live state ──
