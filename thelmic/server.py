@@ -410,6 +410,9 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["call_response_leader"] = _phase11_state.call_response_leader
     _runtime_debug["pending_call_response_leader"] = _phase11_state.pending_call_response_leader
     _runtime_debug["leader_committed_at_drop"] = _phase11_state.leader_committed_at_drop
+    _runtime_debug["phrase_mode"] = _phase11_state.phrase_mode.value
+    _runtime_debug["pending_phrase_mode"] = _phase11_state.pending_phrase_mode.value
+    _runtime_debug["phrase_mode_committed_at_drop"] = _phase11_state.phrase_mode_committed_at_drop
     _runtime_debug["build_length_bars"] = _phase11_state.build_length_bars
     _runtime_debug["silence_length_bars"] = _phase11_state.silence_length_bars
     _runtime_debug["bass_source"] = "phrase_plan"

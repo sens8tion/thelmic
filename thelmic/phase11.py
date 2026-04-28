@@ -214,6 +214,24 @@ def plan_trajectory(start: float, end: float, velocity: float, duration: float) 
     )
 
 
+class PhraseMode(str, Enum):
+    """Within-phrase mode: hook and call/response are mutually exclusive.
+
+    A phrase is either hook-led (identity/melody forward) or call/response-led
+    (conversational/structural). Combining them causes masking.
+
+    HOOK_MODE:
+      hook is primary foreground; call/response is disabled or minimal.
+
+    CALL_RESPONSE_MODE:
+      stab or selected leader calls; hook is absent or heavily reduced.
+
+    Mode is selected/prepared anytime. It commits only at drop.
+    """
+    HOOK_MODE           = "HOOK_MODE"
+    CALL_RESPONSE_MODE  = "CALL_RESPONSE_MODE"
+
+
 @dataclass
 class Phase11State:
     slider: SliderDynamics = field(default_factory=SliderDynamics)
@@ -227,6 +245,10 @@ class Phase11State:
     leader_committed_at_drop: bool = False
     build_length_bars: int = 8
     silence_length_bars: int = 1
+    # Hook / CR mutual exclusivity
+    phrase_mode:         PhraseMode = PhraseMode.CALL_RESPONSE_MODE
+    pending_phrase_mode: PhraseMode = PhraseMode.CALL_RESPONSE_MODE
+    phrase_mode_committed_at_drop: bool = False
 
     def set_target(self, position: float) -> None:
         start = self.slider.actual_position
@@ -238,12 +260,14 @@ class Phase11State:
         self.trajectory = plan_trajectory(start, position, gesture_velocity, duration)
         self._update_arrangement_state()
         self._prepare_pending_call_response_leader()
+        self._prepare_pending_phrase_mode()
 
     def set_immediate(self, position: float) -> None:
         self.slider.set_immediate(position)
         self.trajectory = plan_trajectory(position, position, 0.0, 0.0)
         self._update_arrangement_state()
         self._prepare_pending_call_response_leader()
+        self._prepare_pending_phrase_mode()
 
     def advance(self, bars: float = 1.0) -> float:
         actual = self.slider.advance(bars)
@@ -285,25 +309,49 @@ class Phase11State:
                 self.trajectory.active = False
         self.call_response_leader = self.pending_call_response_leader
         self.leader_committed_at_drop = True
+        # Phrase mode commits at the same drop boundary.
+        self.phrase_mode = self.pending_phrase_mode
+        self.phrase_mode_committed_at_drop = True
         self._prepare_pending_call_response_leader()
+        self._prepare_pending_phrase_mode()
         self._update_arrangement_state()
 
-    def _prepare_pending_call_response_leader(self) -> None:
-        """Pick the next structural call/response leader.
+    @staticmethod
+    def _mix(a: int, b: int, c: int, d: int) -> int:
+        """LCG-style integer hash to distribute seeds away from round multiples."""
+        h = (a * 1664525 + b * 1013904223 + c * 22695477 + d * 6364136223846793005) & 0xFFFFFFFF
+        return h ^ (h >> 16)
 
-        Stab is intentionally dominant. The non-stab branch is deterministic
-        and rare so tests and playback remain repeatable while approximating
-        the requested 90/10 section split.
+    def _prepare_pending_phrase_mode(self) -> None:
+        """Pick the next phrase mode (HOOK_MODE or CALL_RESPONSE_MODE).
+
+        CALL_RESPONSE_MODE is the structural default (~80%).
+        HOOK_MODE appears when the hook needs foreground space (~20%).
         """
-        seed = int(self.slider.target_position * 1000)
-        seed += int(self.trajectory.distance * 1000)
-        seed += int(self.trajectory.velocity * 1000)
-        seed += self.trajectory.current_drop_index * 17
-        if seed % 10 != 0:
+        h = self._mix(
+            int(self.slider.target_position * 997),
+            int(self.trajectory.distance * 1009),
+            self.trajectory.current_drop_index * 13,
+            int(self.slider.actual_position * 1021),
+        )
+        if h % 5 == 0:   # ~20% hook mode
+            self.pending_phrase_mode = PhraseMode.HOOK_MODE
+        else:
+            self.pending_phrase_mode = PhraseMode.CALL_RESPONSE_MODE
+
+    def _prepare_pending_call_response_leader(self) -> None:
+        """Pick the next structural call/response leader (~90% stab)."""
+        h = self._mix(
+            int(self.slider.target_position * 997),
+            int(self.trajectory.distance * 1009),
+            int(self.trajectory.velocity * 1013),
+            self.trajectory.current_drop_index * 17,
+        )
+        if h % 10 != 0:   # ~90% stab
             self.pending_call_response_leader = "stab"
             return
         alternatives = CALL_RESPONSE_LEADERS[1:]
-        self.pending_call_response_leader = alternatives[(seed // 10) % len(alternatives)]
+        self.pending_call_response_leader = alternatives[(h // 10) % len(alternatives)]
 
     def _record_structural_change(self, change: StructuralChange) -> dict:
         entry = evaluate_structural_change(change)
@@ -348,6 +396,9 @@ class Phase11State:
             "call_response_leader": self.call_response_leader,
             "pending_call_response_leader": self.pending_call_response_leader,
             "leader_committed_at_drop": self.leader_committed_at_drop,
+            "phrase_mode": self.phrase_mode.value,
+            "pending_phrase_mode": self.pending_phrase_mode.value,
+            "phrase_mode_committed_at_drop": self.phrase_mode_committed_at_drop,
             "build_length_bars": self.build_length_bars,
             "silence_length_bars": self.silence_length_bars,
             "structural_mutations": list(self.structural_mutations),
