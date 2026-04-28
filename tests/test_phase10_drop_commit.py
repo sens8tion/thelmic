@@ -3,7 +3,9 @@ from dataclasses import replace
 from thelmic.bank_generator import Bank, MIDIEvent, Phrase
 from thelmic.drop_enforcer import (
     DROP_STEP,
+    SURVIVOR_LANE_PRIORITY,
     SURVIVOR_RENDER_LANE,
+    SURVIVOR_SECONDARY_LANE,
     DropCommitState,
     add_survivor_signal,
     enforce_drop_relock,
@@ -72,7 +74,7 @@ def test_survivor_events_are_marked_and_generated_before_drop():
 
     assert stats["survivor_events_before_drop"] > 0
     assert survivors
-    assert {event.layer for event in survivors} == {"survivor", SURVIVOR_RENDER_LANE}
+    assert {event.layer for event in survivors}.issuperset({"survivor", SURVIVOR_RENDER_LANE})
     assert all(event.survives_silence for event in survivors)
     assert all(not event.structural_authority for event in survivors)
     assert all(event.note >= 72 for event in survivors if event.layer == "survivor")
@@ -209,7 +211,7 @@ def test_survivor_reaches_final_output_while_normal_event_is_suppressed():
     enforce_drop_relock(bank, plan, syntax_stats=syntax_stats)
     final_survivors = [event for event in bank.all_events() if event.role == "survivor"]
     assert final_survivors
-    assert {event.layer for event in final_survivors} == {"survivor", SURVIVOR_RENDER_LANE}
+    assert {event.layer for event in final_survivors}.issuperset({"survivor", SURVIVOR_RENDER_LANE})
     assert all(event.structural_authority is False for event in final_survivors)
 
 
@@ -256,23 +258,53 @@ def test_survivor_spans_multiple_pre_drop_silence_windows():
     assert any(time.startswith("7.") for time in survivor_times)
 
 
-def test_survivor_renders_to_hat_lane_and_remains_subordinate():
+def test_survivor_renders_to_priority_lanes_and_remains_subordinate():
     plan = _drop_plan()
     bank = _bank(_event("2.2.0"))
 
     add_survivor_signal(bank, plan)
-    render_events = [
+    primary_events = [
         event for event in bank.all_events()
         if event.role == "survivor" and event.layer == SURVIVOR_RENDER_LANE
+    ]
+    secondary_events = [
+        event for event in bank.all_events()
+        if event.role == "survivor" and event.layer == SURVIVOR_SECONDARY_LANE
     ]
     diagnostic_events = [
         event for event in bank.all_events()
         if event.role == "survivor" and event.layer == "survivor"
     ]
 
-    assert render_events
+    assert primary_events
+    assert secondary_events
     assert diagnostic_events
-    assert {event.layer for event in render_events}.isdisjoint({"kick", "bass", "snare"})
+    render_events = primary_events + secondary_events
+    assert {event.layer for event in render_events}.isdisjoint({"kick", "bass"})
     assert all(0 < event.velocity <= 24 for event in render_events)
+    assert all(event.velocity <= 10 for event in secondary_events)
     assert all(event.velocity == 0 for event in diagnostic_events)
     assert all(event.structural_authority is False for event in render_events)
+
+
+def test_survivor_lane_priority_stack_is_stable():
+    assert SURVIVOR_LANE_PRIORITY == (
+        "hat", "ghost", "snare", "stab", "hook", "kick", "bass",
+    )
+    assert SURVIVOR_RENDER_LANE == "hat"
+    assert SURVIVOR_SECONDARY_LANE == "snare"
+
+
+def test_survivor_secondary_does_not_mimic_drop_downbeat():
+    plan = _drop_plan()
+    bank = _bank(_event("2.2.0"))
+
+    add_survivor_signal(bank, plan)
+    secondary_events = [
+        event for event in bank.all_events()
+        if event.role == "survivor" and event.layer == SURVIVOR_SECONDARY_LANE
+    ]
+
+    assert secondary_events
+    assert all(time_to_bar_step(event.time)[1] not in {0, DROP_STEP} for event in secondary_events)
+    assert all(time_to_bar_step(event.time)[1] < DROP_STEP or time_to_bar_step(event.time)[0] < 2 for event in secondary_events)

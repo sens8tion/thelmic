@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from thelmic.bank_generator import Bank, MIDIEvent, CLOSED_HAT_NOTE, KICK_NOTE
+from thelmic.bank_generator import Bank, MIDIEvent, CLOSED_HAT_NOTE, KICK_NOTE, SNARE_NOTE
 from thelmic.phrase_plan import PhrasePlan, PhraseState
 from thelmic.syntax_enforcer import time_to_bar_step, _plan_bar
 
@@ -58,9 +58,15 @@ DROP_HOOK_VELOCITY:  int = 90
 SURVIVOR_NOTE: int = 84
 SURVIVOR_RENDER_LANE: str = "hat"
 SURVIVOR_RENDER_NOTE: int = CLOSED_HAT_NOTE
+SURVIVOR_LANE_PRIORITY: tuple[str, ...] = (
+    "hat", "ghost", "snare", "stab", "hook", "kick", "bass",
+)
+SURVIVOR_SECONDARY_LANE: str = "snare"
+SURVIVOR_SECONDARY_NOTE: int = SNARE_NOTE
 SURVIVOR_MAX_VELOCITY: int = 24
 SURVIVOR_MIN_VELOCITY: int = 5
 SURVIVOR_DURATION: float = 0.025
+SURVIVOR_SECONDARY_START: float = 0.80
 
 # A supporting event is an "echo" if its velocity is below this fraction
 # of the authority event at the same step/pitch
@@ -223,6 +229,16 @@ def _survivor_velocity(tightening_factor: float) -> int:
     )
 
 
+def _survivor_render_specs(step: int, tightening_factor: float) -> tuple[tuple[str, int, float], ...]:
+    specs: list[tuple[str, int, float]] = [(SURVIVOR_RENDER_LANE, SURVIVOR_RENDER_NOTE, 1.0)]
+    if (
+        tightening_factor >= SURVIVOR_SECONDARY_START
+        and step not in {0, DROP_STEP}
+    ):
+        specs.append((SURVIVOR_SECONDARY_LANE, SURVIVOR_SECONDARY_NOTE, 0.45))
+    return tuple(specs)
+
+
 def _survivor_step_selected(index: int, tightening_factor: float) -> bool:
     if tightening_factor < 0.50:
         return index % 4 == 0
@@ -298,6 +314,8 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
         "silence_window_end": None,
         "drop_step": DROP_STEP,
         "survivor_render_lane": SURVIVOR_RENDER_LANE,
+        "survivor_render_lanes": [SURVIVOR_RENDER_LANE],
+        "survivor_lane_priority": list(SURVIVOR_LANE_PRIORITY),
         "survivor_windows": [],
     }
     plan_bars = _plan_bars(plan)
@@ -334,14 +352,15 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
             time_str = _step_to_time(bar, step)
             velocity = _survivor_velocity(tightening)
             emitted = 0
-            for layer, note in (
-                ("survivor", SURVIVOR_NOTE),
-                (SURVIVOR_RENDER_LANE, SURVIVOR_RENDER_NOTE),
+            render_specs = _survivor_render_specs(step, tightening)
+            for layer, note, multiplier in (
+                ("survivor", SURVIVOR_NOTE, 0.0),
+                *render_specs,
             ):
                 key = (time_str, layer, "survivor")
                 if key in existing:
                     continue
-                event_velocity = 0 if layer == "survivor" else velocity
+                event_velocity = 0 if layer == "survivor" else max(1, int(velocity * multiplier))
                 event = _survivor_event(
                     template, time_str, note, event_velocity, layer, tightening
                 )
@@ -349,6 +368,8 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
                 existing.add(key)
                 emitted += 1
                 stats["survivor_events_before_drop"] += 1
+                if layer != "survivor" and layer not in stats["survivor_render_lanes"]:
+                    stats["survivor_render_lanes"].append(layer)
             if emitted:
                 stats["survivor_ticks_generated"] += 1
     return stats
