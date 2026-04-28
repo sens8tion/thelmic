@@ -204,6 +204,10 @@ def _survivor_events(bank) -> list:
     ]
 
 
+def _survivor_tick_count(bank) -> int:
+    return len({event.time for event in _survivor_events(bank)})
+
+
 def _survivor_signature(event) -> tuple:
     return (
         event.time, event.layer, event.role, event.note,
@@ -312,6 +316,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         bank, survivor_signature
     )
     syntax_stats   = enforce_phrase_syntax(bank, _phrase_plan)
+    survivor_stats["survivor_ticks_after_suppression"] = _survivor_tick_count(bank)
     survivor_trace["present_after_silence_suppression"] = _survivor_trace_present(
         bank, survivor_signature
     )
@@ -322,6 +327,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     drop_stats     = enforce_drop_relock(
         bank, _phrase_plan, _drop_commit_state, syntax_stats
     )
+    survivor_stats["survivor_ticks_in_final_output"] = _survivor_tick_count(bank)
     survivor_trace["present_after_drop_relock"] = _survivor_trace_present(
         bank, survivor_signature
     )

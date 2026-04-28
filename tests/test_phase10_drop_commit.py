@@ -3,6 +3,7 @@ from dataclasses import replace
 from thelmic.bank_generator import Bank, MIDIEvent, Phrase
 from thelmic.drop_enforcer import (
     DROP_STEP,
+    SURVIVOR_RENDER_LANE,
     DropCommitState,
     add_survivor_signal,
     enforce_drop_relock,
@@ -71,10 +72,10 @@ def test_survivor_events_are_marked_and_generated_before_drop():
 
     assert stats["survivor_events_before_drop"] > 0
     assert survivors
-    assert all(event.layer == "survivor" for event in survivors)
+    assert {event.layer for event in survivors} == {"survivor", SURVIVOR_RENDER_LANE}
     assert all(event.survives_silence for event in survivors)
     assert all(not event.structural_authority for event in survivors)
-    assert all(event.note >= 72 for event in survivors)
+    assert all(event.note >= 72 for event in survivors if event.layer == "survivor")
     assert all(event.velocity <= 24 for event in survivors)
     assert all(time_to_bar_step(event.time)[0] <= 2 for event in survivors)
 
@@ -208,5 +209,70 @@ def test_survivor_reaches_final_output_while_normal_event_is_suppressed():
     enforce_drop_relock(bank, plan, syntax_stats=syntax_stats)
     final_survivors = [event for event in bank.all_events() if event.role == "survivor"]
     assert final_survivors
-    assert all(event.layer == "survivor" for event in final_survivors)
+    assert {event.layer for event in final_survivors} == {"survivor", SURVIVOR_RENDER_LANE}
     assert all(event.structural_authority is False for event in final_survivors)
+
+
+def test_survivor_spans_multiple_pre_drop_silence_windows():
+    plan = PhrasePlan(
+        bass_pattern=(PlanNote(bar=4, step=0, pitch=36), PlanNote(bar=8, step=0, pitch=36)),
+        hook_pattern=(PlanNote(bar=4, step=0, pitch=60), PlanNote(bar=8, step=0, pitch=60)),
+        phrase_state={
+            1: PhraseState.HOLD_SILENCE,
+            2: PhraseState.RESOLVED_STABLE,
+            3: PhraseState.HOLD_SILENCE,
+            4: PhraseState.DROP_RELOCK,
+            5: PhraseState.HOLD_SILENCE,
+            6: PhraseState.CALL_UNRESOLVED,
+            7: PhraseState.HOLD_SILENCE,
+            8: PhraseState.DROP_RELOCK,
+        },
+        call_slots={},
+        response_slots={},
+        silence_mask=SilenceMask({
+            1: tuple(range(16)),
+            3: tuple(range(16)),
+            4: tuple(range(0, DROP_STEP)),
+            5: tuple(range(16)),
+            6: tuple(range(8, 16)),
+            7: tuple(range(16)),
+            8: tuple(range(0, DROP_STEP)),
+        }),
+        pressure_curve={bar: 0.5 for bar in range(1, 9)},
+    )
+    bank = _bank(_event("4.2.0"), _event("8.2.0"))
+
+    stats = add_survivor_signal(bank, plan)
+    survivor_times = {event.time for event in bank.all_events() if event.role == "survivor"}
+
+    assert len(stats["survivor_windows"]) == 2
+    assert stats["survivor_windows"][0]["start"] == "1.0"
+    assert stats["survivor_windows"][0]["end"] == "4.3"
+    assert stats["survivor_windows"][1]["start"] == "5.0"
+    assert stats["survivor_windows"][1]["end"] == "8.3"
+    assert any(time.startswith("1.") for time in survivor_times)
+    assert any(time.startswith("3.") for time in survivor_times)
+    assert any(time.startswith("5.") for time in survivor_times)
+    assert any(time.startswith("7.") for time in survivor_times)
+
+
+def test_survivor_renders_to_hat_lane_and_remains_subordinate():
+    plan = _drop_plan()
+    bank = _bank(_event("2.2.0"))
+
+    add_survivor_signal(bank, plan)
+    render_events = [
+        event for event in bank.all_events()
+        if event.role == "survivor" and event.layer == SURVIVOR_RENDER_LANE
+    ]
+    diagnostic_events = [
+        event for event in bank.all_events()
+        if event.role == "survivor" and event.layer == "survivor"
+    ]
+
+    assert render_events
+    assert diagnostic_events
+    assert {event.layer for event in render_events}.isdisjoint({"kick", "bass", "snare"})
+    assert all(0 < event.velocity <= 24 for event in render_events)
+    assert all(event.velocity == 0 for event in diagnostic_events)
+    assert all(event.structural_authority is False for event in render_events)

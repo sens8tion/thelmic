@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from thelmic.bank_generator import Bank, MIDIEvent, KICK_NOTE
+from thelmic.bank_generator import Bank, MIDIEvent, CLOSED_HAT_NOTE, KICK_NOTE
 from thelmic.phrase_plan import PhrasePlan, PhraseState
 from thelmic.syntax_enforcer import time_to_bar_step, _plan_bar
 
@@ -56,6 +56,8 @@ DROP_BASS_VELOCITY:  int = 110
 DROP_KICK_VELOCITY:  int = 115
 DROP_HOOK_VELOCITY:  int = 90
 SURVIVOR_NOTE: int = 84
+SURVIVOR_RENDER_LANE: str = "hat"
+SURVIVOR_RENDER_NOTE: int = CLOSED_HAT_NOTE
 SURVIVOR_MAX_VELOCITY: int = 24
 SURVIVOR_MIN_VELOCITY: int = 5
 SURVIVOR_DURATION: float = 0.025
@@ -233,23 +235,55 @@ def _pre_drop_survivor_positions(
     plan: PhrasePlan, drop_bar: int, plan_bars: int,
 ) -> list[tuple[int, int]]:
     positions: list[tuple[int, int]] = []
-    prev_bar = drop_bar - 1
-    if prev_bar >= 1:
-        prev_pbar = _plan_bar(prev_bar, plan_bars)
-        prev_muted = tuple(plan.silence_mask.muted_steps_by_bar.get(prev_pbar, ()))
-        if plan.phrase_state.get(prev_pbar) == PhraseState.HOLD_SILENCE or prev_muted:
-            positions.extend((prev_bar, step) for step in prev_muted)
-
-    pbar = _plan_bar(drop_bar, plan_bars)
-    drop_muted = tuple(
-        step for step in plan.silence_mask.muted_steps_by_bar.get(pbar, ())
-        if step < DROP_STEP
-    )
-    positions.extend((drop_bar, step) for step in drop_muted)
+    drop_pbar = _plan_bar(drop_bar, plan_bars)
+    cycle_start = drop_bar - (drop_pbar - 1)
+    window_start = cycle_start
+    for bar in range(cycle_start, drop_bar):
+        if plan.phrase_state.get(_plan_bar(bar, plan_bars)) == PhraseState.DROP_RELOCK:
+            window_start = bar + 1
+    for bar in range(window_start, drop_bar + 1):
+        pbar = _plan_bar(bar, plan_bars)
+        for step in plan.silence_mask.muted_steps_by_bar.get(pbar, ()):
+            if bar < drop_bar or step < DROP_STEP:
+                positions.append((bar, step))
     return sorted(set(positions))
 
 
-def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
+def _position_label(position: tuple[int, int] | None) -> str | None:
+    if position is None:
+        return None
+    bar, step = position
+    return f"{bar}.{step}"
+
+
+def _survivor_event(
+    template: MIDIEvent,
+    time_str: str,
+    note: int,
+    velocity: int,
+    layer: str,
+    tightening: float,
+) -> MIDIEvent:
+    return replace(
+        template,
+        time=time_str,
+        note=note,
+        velocity=velocity,
+        duration=SURVIVOR_DURATION,
+        layer=layer,
+        role="survivor",
+        emphasis=0.05,
+        openness=0.0,
+        expected_weight=0.0,
+        should_resolve=False,
+        active=True,
+        survives_silence=True,
+        structural_authority=False,
+        deformation={"survivor_signal": round(tightening, 3)},
+    )
+
+
+def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
     """Add a low-amplitude timing carrier inside pre-drop silence windows.
 
     Survivor events are explicitly marked so Phase 6 silence enforcement can
@@ -259,6 +293,12 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
     stats = {
         "survivor_events_before_drop": 0,
         "survivor_drop_regions": 0,
+        "survivor_ticks_generated": 0,
+        "silence_window_start": None,
+        "silence_window_end": None,
+        "drop_step": DROP_STEP,
+        "survivor_render_lane": SURVIVOR_RENDER_LANE,
+        "survivor_windows": [],
     }
     plan_bars = _plan_bars(plan)
     existing = _existing_event_keys(bank)
@@ -278,35 +318,39 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict[str, int]:
         if not positions:
             continue
         stats["survivor_drop_regions"] += 1
+        stats["silence_window_start"] = stats["silence_window_start"] or _position_label(positions[0])
+        stats["silence_window_end"] = _position_label(positions[-1])
+        stats["survivor_windows"].append({
+            "start": _position_label(positions[0]),
+            "end": _position_label(positions[-1]),
+            "drop_step": DROP_STEP,
+            "drop_bar": drop_bar,
+        })
         total = max(1, len(positions) - 1)
         for idx, (bar, step) in enumerate(positions):
             tightening = idx / total
             if not _survivor_step_selected(idx, tightening):
                 continue
             time_str = _step_to_time(bar, step)
-            key = (time_str, "survivor", "survivor")
-            if key in existing:
-                continue
-            survivor = replace(
-                template,
-                time=time_str,
-                note=SURVIVOR_NOTE,
-                velocity=_survivor_velocity(tightening),
-                duration=SURVIVOR_DURATION,
-                layer="survivor",
-                role="survivor",
-                emphasis=0.05,
-                openness=0.0,
-                expected_weight=0.0,
-                should_resolve=False,
-                active=True,
-                survives_silence=True,
-                structural_authority=False,
-                deformation={"survivor_signal": round(tightening, 3)},
-            )
-            _append_to_bar(bank, survivor)
-            existing.add(key)
-            stats["survivor_events_before_drop"] += 1
+            velocity = _survivor_velocity(tightening)
+            emitted = 0
+            for layer, note in (
+                ("survivor", SURVIVOR_NOTE),
+                (SURVIVOR_RENDER_LANE, SURVIVOR_RENDER_NOTE),
+            ):
+                key = (time_str, layer, "survivor")
+                if key in existing:
+                    continue
+                event_velocity = 0 if layer == "survivor" else velocity
+                event = _survivor_event(
+                    template, time_str, note, event_velocity, layer, tightening
+                )
+                _append_to_bar(bank, event)
+                existing.add(key)
+                emitted += 1
+                stats["survivor_events_before_drop"] += 1
+            if emitted:
+                stats["survivor_ticks_generated"] += 1
     return stats
 
 
