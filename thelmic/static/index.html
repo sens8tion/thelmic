@@ -540,6 +540,11 @@
       border-right: 1px solid transparent;
     }
 
+    .seq-cell.no-midi {
+      filter: grayscale(0.75);
+      opacity: 0.35 !important;
+    }
+
     /* Bar dividers (every 16 steps) */
     .seq-cell.bar-start {
       border-left: 1px solid #333;
@@ -1735,19 +1740,26 @@
           const colour = dom ? blendTowardsHex(baseColour, dom.colour, dom.intensity) : baseColour;
           cell.style.background = colour;
           cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
+          cell.classList.toggle('no-midi', !ev.midi_send);
           cell.dataset.role      = visualRole;
           cell.dataset.emphasis  = ev.emphasis;
           cell.dataset.baseColour = baseColour;
           cell.dataset.deform    = JSON.stringify(ev.deformation || {});
+          cell.dataset.midiSend  = ev.midi_send ? 'true' : 'false';
+          cell.dataset.midiChannel = ev.midi_channel ?? '';
           const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
-          cell.title = `${role} ${visualRole} vel:${ev.velocity} deform:${deformDesc}`;
+          const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}`;
         } else {
+          cell.classList.remove('no-midi');
           cell.style.background = '';
           cell.style.opacity    = '';
           cell.dataset.role     = '';
           cell.dataset.emphasis = '0.2';
           cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
           cell.dataset.deform   = '{}';
+          cell.dataset.midiSend = 'false';
+          cell.dataset.midiChannel = '';
           cell.title = '';
         }
       }
