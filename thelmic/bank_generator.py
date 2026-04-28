@@ -87,7 +87,18 @@ class BankGenerator:
     def generate(
         self, force: ForceState, bank_index: int, landscape_position: float = 0.0,
         curve_overrides: dict[str, float] | None = None,
+        active_archetype: Optional[str] = None,
     ) -> Bank:
+        """Generate a Bank.
+
+        active_archetype: when provided, bypasses density-based archetype
+        selection and uses this name instead.  Used to lock archetype for
+        the duration of a bank so within-bank regeneration (quantize
+        boundaries) does not silently change the archetype mid-phrase.
+
+        active_archetype = None  →  select from density as normal (bank start)
+        active_archetype = name  →  use this name (within-bank regen / preview)
+        """
         effective = ForceState(
             anticipation=force.anticipation,
             release_pressure=force.release_pressure,
@@ -96,8 +107,11 @@ class BankGenerator:
             control_vs_chaos=force.control_vs_chaos,
         )
 
-        # 1. Select archetype (density-driven or explicit; territory-agnostic)
-        archetype = select_archetype(effective.density, self.selected_archetype)
+        # 1. Select archetype.
+        #    During within-bank regeneration active_archetype is set so we never
+        #    re-derive from density mid-phrase.  Only at bank start (active_archetype
+        #    is None) do we allow the density to pick a new archetype.
+        archetype = select_archetype(effective.density, active_archetype or self.selected_archetype)
 
         # 2. Extract anchor slots — passed to every deformation as a hard constraint
         anchors = Anchors(

@@ -127,6 +127,10 @@ _pression_timeline: list[PressionBar] = empty_timeline()
 _pression_cc_map:   dict[str, tuple[int, int]] = dict(DEFAULT_CC_MAP)
 _pression_bar_idx:  int = 0   # current bar being played (0-based within bank)
 _active_pression_mapping_lane: Optional[str] = None
+# Active archetype locked at bank start; only changes at drop commit or new bank.
+# pending_archetype_name is what density/slider currently implies — may differ.
+_active_archetype_name:  Optional[str] = None
+_pending_archetype_name: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _drop_commit_state = DropCommitState()
 _phase11_state = Phase11State()
@@ -332,6 +336,15 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
     if drop_stats.get("commit_applied", 0):
         _phase11_state.mark_drop_committed()
+        # Archetype commit at drop: active_archetype advances to pending_archetype.
+        # This is the ONLY place active_archetype may change instantly.
+        global _active_archetype_name, _pending_archetype_name
+        if _pending_archetype_name and _pending_archetype_name != _active_archetype_name:
+            _log.debug(
+                "archetype commit at drop: %s → %s",
+                _active_archetype_name, _pending_archetype_name,
+            )
+            _active_archetype_name = _pending_archetype_name
     survivor_stats["survivor_ticks_in_final_output"] = _survivor_tick_count(bank)
     survivor_trace["present_after_drop_relock"] = _survivor_trace_present(
         bank, survivor_signature
@@ -398,9 +411,11 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
 def _prepare_regenerated_bank(bank_idx: int):
     t0 = time.perf_counter()
     overrides = _generation_curve_overrides()
+    # Use locked active archetype so within-bank regen never changes archetype.
     fresh = _generator.generate(
         _engine.force_state, bank_idx, _engine.landscape_position,
         curve_overrides=overrides,
+        active_archetype=_active_archetype_name if _playing else None,
     )
     _apply_behaviour_modules_to_bank(fresh, overrides)
     elapsed = _record_timing("next_bank_prepare_ms", (time.perf_counter() - t0) * 1000)
@@ -497,9 +512,12 @@ async def _apply_and_preview() -> None:
         if not _playing:
             _drop_commit_state = DropCommitState()
         overrides = _generation_curve_overrides()
+        # Use locked active archetype for preview; density change is visible
+        # only via pending archetype and takes effect at the next drop.
         fresh = _generator.generate(
             _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
             curve_overrides=overrides,
+            active_archetype=_active_archetype_name if _playing else None,
         )
         _apply_behaviour_modules_to_bank(fresh, overrides)
         # Splice: keep up-to-and-including current phrase, replace the rest
@@ -594,6 +612,8 @@ def _force_state_dict(include_bank: bool = True) -> dict:
         "midi_cc_port": _midi_cc.port_name if _midi_cc else None,
         "archetype": archetype_name_at(density=_engine.force_state.density),
         "selected_archetype": _generator.selected_archetype,
+        "active_archetype":   _active_archetype_name,
+        "pending_archetype":  _pending_archetype_name,
         "deformation_colours": DEFORMATION_COLOURS,
         "deformation_model_dimensions": DEFORMATION_MODEL_DIMENSIONS,
         "dimension_roles": DIMENSION_ROLES,
@@ -787,9 +807,23 @@ def _playback_loop() -> None:
         _start_pending_curves()
         snapshot = _engine.begin_bank()
         overrides = _generation_curve_overrides()
+
+        # Lock active archetype at bank start.  Within-bank regeneration
+        # (quantize boundaries, preview) must use this name so archetype
+        # cannot change mid-phrase due to slider/density movement.
+        # Only drops are allowed to commit a new active archetype.
+        global _active_archetype_name, _pending_archetype_name
+        from thelmic.archetypes import select_archetype as _select_arch
+        _pending_archetype_name = _select_arch(
+            _engine.force_state.density, _generator.selected_archetype,
+        ).name
+        if _active_archetype_name is None:
+            _active_archetype_name = _pending_archetype_name   # first bank
+
         bank = _generator.generate(
             _engine.force_state, bank_idx, _engine.landscape_position,
             curve_overrides=overrides,
+            active_archetype=_active_archetype_name,
         )
         _apply_behaviour_modules_to_bank(bank, overrides)
         _current_bank = bank
@@ -1102,6 +1136,9 @@ async def _handle_message(msg: dict) -> None:
                 _playing = True
                 _drop_commit_state = DropCommitState()
                 _phase11_state.set_immediate(_engine.landscape_position)
+                # Reset archetype lock so the first bank re-derives from density.
+                _active_archetype_name  = None
+                _pending_archetype_name = None
                 _play_thread = threading.Thread(target=_playback_loop, daemon=True)
                 _play_thread.start()
         await _broadcast({"type": "state", **_force_state_dict()})
