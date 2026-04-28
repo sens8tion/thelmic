@@ -552,20 +552,19 @@
 
     /* ── Phrase overlay ── */
     .phrase-overlay-wrap {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
+      position: relative;
+      width: 800%;           /* same as .seq-lane-row — shares the same coordinate space */
+      height: 0;             /* zero height so it doesn't push lanes down */
       pointer-events: none;
       z-index: 3;
       overflow: visible;
+      will-change: transform;
     }
 
     .phrase-marker {
       position: absolute;
       top: 0;
-      bottom: 0;
+      height: 200px;     /* tall enough to span all visible lanes */
       width: 0;
       border-left: 2px solid rgba(180, 150, 60, 0.55);
       overflow: visible;
@@ -1526,7 +1525,7 @@
     function applyRollingViewport() {
       const viewport = rollingViewport();
       const translatePercent = (viewport.renderStart / RENDER_STEPS) * 100;
-      document.querySelectorAll('.seq-lane-row, .deform-strip').forEach(row => {
+      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap').forEach(row => {
         row.style.transform = `translateX(-${translatePercent}%)`;
       });
       return viewport;
