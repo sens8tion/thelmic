@@ -44,6 +44,7 @@ from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
 from thelmic.pressure_curves import CurveEngine
+from thelmic.phrase_model import PhraseMode, build_phrase_model
 from thelmic.phrase_plan import PhrasePlan, generate_phrase_plan
 from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
@@ -651,24 +652,65 @@ def _phrase_metadata_list() -> list:
     if _runtime_debug.get("survivor_events_final", 0) > 0:
         rules.append("survivor")
 
+    phrase_mode = (
+        PhraseMode.CALL_RESPONSE_MODE
+        if mode == PhraseMode.CALL_RESPONSE_MODE.value
+        else PhraseMode.HOOK_MODE
+    )
+    phrase_model = build_phrase_model(
+        drop_bars=tuple(1 + idx * BARS_PER_PHRASE for idx in range(PHRASES_PER_BANK)),
+        total_bars=PHRASES_PER_BANK * BARS_PER_PHRASE,
+        phrase_modes=tuple(phrase_mode for _ in range(PHRASES_PER_BANK)),
+        sub_phrase_bars=min(BARS_PER_PHRASE, 4),
+    )
+    marker_metadata = phrase_model.marker_metadata(steps_per_bar=STEPS_PER_BAR)
+
     metadata = []
-    for phrase_idx in range(PHRASES_PER_BANK):
-        start_step = phrase_idx * BARS_PER_PHRASE * STEPS_PER_BAR
-        end_step   = start_step + BARS_PER_PHRASE * STEPS_PER_BAR - 1
+    for phrase in phrase_model.phrases:
+        timebase = phrase_model.timebase_at_step((phrase.start_bar - 1) * STEPS_PER_BAR)
+        end_step = (phrase.end_bar * STEPS_PER_BAR) - 1
+        sub_phrases = [
+            {
+                "sub_phrase_index": sub.index,
+                "role": sub.role.value,
+                "start_step": (sub.start_bar - 1) * STEPS_PER_BAR,
+                "end_step": (sub.end_bar * STEPS_PER_BAR) - 1,
+                "sub_phrase_start_step": (sub.start_bar - 1) * STEPS_PER_BAR,
+                "phrase_start_step": timebase.phrase_start_step,
+                "bar_index": sub.start_bar,
+                "label": sub.role.value,
+            }
+            for sub in phrase.sub_phrases
+        ]
         metadata.append({
-            "phrase_id":            f"ph{phrase_idx}",
-            "phrase_index":         phrase_idx,
-            "start_step":           start_step,
+            "phrase_id":            f"ph{phrase.index}",
+            "phrase_index":         phrase.index,
+            "start_step":           timebase.musical_step,
             "end_step":             end_step,
+            "global_step":          timebase.global_step,
+            "musical_step":         timebase.musical_step,
+            "bar_index":            timebase.bar_index,
+            "sub_phrase_index":     timebase.sub_phrase_index,
+            "phrase_start_step":    timebase.phrase_start_step,
+            "sub_phrase_start_step": timebase.sub_phrase_start_step,
+            "phrase_role":          phrase.role.value,
             "mode":                 mode,
             "archetype":            archetype,
             "drop_role":            drop_role,
             "rules":                list(rules),
+            "sub_phrases":          sub_phrases,
             "dominant_instrument":  dom_inst,
             "sparsity_mode":        sp_mode,
             "sparsity_level":       round(sp_level, 2),
             "call_response_leader": cr_leader,
         })
+    metadata.append({
+        "type": "timebase",
+        "steps_per_bar": STEPS_PER_BAR,
+        "bank_start_step": marker_metadata["bank_start_step"],
+        "phrase_markers": marker_metadata["phrase_markers"],
+        "sub_phrase_markers": marker_metadata["sub_phrase_markers"],
+    })
     return metadata
 
 

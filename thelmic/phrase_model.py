@@ -15,6 +15,7 @@ from typing import Iterable, Optional
 
 ALLOWED_SUB_PHRASE_BARS = (4, 8, 16)
 DEFAULT_SUB_PHRASE_BARS = 8
+STEPS_PER_BAR = 16
 
 
 class PhraseRole(str, Enum):
@@ -195,6 +196,46 @@ class PhraseCursor:
 
 
 @dataclass(frozen=True)
+class PhraseTimebasePoint:
+    global_step: int
+    musical_step: int
+    bar_index: int
+    step_in_bar: int
+    phrase_index: int
+    sub_phrase_index: int
+    phrase_start_step: int
+    sub_phrase_start_step: int
+    phrase_role: PhraseRole
+    phrase_mode: PhraseMode
+    sub_phrase_role: SubPhraseRole
+
+    @property
+    def is_phrase_start(self) -> bool:
+        return self.musical_step == self.phrase_start_step
+
+    @property
+    def is_sub_phrase_start(self) -> bool:
+        return self.musical_step == self.sub_phrase_start_step
+
+    def to_dict(self) -> dict:
+        return {
+            "global_step": self.global_step,
+            "musical_step": self.musical_step,
+            "bar_index": self.bar_index,
+            "step_in_bar": self.step_in_bar,
+            "phrase_index": self.phrase_index,
+            "sub_phrase_index": self.sub_phrase_index,
+            "phrase_start_step": self.phrase_start_step,
+            "sub_phrase_start_step": self.sub_phrase_start_step,
+            "phrase_role": self.phrase_role.value,
+            "phrase_mode": self.phrase_mode.value,
+            "sub_phrase_role": self.sub_phrase_role.value,
+            "is_phrase_start": self.is_phrase_start,
+            "is_sub_phrase_start": self.is_sub_phrase_start,
+        }
+
+
+@dataclass(frozen=True)
 class PhraseModel:
     phrases: tuple[Phrase, ...]
 
@@ -227,6 +268,83 @@ class PhraseModel:
             constraints=sub_phrase.constraints,
             transformer=sub_phrase.transformer,
         )
+
+    def timebase_at_step(
+        self,
+        global_step: int,
+        *,
+        bank_start_step: int = 0,
+        steps_per_bar: int = STEPS_PER_BAR,
+    ) -> PhraseTimebasePoint:
+        if steps_per_bar <= 0:
+            raise ValueError("steps_per_bar must be positive")
+        musical_step = global_step - bank_start_step
+        if musical_step < 0:
+            raise ValueError("global_step is before the phrase model bank start")
+        bar = (musical_step // steps_per_bar) + 1
+        step_in_bar = musical_step % steps_per_bar
+        phrase = self.phrase_at_bar(bar)
+        sub_phrase = phrase.sub_phrase_at_bar(bar)
+        return PhraseTimebasePoint(
+            global_step=global_step,
+            musical_step=musical_step,
+            bar_index=bar,
+            step_in_bar=step_in_bar,
+            phrase_index=phrase.index,
+            sub_phrase_index=sub_phrase.index,
+            phrase_start_step=(phrase.start_bar - 1) * steps_per_bar,
+            sub_phrase_start_step=(sub_phrase.start_bar - 1) * steps_per_bar,
+            phrase_role=phrase.role,
+            phrase_mode=phrase.mode,
+            sub_phrase_role=sub_phrase.role,
+        )
+
+    def marker_metadata(
+        self,
+        *,
+        bank_start_step: int = 0,
+        steps_per_bar: int = STEPS_PER_BAR,
+    ) -> dict:
+        phrase_markers = []
+        sub_phrase_markers = []
+        for phrase in self.phrases:
+            phrase_start_step = bank_start_step + (phrase.start_bar - 1) * steps_per_bar
+            phrase_markers.append(
+                {
+                    "type": "phrase",
+                    "global_step": phrase_start_step,
+                    "musical_step": phrase_start_step - bank_start_step,
+                    "bar_index": phrase.start_bar,
+                    "phrase_index": phrase.index,
+                    "phrase_start_step": phrase_start_step - bank_start_step,
+                    "label": phrase.role.value,
+                    "role": phrase.role.value,
+                    "mode": phrase.mode.value,
+                }
+            )
+            for sub_phrase in phrase.sub_phrases:
+                sub_start_step = bank_start_step + (sub_phrase.start_bar - 1) * steps_per_bar
+                sub_phrase_markers.append(
+                    {
+                        "type": "sub_phrase",
+                        "global_step": sub_start_step,
+                        "musical_step": sub_start_step - bank_start_step,
+                        "bar_index": sub_phrase.start_bar,
+                        "phrase_index": phrase.index,
+                        "sub_phrase_index": sub_phrase.index,
+                        "phrase_start_step": phrase_start_step - bank_start_step,
+                        "sub_phrase_start_step": sub_start_step - bank_start_step,
+                        "label": sub_phrase.role.value,
+                        "role": sub_phrase.role.value,
+                        "mode": phrase.mode.value,
+                    }
+                )
+        return {
+            "steps_per_bar": steps_per_bar,
+            "bank_start_step": bank_start_step,
+            "phrase_markers": phrase_markers,
+            "sub_phrase_markers": sub_phrase_markers,
+        }
 
     def to_dict(self) -> dict:
         return {"phrases": [phrase.to_dict() for phrase in self.phrases]}

@@ -127,3 +127,47 @@ def test_pre_drop_phrase_marks_withholding_and_silence_constraints():
 def test_phrase_lengths_must_align_to_four_bar_boundaries():
     with pytest.raises(ValueError, match="4-bar"):
         build_phrase_model(drop_bars=(1, 11), total_bars=20)
+
+
+def test_timebase_point_uses_musical_steps_not_display_columns():
+    model = build_phrase_model(drop_bars=(1, 17), total_bars=32, sub_phrase_bars=8)
+
+    point = model.timebase_at_step(256)
+
+    assert point.global_step == 256
+    assert point.musical_step == 256
+    assert point.bar_index == 17
+    assert point.step_in_bar == 0
+    assert point.phrase_index == 1
+    assert point.sub_phrase_index == 0
+    assert point.phrase_start_step == 256
+    assert point.sub_phrase_start_step == 256
+    assert point.is_phrase_start is True
+    assert point.is_sub_phrase_start is True
+
+
+def test_timebase_supports_bank_global_offset_without_changing_musical_position():
+    model = build_phrase_model(drop_bars=(1, 17), total_bars=32, sub_phrase_bars=8)
+
+    point = model.timebase_at_step(1256, bank_start_step=1000)
+
+    assert point.global_step == 1256
+    assert point.musical_step == 256
+    assert point.bar_index == 17
+    assert point.phrase_index == 1
+    assert point.phrase_start_step == 256
+
+
+def test_marker_metadata_exposes_phrase_and_sub_phrase_boundaries():
+    model = build_phrase_model(drop_bars=(1, 17), total_bars=32, sub_phrase_bars=8)
+    metadata = model.marker_metadata()
+
+    assert [marker["musical_step"] for marker in metadata["phrase_markers"]] == [0, 256]
+    assert [marker["musical_step"] for marker in metadata["sub_phrase_markers"]] == [
+        0,
+        128,
+        256,
+        384,
+    ]
+    assert metadata["sub_phrase_markers"][1]["phrase_index"] == 0
+    assert metadata["sub_phrase_markers"][1]["sub_phrase_start_step"] == 128

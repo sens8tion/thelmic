@@ -13,6 +13,8 @@ kick-first phase notes are historical and are not the active architecture.
 
 ## Current Status
 
+The previous planner-first implementation plan through Phase 11 is complete.
+
 | Phase | Status | Meaning |
 |---|---|---|
 | Phase 0 planner foundation | complete | `thelmic/phrase_plan.py` exists and exposes a debuggable `PhrasePlan` |
@@ -27,6 +29,47 @@ kick-first phase notes are historical and are not the active architecture.
 | Phase 9 drop construction | complete | `DROP_RELOCK` enforces bass/kick/hook relock and pre-drop contrast |
 | Phase 10 survivor signal and atomic drop commit | complete | survivor events pass through pre-drop silence and drop commit state guards the relock boundary |
 | Phase 11 slider dynamics and structural trajectory | complete | slider dynamics, trajectory, priority, and sparsity shape arrangement without bypassing drop boundaries |
+
+## Current Session Plan: Phrase Authority Alignment
+
+The active alignment project makes phrase and sub-phrase state the shared
+authority for generation and display. Phrase authority must come before further
+musical rule work.
+
+| Alignment Phase | Status | Meaning |
+|---|---|---|
+| Phase 1 phrase structure foundation | complete | `thelmic/phrase_model.py` defines phrase/sub-phrase roles, constraints, cursor lookup, and stable drop-to-drop boundaries |
+| Phase 1.5 canonical timebase and marker alignment | complete | phrase markers, sub-phrase markers, sequencer events, and UI overlays derive from the same musical step coordinates |
+| Phase 2 phrase authority contract | pending | expose phrase/sub-phrase context to generation layers |
+| Phase 3 hook alignment | pending | hook placement obeys phrase mode and permitted hook windows |
+| Phase 4 call/response alignment | pending | calls, gaps, and responses are phrase-gated and rhythm-conformant |
+| Phase 5 bass and stab rhythm conformance | pending | bass and stab derive from phrase, rhythm, and call/response authority |
+| Phase 6 silence, withholding, and pre-drop gap | pending | silence and waiting signals are formal phrase-owned structures |
+| Phase 7 drop alignment | pending | drop resolver aligns intended drop, post-silence legal step, and relock |
+| Phase 8 transformer sub-phrase behaviour | pending | transformer zones progressively mutate existing signatures without creating new event types |
+| Phase 9 UI phrase boundary overlay | pending | visual phrase/sub-phrase overlays expose authority without defining musical rules |
+| Phase 10 compliance pass | pending | audit hidden generator rules and move musical authority into the rules/architecture layer |
+| Phase 11 regression and musical feel tests | pending | scenario tests prove Oak, Chaos, and Nott remain phrase-aware |
+
+Phase 1.5 timebase contract:
+
+```text
+global_step
+musical_step
+bar_index
+phrase_index
+sub_phrase_index
+phrase_start_step
+sub_phrase_start_step
+```
+
+Rendering hierarchy:
+
+- Phrase boundary: strong full-height marker and phrase label.
+- Sub-phrase boundary: dimmer/thinner marker inside phrase spans.
+- Bar boundary: faint grid line.
+- Drop/relock: distinct event boundary; it is not visually equivalent to a
+  phrase boundary unless phrase authority says they coincide.
 
 Current rule:
 

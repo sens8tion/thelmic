@@ -545,9 +545,17 @@
       border-left: 1px solid #333;
     }
 
-    /* Phrase dividers (every 64 steps) */
+    /* Phrase dividers are assigned from server-provided musical timebase metadata. */
     .seq-cell.phrase-start {
-      border-left: 1px solid #555;
+      border-left: 2px solid #606060;
+    }
+
+    .seq-cell.sub-phrase-start {
+      border-left: 1px solid #3d3d3d;
+    }
+
+    .seq-cell.drop-start {
+      box-shadow: inset 2px 0 0 rgba(190, 70, 70, 0.55);
     }
 
     /* ── Phrase overlay ── */
@@ -568,12 +576,23 @@
       top: 0;
       height: 200px;     /* tall enough to span all visible lanes */
       width: 0;
-      border-left: 2px solid rgba(180, 150, 60, 0.55);
+      border-left: 2px solid rgba(210, 180, 80, 0.7);
       overflow: visible;
     }
 
     .phrase-marker.mode-cr {
       border-left-color: rgba(150, 100, 190, 0.45);
+    }
+
+    .phrase-marker.sub-phrase-marker {
+      top: 18px;
+      height: 150px;
+      border-left: 1px solid rgba(160, 160, 160, 0.24);
+    }
+
+    .phrase-marker.drop-marker {
+      height: 28px;
+      border-left: 2px solid rgba(190, 70, 70, 0.65);
     }
 
     .phrase-label {
@@ -593,6 +612,20 @@
 
     .phrase-marker.mode-cr .phrase-label {
       color: #b080d0;
+    }
+
+    .sub-phrase-label {
+      position: absolute;
+      top: 0;
+      left: 3px;
+      font-size: 7px;
+      white-space: nowrap;
+      color: rgba(190, 190, 190, 0.55);
+      text-transform: uppercase;
+      background: rgba(0, 0, 0, 0.58);
+      padding: 1px 3px;
+      border-radius: 1px;
+      line-height: 1.3;
     }
 
     .phrase-badges {
@@ -666,8 +699,9 @@
       height: 100%;
     }
 
-    .deform-cell.bar-start    { border-left: 1px solid #333; }
-    .deform-cell.phrase-start { border-left: 1px solid #555; }
+    .deform-cell.bar-start        { border-left: 1px solid #333; }
+    .deform-cell.phrase-start     { border-left: 2px solid #555; }
+    .deform-cell.sub-phrase-start { border-left: 1px solid #3d3d3d; }
 
     /* ── Transition graph ── */
     .transition-graph-section {
@@ -1299,6 +1333,7 @@
 
       // Sequencer
       if (s.bank_events !== undefined) {
+        if (s.phrase_metadata !== undefined) updatePhraseTimebase(s.phrase_metadata);
         renderSequencer(s.bank_events, bankSlot, bankTotal);
         if (s.phrase_metadata !== undefined) renderPhraseOverlay(s.phrase_metadata);
       }
@@ -1437,6 +1472,9 @@
     };
     const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
     const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
+    let _phraseBoundarySteps = new Set();
+    let _subPhraseBoundarySteps = new Set();
+    let _dropBoundarySteps = new Set();
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1476,6 +1514,44 @@
       const [bar, beat, tick] = timeStr.split('.').map(Number);
       const beatStep = Math.floor((tick / 24) * 4); // tick→16th within beat
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
+    }
+
+    function _extractTimebase(phraseMeta) {
+      const entries = phraseMeta || [];
+      return entries.find(meta => meta && meta.type === 'timebase') || null;
+    }
+
+    function updatePhraseTimebase(phraseMeta) {
+      const timebase = _extractTimebase(phraseMeta);
+      const phrases = (phraseMeta || []).filter(meta => meta && meta.type !== 'timebase');
+      const phraseMarkers = timebase ? (timebase.phrase_markers || []) : phrases;
+      const subMarkers = timebase
+        ? (timebase.sub_phrase_markers || [])
+        : phrases.flatMap(meta => meta.sub_phrases || []);
+
+      _phraseBoundarySteps = new Set(
+        phraseMarkers
+          .map(marker => marker.musical_step ?? marker.start_step)
+          .filter(step => Number.isInteger(step))
+      );
+      _subPhraseBoundarySteps = new Set(
+        subMarkers
+          .map(marker => marker.musical_step ?? marker.start_step)
+          .filter(step => Number.isInteger(step) && !_phraseBoundarySteps.has(step))
+      );
+      _dropBoundarySteps = new Set(
+        phrases
+          .filter(meta => meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
+          .map(meta => meta.musical_step ?? meta.start_step)
+          .filter(step => Number.isInteger(step))
+      );
+    }
+
+    function applyTimebaseClasses(cell, sourceStep) {
+      cell.classList.remove('phrase-start', 'sub-phrase-start', 'drop-start');
+      if (_phraseBoundarySteps.has(sourceStep)) cell.classList.add('phrase-start');
+      else if (_subPhraseBoundarySteps.has(sourceStep)) cell.classList.add('sub-phrase-start');
+      if (_dropBoundarySteps.has(sourceStep)) cell.classList.add('drop-start');
     }
 
     function roleLaneForEvent(event) {
@@ -1612,8 +1688,8 @@
             cell.dataset.renderStep = s;
             cell.dataset.deformName = name;
             cell.dataset.baseIntensity = d;
-            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-            else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            applyTimebaseClasses(cell, sourceStep);
             if (d > 0) {
               const alpha = 0.15 + d * 0.85;
               cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
@@ -1662,7 +1738,9 @@
           const role = laneEl.dataset.role;
           if (!role) return;
           laneEl.querySelectorAll('.seq-cell').forEach(cell => {
-            _paintCell(cell, role, parseInt(cell.dataset.step), stepMap);
+            const sourceStep = parseInt(cell.dataset.step);
+            applyTimebaseClasses(cell, sourceStep);
+            _paintCell(cell, role, sourceStep, stepMap);
           });
         });
       } else {
@@ -1689,8 +1767,8 @@
             cell.dataset.step      = sourceStep;
             cell.dataset.renderStep = s;
             cell.dataset.layer     = role;
-            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-            else if (sourceStep % STEPS === 0)  cell.classList.add('bar-start');
+            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            applyTimebaseClasses(cell, sourceStep);
             _paintCell(cell, role, sourceStep, stepMap);
             row.appendChild(cell);
           }
@@ -1752,15 +1830,38 @@
 
       if (!_phraseMetadata.length) return;
 
-      // Total render columns = 512 (TOTAL_STEPS × 2)
-      // seq-content width is set by the deform strips (800% of scroll container).
-      // A phrase boundary at render column C is at left = (C / 512) * 100% of seq-content.
-      const RENDER_COLS = 512;
-      const PHRASE_STEPS = 64;  // 4 bars × 16 steps
+      // Marker positions are musical steps supplied by the server timebase.
+      const RENDER_COLS = RENDER_STEPS;
 
-      _phraseMetadata.forEach(meta => {
+      updatePhraseTimebase(_phraseMetadata);
+      const timebase = _extractTimebase(_phraseMetadata);
+      const phraseEntries = _phraseMetadata.filter(meta => meta && meta.type !== 'timebase');
+      const subPhraseMarkers = timebase
+        ? (timebase.sub_phrase_markers || [])
+        : phraseEntries.flatMap(meta => meta.sub_phrases || []);
+
+      subPhraseMarkers.forEach(sub => {
+        const subStep = sub.musical_step ?? sub.start_step;
+        if (!Number.isInteger(subStep) || _phraseBoundarySteps.has(subStep)) return;
+        [subStep, subStep + TOTAL_STEPS].forEach(col => {
+          const marker = document.createElement('div');
+          marker.className = 'phrase-marker sub-phrase-marker';
+          marker.style.left = ((col / RENDER_COLS) * 100) + '%';
+          const role = sub.label || sub.role;
+          if (role) {
+            const label = document.createElement('div');
+            label.className = 'sub-phrase-label';
+            label.textContent = role.replace(/_/g, ' ');
+            marker.appendChild(label);
+          }
+          wrap.appendChild(marker);
+        });
+      });
+
+      phraseEntries.forEach(meta => {
         // Each phrase boundary appears twice (double-buffer render)
-        [meta.start_step, meta.start_step + 256].forEach(col => {
+        const phraseStep = meta.musical_step ?? meta.start_step;
+        [phraseStep, phraseStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
           marker.className = 'phrase-marker' + (meta.mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
           marker.style.left = ((col / RENDER_COLS) * 100) + '%';
