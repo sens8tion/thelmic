@@ -369,6 +369,42 @@ as a hook event (non-drum, non-bass) are suppressed.
 
 **[HARD]** In HOOK_MODE, hook is primary foreground. Call/response is disabled or minimal.
 
+### Hook placement in HOOK_MODE
+
+**[HARD]** In HOOK_MODE, hook events are **sparse and phrase-defining** — not continuous.
+
+**[HARD]** Hook placement follows this structure:
+
+1. **Phrase start** — hook introduces its identity. This placement is required.
+2. **Pre-drop optional** — hook may appear once more before the drop as a memory cue.
+
+No other placements are allowed without structural reason.
+
+**[HARD]** Hook must not:
+- Loop constantly throughout the phrase
+- Fill every bar
+- Compete with call/response material
+- Become the main rhythmic engine
+- Appear randomly mid-phrase without structural purpose
+
+**[PREF]** The pre-drop repeat may be varied:
+- Shorter (partial motif)
+- Different velocity (lighter or heavier)
+- Rhythmically displaced by 1–2 steps
+- Partially fragmented (first or last note omitted)
+
+**[HARD]** The pre-drop hook repeat must not interfere with:
+- Survivor signal
+- Pre-drop silence
+- Drop commit authority
+- Bass / sub / kick presence at the drop step
+
+**Acceptance:**
+- In HOOK_MODE, hook appears at phrase start
+- Hook may appear once again before drop
+- Hook does not continuously occupy the phrase
+- Hook remains identity material, not rhythmic filler
+
 ---
 
 ## Bassline Rules
