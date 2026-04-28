@@ -552,9 +552,11 @@
 
     /* ── Phrase overlay ── */
     .phrase-overlay-wrap {
-      position: relative;
-      width: 800%;           /* same as .seq-lane-row — shares the same coordinate space */
-      height: 0;             /* zero height so it doesn't push lanes down */
+      position: absolute;    /* out of flow — no layout artifact */
+      top: 0;
+      left: 0;
+      width: 800%;           /* same coordinate space as .seq-lane-row */
+      height: 0;
       pointer-events: none;
       z-index: 3;
       overflow: visible;
