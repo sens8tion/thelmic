@@ -51,7 +51,7 @@ not independent composers.
 
 ## Phrase Modes
 
-Within a phrase (between drops), two modes are available:
+Within a phrase (between drops), the system chooses **one** foreground mode:
 
 | Mode | Description |
 |------|-------------|
@@ -65,23 +65,51 @@ a single phrase. A phrase is either one or the other — not both.
 - Call/response requires alternation and contrast.
 - Combining them causes masking and loss of musical intent.
 
-**[HARD]** Phrase mode may be *prepared* at any time. It *commits* only at a drop boundary.
+**[HARD]** `pending_phrase_mode` may be prepared at any time.  
+`active_phrase_mode` commits **only at a drop boundary**.  
+`active_phrase_mode` must **not change between drops**.
 
 **[PREF]** Approximately 80% CALL_RESPONSE_MODE, 20% HOOK_MODE.  
 `phase11.py:325–340` — `h % 5 == 0` → HOOK_MODE.
 
-**[HARD]** Mode must not change mid-phrase.
+### HOOK_MODE
 
-### HOOK_MODE behaviour
-- Hook is primary foreground voice
-- Call/response system is disabled or minimal (fills only)
-- Beat bed may thin slightly for hook focus
-- Bass/sub support and remain stable
+**[HARD]** Hook is the foreground identity voice.
 
-### CALL_RESPONSE_MODE behaviour
-- Stab leads (~90%) or selected leader at drop commit
-- Hook is absent or heavily reduced (no dominant motif)
-- Clear alternation between call (beats 1–2) and response (beats 3–4) roles
+**[HARD]** Call/response is disabled or reduced to tiny fills. Stab must not lead a full
+call/response pattern while HOOK_MODE is active.
+
+**[PREF]** Sparsity may clear space for hook. Beat bed may thin slightly for hook focus.
+
+**[HARD]** Bass and sub remain supportive and stable — they do not compete with hook.
+
+**Acceptance:** A HOOK_MODE phrase produces recognisable melodic/identity material.
+No active call/response alternation is present.
+
+### CALL_RESPONSE_MODE
+
+**[HARD]** Stab leads call/response approximately 90% of the time. Other valid leaders:
+bass, hook (background only), snare.
+
+**[HARD]** Hook is absent, minimal, or background-only. No dominant hook motif runs across
+the phrase.
+
+**[HARD]** Phrase motion comes from call → response interaction, not from a continuous
+foreground identity voice.
+
+**Acceptance:** A CALL_RESPONSE_MODE phrase produces conversational movement.
+No dominant hook motif is present.
+
+### Structural lock
+
+**[HARD]** Phrase mode is structural. It follows the same commit rules as archetype and
+call/response leader:
+
+```
+pending_phrase_mode   — may be prepared anytime
+active_phrase_mode    — commits only at drop
+                     — must not change between drops
+```
 
 ---
 
