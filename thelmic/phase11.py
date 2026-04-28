@@ -23,6 +23,7 @@ PRIORITY_INDEX: dict[str, int] = {
     layer: index for index, layer in enumerate(INSTRUMENT_PRIORITY)
 }
 CORE_DROP_LAYERS: frozenset[str] = frozenset({"kick", "bass"})
+ALLOWED_PROGRESSIVE_STEP_DELTA: float = 0.2
 
 
 class SparsityMode(str, Enum):
@@ -30,6 +31,45 @@ class SparsityMode(str, Enum):
     HARD = "hard"
     PULSED = "pulsed"
     DOMINANT_BURST = "dominant_burst"
+
+
+@dataclass(frozen=True)
+class StructuralChange:
+    mutation_type: str
+    step: int
+    nearest_drop_step: int
+    change_magnitude: float
+    change_mode: str
+    is_continuous: bool = True
+
+
+def can_apply_instant_structural_change(step: int, drop_step: int) -> bool:
+    return step == drop_step
+
+
+def can_apply_progressive_structural_change(
+    change: StructuralChange,
+    allowed_step_delta: float = ALLOWED_PROGRESSIVE_STEP_DELTA,
+) -> bool:
+    return change.is_continuous and change.change_magnitude <= allowed_step_delta
+
+
+def evaluate_structural_change(change: StructuralChange) -> dict:
+    if change.change_mode == "instantaneous":
+        allowed = can_apply_instant_structural_change(change.step, change.nearest_drop_step)
+        reason = "drop_step" if allowed else "instantaneous_change_requires_drop"
+    else:
+        allowed = can_apply_progressive_structural_change(change)
+        reason = "continuous_delta_within_basin" if allowed else "progressive_delta_too_large"
+    return {
+        "mutation_type": change.mutation_type,
+        "step": change.step,
+        "nearest_drop_step": change.nearest_drop_step,
+        "change_magnitude": round(change.change_magnitude, 3),
+        "change_mode": change.change_mode,
+        "allowed": allowed,
+        "reason": reason,
+    }
 
 
 @dataclass
@@ -175,6 +215,7 @@ class Phase11State:
     dominant_instrument: str | None = None
     sparsity_level: float = 0.0
     sparsity_mode: SparsityMode = SparsityMode.SOFT
+    structural_mutations: list[dict] = field(default_factory=list)
 
     def set_target(self, position: float) -> None:
         start = self.slider.actual_position
@@ -193,10 +234,35 @@ class Phase11State:
 
     def advance(self, bars: float = 1.0) -> float:
         actual = self.slider.advance(bars)
+        motion = self.slider.internal_motion()
+        self._record_structural_change(
+            StructuralChange(
+                mutation_type="bounded_internal_motion",
+                step=-1,
+                nearest_drop_step=-1,
+                change_magnitude=max(
+                    motion["micro_variation"],
+                    motion["phrase_evolution"],
+                    motion["energy_breathing"],
+                ),
+                change_mode="progressive",
+                is_continuous=True,
+            )
+        )
         self._update_arrangement_state()
         return actual
 
     def mark_drop_committed(self) -> None:
+        self._record_structural_change(
+            StructuralChange(
+                mutation_type="drop_role_advancement",
+                step=4,
+                nearest_drop_step=4,
+                change_magnitude=1.0,
+                change_mode="instantaneous",
+                is_continuous=False,
+            )
+        )
         if self.trajectory.drop_plan:
             self.trajectory.current_drop_index = min(
                 self.trajectory.current_drop_index + 1,
@@ -205,6 +271,12 @@ class Phase11State:
             if self.trajectory.current_drop_index >= len(self.trajectory.drop_plan) - 1:
                 self.trajectory.active = False
         self._update_arrangement_state()
+
+    def _record_structural_change(self, change: StructuralChange) -> dict:
+        entry = evaluate_structural_change(change)
+        self.structural_mutations.append(entry)
+        self.structural_mutations = self.structural_mutations[-16:]
+        return entry
 
     def _update_arrangement_state(self) -> None:
         role = self.trajectory.drop_role
@@ -234,6 +306,7 @@ class Phase11State:
             "dominant_instrument": self.dominant_instrument,
             "sparsity_mode": self.sparsity_mode.value,
             "sparsity_level": round(self.sparsity_level, 3),
+            "structural_mutations": list(self.structural_mutations),
         }
 
 

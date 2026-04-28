@@ -4,6 +4,10 @@ from thelmic.phase11 import (
     INSTRUMENT_PRIORITY,
     Phase11State,
     SparsityMode,
+    StructuralChange,
+    can_apply_instant_structural_change,
+    can_apply_progressive_structural_change,
+    evaluate_structural_change,
     enforce_priority_and_sparsity,
     plan_trajectory,
 )
@@ -145,4 +149,104 @@ def test_drop_presentation_preserves_phase10_kick_bass_reanchor():
 def test_instrument_priority_stack_is_stable():
     assert INSTRUMENT_PRIORITY == (
         "kick", "bass", "snare", "hook", "stab", "hat", "ghost", "survivor",
+    )
+
+
+def test_progressive_hook_change_allowed_between_drops():
+    change = StructuralChange(
+        mutation_type="hook_motif_variation",
+        step=2,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=0.08,
+        change_mode="progressive",
+        is_continuous=True,
+    )
+
+    result = evaluate_structural_change(change)
+
+    assert can_apply_progressive_structural_change(change)
+    assert result["allowed"] is True
+    assert result["reason"] == "continuous_delta_within_basin"
+
+
+def test_hook_replacement_is_drop_gated():
+    before_drop = StructuralChange(
+        mutation_type="hook_replacement",
+        step=2,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=1.0,
+        change_mode="instantaneous",
+        is_continuous=False,
+    )
+    at_drop = StructuralChange(
+        mutation_type="hook_replacement",
+        step=DROP_STEP,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=1.0,
+        change_mode="instantaneous",
+        is_continuous=False,
+    )
+
+    assert evaluate_structural_change(before_drop)["allowed"] is False
+    assert evaluate_structural_change(at_drop)["allowed"] is True
+
+
+def test_archetype_snap_is_drop_gated_but_bias_can_be_progressive():
+    bias = StructuralChange(
+        mutation_type="archetype_bias",
+        step=1,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=0.12,
+        change_mode="progressive",
+        is_continuous=True,
+    )
+    snap = StructuralChange(
+        mutation_type="archetype_snap",
+        step=1,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=0.8,
+        change_mode="instantaneous",
+        is_continuous=False,
+    )
+
+    assert evaluate_structural_change(bias)["allowed"] is True
+    assert evaluate_structural_change(snap)["allowed"] is False
+    assert can_apply_instant_structural_change(DROP_STEP, DROP_STEP)
+
+
+def test_drop_is_only_instantaneous_knee():
+    large_between = StructuralChange(
+        mutation_type="dominant_instrument_hard_switch",
+        step=3,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=0.9,
+        change_mode="instantaneous",
+        is_continuous=False,
+    )
+    same_at_drop = StructuralChange(
+        mutation_type="dominant_instrument_hard_switch",
+        step=DROP_STEP,
+        nearest_drop_step=DROP_STEP,
+        change_magnitude=0.9,
+        change_mode="instantaneous",
+        is_continuous=False,
+    )
+
+    assert evaluate_structural_change(large_between)["allowed"] is False
+    assert evaluate_structural_change(same_at_drop)["allowed"] is True
+
+
+def test_phase11_diagnostics_distinguish_progressive_and_instantaneous():
+    state = Phase11State()
+    state.set_immediate(0.2)
+    state.advance(1.0)
+    state.mark_drop_committed()
+
+    mutations = state.to_dict()["structural_mutations"]
+    assert any(item["change_mode"] == "progressive" and item["allowed"] for item in mutations)
+    assert any(
+        item["change_mode"] == "instantaneous"
+        and item["step"] == item["nearest_drop_step"]
+        and item["allowed"]
+        for item in mutations
     )

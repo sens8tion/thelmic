@@ -478,14 +478,20 @@ Distance carries meaning:
 Multi-drop planning is conceptual only at this stage. Future drop roles may
 include transition, intensify, peak, and resolve, but these are not implemented.
 
-Structural discreteness rule:
+Structural knee rule:
 
 ```text
-Structure changes only at drop boundaries.
+Between drops:
+  structural change may happen progressively
+
+At drop:
+  structural change may happen instantaneously
 ```
 
-Between drops, continuous modulation is allowed. At a drop, structural state may
-change.
+The drop is the only valid instantaneous structural knee. Between drops,
+motif mutation, density evolution, sparsity shifts, call/response intensity
+changes, groove-feel modulation, and priority emphasis changes may happen when
+they are continuous and bounded by the current constraint basin.
 
 Velocity influence:
 
@@ -527,7 +533,8 @@ Future implementation constraints:
 
 - Survivor signal must be isolated from musical layers.
 - Drop commit must override all prior phases.
-- Trajectory must not bypass drop boundaries.
+- Trajectory must not bypass drop boundaries for instantaneous structural
+  commits.
 - Slider inertia must not break the constraint basin.
 
 Implemented Phase 11 contract:
@@ -544,6 +551,9 @@ Implemented Phase 11 contract:
 - Diagnostics expose slider target, actual position, slider velocity,
   trajectory state, drop plan, current drop index, drop role, dominant
   instrument, sparsity mode/level, and priority/sparsity counters.
+- Structural mutation diagnostics distinguish `progressive` from
+  `instantaneous` changes. Progressive bounded deltas are allowed between
+  drops; instantaneous structural deltas are accepted only at the drop step.
 
 ---
 
