@@ -47,6 +47,17 @@ class MIDIEvent:
     active: bool = True
     survives_silence: bool = False
     structural_authority: bool = True
+    origin_source: str = ""
+    origin_reason: str = ""
+    resolution_reason: str = ""
+    source: str = ""
+    reason: str = ""
+    intent_id: str = ""
+    resolved_event_id: str = ""
+    global_step: int = -1
+    musical_step: int = -1
+    phrase_index: int = -1
+    bar_index: int = -1
     deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
 
 
@@ -88,6 +99,9 @@ class BankGenerator:
         self, force: ForceState, bank_index: int, landscape_position: float = 0.0,
         curve_overrides: dict[str, float] | None = None,
         active_archetype: Optional[str] = None,
+        kick_authority: str = "legacy",
+        snare_authority: str = "legacy",
+        hat_authority: str = "legacy",
     ) -> Bank:
         """Generate a Bank.
 
@@ -136,6 +150,9 @@ class BankGenerator:
             phrase = self._generate_phrase(
                 effective, bank_index, phrase_idx, blend,
                 kick_deforms, snare_deforms, hat_deforms,
+                kick_authority=kick_authority,
+                snare_authority=snare_authority,
+                hat_authority=hat_authority,
             )
             bank.phrases.append(phrase)
         return bank
@@ -155,6 +172,9 @@ class BankGenerator:
         kick_deforms:  dict[str, list[float]],
         snare_deforms: dict[str, list[float]],
         hat_deforms:   dict[str, list[float]],
+        kick_authority: str = "legacy",
+        snare_authority: str = "legacy",
+        hat_authority: str = "legacy",
     ) -> Phrase:
         phrase = Phrase(phrase_index=phrase_idx)
         bar_offset = phrase_idx * BARS_PER_PHRASE
@@ -165,15 +185,18 @@ class BankGenerator:
 
         for bar in range(BARS_PER_PHRASE):
             abs_bar = bar_offset + bar + 1
-            phrase.events.extend(self._generate_kick_bar(
-                force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp, kick_deforms
-            ))
-            phrase.events.extend(self._generate_snare_bar(
-                force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp, snare_deforms
-            ))
-            phrase.events.extend(self._generate_hat_bar(
-                force, abs_bar, hat_fired, blend.hat_exp, hat_deforms
-            ))
+            if kick_authority != "stream":
+                phrase.events.extend(self._generate_kick_bar(
+                    force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp, kick_deforms
+                ))
+            if snare_authority != "stream":
+                phrase.events.extend(self._generate_snare_bar(
+                    force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp, snare_deforms
+                ))
+            if hat_authority != "stream":
+                phrase.events.extend(self._generate_hat_bar(
+                    force, abs_bar, hat_fired, blend.hat_exp, hat_deforms
+                ))
         return phrase
 
     # ------------------------------------------------------------------

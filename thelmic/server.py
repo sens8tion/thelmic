@@ -34,7 +34,17 @@ from thelmic.call_response import (
 )
 from thelmic.calls import generate_planned_calls
 from thelmic.responses import generate_planned_responses
-from thelmic.hook import generate_planned_hook
+from thelmic.stream_drums import render_stream_hat_events, render_stream_kick_events
+from thelmic.stream_hooks import render_stream_hook_events
+from thelmic.stream_voices import (
+    render_stream_snare_events,
+    render_stream_bassline_events,
+    render_stream_sub_events,
+    render_stream_stab_events,
+    render_stream_ghost_events,
+    render_stream_survivor_events,
+    render_stream_drop_relock_events,
+)
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, audit_pression_compliance,
     DEFAULT_CC_MAP, DIMENSION_NAMES, DIMENSION_COLOURS,
@@ -49,10 +59,11 @@ from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
 )
-from thelmic.drop_enforcer import DropCommitState, add_survivor_signal, enforce_drop_relock
+from thelmic.drop_enforcer import DropCommitState, enforce_drop_relock
 from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.phase11 import Phase11State, enforce_priority_and_sparsity
+from thelmic.stream_engine import StructureProfile, StructureStream, Tick
 from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
@@ -87,6 +98,7 @@ _STATIC = pathlib.Path(__file__).parent / "static"
 _log = logging.getLogger(__name__)
 _BAR_LOG = logging.getLogger("thelmic.bar_timing")   # enable with --timing
 _TIMING_WARN_MS = 2.0
+_BANK_SIZE_STEPS = 256
 
 # Fields emitted by _BAR_LOG per bar (tab-separated for easy grep/cut):
 #   time_ms         wall-clock ms since process start (monotonic)
@@ -134,6 +146,19 @@ _pending_archetype_name: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _drop_commit_state = DropCommitState()
 _phase11_state = Phase11State()
+_structure_stream = StructureStream()
+# Voice authority flags — "stream" | "legacy"
+# Default: all voices owned by the stream pipeline.
+# Set to "legacy" per voice for rollback/debug.
+_KICK_AUTHORITY     = "stream"
+_SNARE_AUTHORITY    = "stream"
+_HAT_AUTHORITY      = "stream"
+_HOOK_AUTHORITY     = "stream"
+_BASSLINE_AUTHORITY = "stream"
+_SUB_AUTHORITY      = "stream"
+_STAB_AUTHORITY     = "stream"
+_GHOST_AUTHORITY    = "stream"
+_DROP_AUTHORITY     = "stream"
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
     "next_bank_prepare_ms": 0.0,
@@ -193,6 +218,97 @@ def _append_events_to_bank(bank, events: list) -> list:
             bank.phrases[phrase_index].events.append(event)
             appended.append(event)
     return appended
+
+
+def _stream_event_trace(events: list) -> list[dict]:
+    trace: list[dict] = []
+    for event in events:
+        if getattr(event, "source", "") != "stream":
+            continue
+        trace.append({
+            "instrument": event.layer,
+            "step": _event_to_step(event),
+            "source": getattr(event, "source", ""),
+            "intent_id": getattr(event, "intent_id", ""),
+            "resolved_event_id": getattr(event, "resolved_event_id", ""),
+            "global_step": getattr(event, "global_step", -1),
+            "musical_step": getattr(event, "musical_step", -1),
+            "phrase_index": getattr(event, "phrase_index", -1),
+            "bar_index": getattr(event, "bar_index", -1),
+            "reason": getattr(event, "reason", ""),
+        })
+    return trace
+
+
+def _event_to_step(event) -> int:
+    try:
+        bar, beat, tick = (int(part) for part in event.time.split("."))
+    except ValueError:
+        return -1
+    tick_in_bar = (beat - 1) * 24 + tick
+    return (bar - 1) * 16 + tick_in_bar // 6
+
+
+def _assert_stream_event_provenance(events: list, *, stage: str) -> None:
+    violations: list[str] = []
+    for event in events:
+        if getattr(event, "source", "") != "stream":
+            continue
+        missing = [
+            name for name, value in {
+                "intent_id": getattr(event, "intent_id", ""),
+                "resolved_event_id": getattr(event, "resolved_event_id", ""),
+                "reason": getattr(event, "reason", ""),
+                "global_step": getattr(event, "global_step", -1),
+                "musical_step": getattr(event, "musical_step", -1),
+            }.items()
+            if value in ("", -1, None)
+        ]
+        musical_step = getattr(event, "musical_step", -1)
+        global_step = getattr(event, "global_step", -1)
+        expected_global = event.bank_index * _BANK_SIZE_STEPS + musical_step if hasattr(event, "bank_index") else None
+        if getattr(event, "phrase_index", -1) < 0:
+            missing.append("phrase_index")
+        if getattr(event, "bar_index", -1) < 1:
+            missing.append("bar_index")
+        if not 0 <= musical_step < _BANK_SIZE_STEPS:
+            missing.append("musical_step_bounds")
+        if missing:
+            violations.append(
+                f"{event.layer}@{event.time} missing {','.join(missing)}"
+            )
+    if violations:
+        raise RuntimeError(
+            f"stream provenance violation after {stage}: "
+            + "; ".join(violations[:12])
+        )
+
+
+def _assert_final_stream_invariants(bank, *, stage: str) -> None:
+    violations: list[str] = []
+    for event in bank.all_events():
+        if not getattr(event, "active", True):
+            continue
+        source = getattr(event, "source", "")
+        if source != "stream":
+            violations.append(
+                f"{event.layer}@{event.time} source={source or 'missing'}"
+            )
+            continue
+        _assert_stream_event_provenance([event], stage=stage)
+        musical_step = getattr(event, "musical_step", -1)
+        global_step = getattr(event, "global_step", -1)
+        expected_global = bank.bank_index * _BANK_SIZE_STEPS + musical_step
+        if global_step != expected_global:
+            violations.append(
+                f"{event.layer}@{event.time} global_step={global_step} "
+                f"expected={expected_global}"
+            )
+    if violations:
+        raise RuntimeError(
+            f"final stream invariant violation after {stage}: "
+            + "; ".join(violations[:16])
+        )
 
 
 def _events_per_bar(events: list) -> dict[int, int]:
@@ -273,7 +389,60 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         behaviour.anchor_velocity = overrides["anchor_velocity"]
     progress = transition.progress if transition else 0.0
     _runtime_debug = apply_anchor_withholding(bank, behaviour, progress)
+
+    structure_frames = _stream_structure_frame_objects(bank.bank_index)
+    # seed_events: current bank state before stream voices. When all voices are
+    # stream-owned this may be empty; stream adapters supply neutral templates.
+    seed_events = list(bank.all_events())
+    stream_kick_events, kick_stream_stats = render_stream_kick_events(
+        structure_frames,
+        seed_events,
+    )
+    _assert_stream_event_provenance(stream_kick_events, stage="stream_kick_resolve")
+    appended_stream_kicks = _append_events_to_bank(bank, stream_kick_events)
+    _assert_stream_event_provenance(appended_stream_kicks, stage="stream_kick_adapter")
+    stream_hat_events, hat_stream_stats = render_stream_hat_events(
+        structure_frames,
+        list(bank.all_events()),
+    )
+    _assert_stream_event_provenance(stream_hat_events, stage="stream_hat_resolve")
+    appended_stream_hats = _append_events_to_bank(bank, stream_hat_events)
+    _assert_stream_event_provenance(appended_stream_hats, stage="stream_hat_adapter")
+
+    # ── Snare stream ───────────────────────────────────────────────────────────
+    if _SNARE_AUTHORITY == "stream":
+        stream_snare_events, snare_stream_stats = render_stream_snare_events(
+            structure_frames, list(bank.all_events()),
+        )
+        appended_stream_snares = _append_events_to_bank(bank, stream_snare_events)
+    else:
+        stream_snare_events = []
+        appended_stream_snares = []
+        snare_stream_stats = {"snare_source": "legacy"}
+
     base_events = list(bank.all_events())
+    _runtime_debug["stream_output_trace"] = {
+        "after_resolve": _stream_event_trace(stream_kick_events + stream_hat_events),
+        "after_adapter": _stream_event_trace(appended_stream_kicks + appended_stream_hats),
+    }
+    _log.debug(
+        "stream output after_adapter=%s",
+        _runtime_debug["stream_output_trace"]["after_adapter"][:24],
+    )
+    _runtime_debug["stream_anchor_sources_seen_by_legacy"] = {
+        "kick": sum(
+            1 for event in base_events
+            if event.layer == "kick" and getattr(event, "source", "") == "stream"
+        ),
+        "hat": sum(
+            1 for event in base_events
+            if (
+                event.layer == "hat"
+                and event.role != "survivor"
+                and getattr(event, "source", "") == "stream"
+            )
+        ),
+    }
     landscape_position = _engine.landscape_position
 
     # Collect bars present in this bank
@@ -295,51 +464,123 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         base_events[0] if base_events else None,
     )
 
-    bassline_events: list = generate_planned_bass(
-        base_events, behaviour, _phrase_plan,
-        landscape_position=landscape_position,
-    )
-    hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
-    leader = _phase11_state.call_response_leader
-    leader_layer = "bassline" if leader == "bass" else leader
-
-    # Stab is the primary call/response voice. Bassline participates as the
-    # paired body of the exchange, using the same planner-owned slots.
-    planned_calls = generate_planned_calls(
-        base_events, behaviour, _phrase_plan, leader_layer="stab",
-    )
-    planned_responses = generate_planned_responses(
-        base_events, behaviour, _phrase_plan, leader_layer="stab",
-    )
-    bassline_calls = generate_planned_calls(
-        base_events, behaviour, _phrase_plan, leader_layer="bassline",
-    )
-    bassline_responses = generate_planned_responses(
-        base_events, behaviour, _phrase_plan, leader_layer="bassline",
-    )
-    if leader_layer == "bassline":
-        call_response_bassline_events = bassline_calls.events + bassline_responses.events
+    # ── Bassline ──────────────────────────────────────────────────────────────
+    if _BASSLINE_AUTHORITY == "stream":
+        bassline_events, bassline_stream_stats = render_stream_bassline_events(
+            structure_frames, base_events,
+        )
     else:
-        call_response_bassline_events = bassline_responses.events
-    stab_events: list = planned_calls.events + planned_responses.events
-    bassline_events.extend(call_response_bassline_events)
-    sub_events: list = generate_sub_from_bassline(
-        bassline_events, behaviour, landscape_position=landscape_position,
+        # Legacy path — active only when _BASSLINE_AUTHORITY = "legacy"
+        bassline_events = generate_planned_bass(
+            base_events, behaviour, _phrase_plan,
+            landscape_position=landscape_position,
+        )
+        bassline_stream_stats = {"bassline_source": "legacy"}
+
+    # ── Hook ──────────────────────────────────────────────────────────────────
+    hook_events, hook_stream_stats = render_stream_hook_events(
+        structure_frames, _phrase_plan, base_events,
     )
+    _assert_stream_event_provenance(hook_events, stage="stream_hook_resolve")
+
+    # ── Stab / Call / Response ────────────────────────────────────────────────
+    if _STAB_AUTHORITY == "stream":
+        stab_events, stab_stream_stats = render_stream_stab_events(
+            structure_frames, base_events,
+        )
+        # Bassline call/response when stream owns stab — legacy path no-ops
+        call_response_bassline_events: list = []
+    else:
+        # Legacy path — active only when _STAB_AUTHORITY = "legacy"
+        leader = _phase11_state.call_response_leader
+        leader_layer = "bassline" if leader == "bass" else leader
+        planned_calls = generate_planned_calls(
+            base_events, behaviour, _phrase_plan, leader_layer="stab",
+        )
+        planned_responses = generate_planned_responses(
+            base_events, behaviour, _phrase_plan, leader_layer="stab",
+        )
+        bassline_calls = generate_planned_calls(
+            base_events, behaviour, _phrase_plan, leader_layer="bassline",
+        )
+        bassline_responses = generate_planned_responses(
+            base_events, behaviour, _phrase_plan, leader_layer="bassline",
+        )
+        call_response_bassline_events = (
+            bassline_calls.events + bassline_responses.events
+            if leader_layer == "bassline" else bassline_responses.events
+        )
+        stab_events = planned_calls.events + planned_responses.events
+        stab_stream_stats = {"stab_source": "legacy"}
+
+    if _BASSLINE_AUTHORITY != "stream":
+        bassline_events.extend(call_response_bassline_events)
+
+    # ── Sub ────────────────────────────────────────────────────────────────────
+    if _SUB_AUTHORITY == "stream":
+        sub_events, sub_stream_stats = render_stream_sub_events(
+            structure_frames, base_events,
+        )
+    else:
+        # Legacy path
+        sub_events = generate_sub_from_bassline(
+            bassline_events, behaviour, landscape_position=landscape_position,
+        )
+        sub_stream_stats = {"sub_source": "legacy"}
 
     _log.debug(
-        "bank=%d mode=%s calls_rendered=%d responses_rendered=%d",
-        bank.bank_index, mode.value,
-        planned_calls.stats.get("call_events_rendered", 0),
-        planned_responses.stats.get("response_events_rendered", 0),
+        "bank=%d mode=%s stab_authority=%s stab_events=%d",
+        bank.bank_index, mode.value, _STAB_AUTHORITY, len(stab_events),
     )
 
     appended_bassline = _append_events_to_bank(bank, bassline_events)
-    appended_sub   = _append_events_to_bank(bank, sub_events)
-    appended_hooks = _append_events_to_bank(bank, hook_events)
+    appended_sub      = _append_events_to_bank(bank, sub_events)
+    appended_hooks    = _append_events_to_bank(bank, hook_events)
+    _assert_stream_event_provenance(appended_hooks, stage="stream_hook_adapter")
+    _runtime_debug["stream_output_trace"]["after_hook_adapter"] = _stream_event_trace(appended_hooks)
     appended_stabs = _append_events_to_bank(bank, stab_events)
-    beat_bed_stats = ensure_beat_bed(bank, _phrase_plan, _phase11_state)
-    survivor_stats = add_survivor_signal(bank, _phrase_plan)
+
+    # ── Ghost stream ───────────────────────────────────────────────────────────
+    if _GHOST_AUTHORITY == "stream":
+        stream_ghost_events, ghost_stream_stats = render_stream_ghost_events(
+            structure_frames, list(bank.all_events()),
+        )
+        appended_stream_ghosts = _append_events_to_bank(bank, stream_ghost_events)
+    else:
+        stream_ghost_events = []
+        appended_stream_ghosts = []
+        ghost_stream_stats = {"ghost_source": "legacy"}
+
+    # ── Drop/relock stream ────────────────────────────────────────────────────
+    stream_survivor_events, survivor_stats = render_stream_survivor_events(
+        structure_frames, list(bank.all_events()),
+    )
+    appended_stream_survivors = _append_events_to_bank(bank, stream_survivor_events)
+    survivor_stats.update({
+        "survivor_ticks_generated": len(stream_survivor_events),
+        "survivor_ticks_after_suppression": len(appended_stream_survivors),
+        "survivor_ticks_in_final_output": len(appended_stream_survivors),
+        "survivor_render_lane": "hat",
+    })
+
+    if _DROP_AUTHORITY == "stream":
+        stream_drop_events, drop_stream_stats = render_stream_drop_relock_events(
+            structure_frames, list(bank.all_events()),
+        )
+        appended_stream_drops = _append_events_to_bank(bank, stream_drop_events)
+    else:
+        stream_drop_events = []
+        appended_stream_drops = []
+        drop_stream_stats = {"drop_source": "legacy"}
+
+    beat_bed_stats = ensure_beat_bed(
+        bank,
+        _phrase_plan,
+        _phase11_state,
+        kick_authority=_KICK_AUTHORITY,
+        snare_authority=_SNARE_AUTHORITY,
+        hat_authority=_HAT_AUTHORITY,
+    )
     survivor_after_generation = _survivor_events(bank)
     survivor_signature = (
         _survivor_signature(survivor_after_generation[0])
@@ -360,7 +601,11 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
     priority_stats = enforce_priority_and_sparsity(bank, _phrase_plan, _phase11_state)
     drop_stats     = enforce_drop_relock(
-        bank, _phrase_plan, _drop_commit_state, syntax_stats
+        bank, _phrase_plan, _drop_commit_state, syntax_stats,
+        hook_authority=_HOOK_AUTHORITY,
+        kick_authority=_KICK_AUTHORITY,
+        bassline_authority=_BASSLINE_AUTHORITY,
+        sub_authority=_SUB_AUTHORITY,
     )
     if drop_stats.get("commit_applied", 0):
         _phase11_state.mark_drop_committed()
@@ -395,9 +640,31 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["sub_events_per_bar"]       = _events_per_bar(appended_sub)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
+    _runtime_debug["stream_kick_events_per_bar"] = _events_per_bar(appended_stream_kicks)
+    _runtime_debug["stream_hat_events_per_bar"] = _events_per_bar(appended_stream_hats)
+    _runtime_debug.update(kick_stream_stats)
+    _runtime_debug.update(hat_stream_stats)
+    _runtime_debug["kick_authority"]     = _KICK_AUTHORITY
+    _runtime_debug["snare_authority"]    = _SNARE_AUTHORITY
+    _runtime_debug["hat_authority"]      = _HAT_AUTHORITY
+    _runtime_debug["hook_authority"]     = _HOOK_AUTHORITY
+    _runtime_debug["bassline_authority"] = _BASSLINE_AUTHORITY
+    _runtime_debug["sub_authority"]      = _SUB_AUTHORITY
+    _runtime_debug["stab_authority"]     = _STAB_AUTHORITY
+    _runtime_debug["ghost_authority"]    = _GHOST_AUTHORITY
+    _runtime_debug["drop_authority"]     = _DROP_AUTHORITY
+    _runtime_debug.update(snare_stream_stats)
+    _runtime_debug.update(bassline_stream_stats)
+    _runtime_debug.update(sub_stream_stats)
+    _runtime_debug.update(stab_stream_stats)
+    _runtime_debug.update(ghost_stream_stats)
+    _runtime_debug.update(drop_stream_stats)
     _runtime_debug.update(beat_bed_stats)
-    _runtime_debug.update(planned_calls.stats)
-    _runtime_debug.update(planned_responses.stats)
+    # planned_calls/responses only exist when _STAB_AUTHORITY="legacy"
+    if _STAB_AUTHORITY == "legacy":
+        _runtime_debug.update(planned_calls.stats)
+        _runtime_debug.update(planned_responses.stats)
+    _runtime_debug.update(hook_stream_stats)
     _runtime_debug.update(syntax_stats)
     _runtime_debug.update(support_stats)
     _runtime_debug.update(priority_stats)
@@ -417,12 +684,15 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["silence_length_bars"] = _phase11_state.silence_length_bars
     _runtime_debug["bass_source"] = "phrase_plan"
     _runtime_debug["bass_tonal_centre"] = 36
-    _runtime_debug["hook_source"] = "phrase_plan"
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
     _runtime_debug.update(arrangement_diagnostics(bank, _phase11_state))
     pression_modulated_count = apply_behaviour_dynamics(bank, behaviour)
+    _assert_stream_authority(bank)
+    _assert_stream_event_provenance(bank.all_events(), stage="final_bank")
+    _assert_final_stream_invariants(bank, stage="final_bank")
+    _runtime_debug["stream_output_trace"]["final_bank"] = _stream_event_trace(bank.all_events())
 
     # Pre-compute pression timeline for this bank.
     # Pression is computed AFTER enforce_phrase_syntax so it sees only
@@ -455,6 +725,9 @@ def _prepare_regenerated_bank(bank_idx: int):
         _engine.force_state, bank_idx, _engine.landscape_position,
         curve_overrides=overrides,
         active_archetype=_active_archetype_name if _playing else None,
+        kick_authority=_KICK_AUTHORITY,
+        snare_authority=_SNARE_AUTHORITY,
+        hat_authority=_HAT_AUTHORITY,
     )
     _apply_behaviour_modules_to_bank(fresh, overrides)
     elapsed = _record_timing("next_bank_prepare_ms", (time.perf_counter() - t0) * 1000)
@@ -557,6 +830,9 @@ async def _apply_and_preview() -> None:
             _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
             curve_overrides=overrides,
             active_archetype=_active_archetype_name if _playing else None,
+            kick_authority=_KICK_AUTHORITY,
+            snare_authority=_SNARE_AUTHORITY,
+            hat_authority=_HAT_AUTHORITY,
         )
         _apply_behaviour_modules_to_bank(fresh, overrides)
         # Splice: keep up-to-and-including current phrase, replace the rest
@@ -721,6 +997,42 @@ def _sub_phrase_role_for_index(index: int, count: int) -> str:
     return "transformation"
 
 
+def _stream_structure_frame_objects(bank_index: int | None = None) -> list:
+    """Generate StructureFrames for the current bank.
+
+    Called at every bank generation (and quantize boundary regeneration).
+    Each bank gets its own global_step range: bank N covers steps N*256 to N*256+255.
+    musical_step is always 0..255 (bank-relative) and is stored in the frame.
+    """
+    steps_per_bar = 16
+    total_bars = 16
+    total_steps = total_bars * steps_per_bar
+    if bank_index is None:
+        bank_index = _current_bank.bank_index if _current_bank is not None else 0
+    bank_start_step = bank_index * total_steps
+    stream = StructureStream(
+        StructureProfile(
+            phrase_length_bars=16,
+            subphrase_length_bars=8,
+            origin_step=bank_start_step,
+        )
+    )
+    ticks = (
+        Tick(global_step=bank_start_step + step, time=0.0)
+        for step in range(total_steps)
+    )
+    frames = list(stream.frames(ticks))
+    _log.debug(
+        "stream frames generated: bank=%d global_step_range=%d..%d musical_step_range=0..%d",
+        bank_index, bank_start_step, bank_start_step + total_steps - 1, total_steps - 1,
+    )
+    return frames
+
+
+def _stream_structure_frames() -> list[dict]:
+    return [frame.to_dict() for frame in _stream_structure_frame_objects()]
+
+
 def _phrase_context_steps() -> list[dict]:
     """Resolved per-step phrase context for UI and later generator consumers.
 
@@ -779,6 +1091,9 @@ def _bank_events_list(bank) -> list:
     for event in bank.all_events():
         if event.layer == "survivor":
             continue
+        if getattr(event, "source", "") == "stream":
+            _assert_stream_event_provenance([event], stage="server_payload")
+        source_label = "stream" if getattr(event, "source", "") == "stream" else ""
         events.append({
             "time": event.time,
             "layer": event.layer,
@@ -792,9 +1107,58 @@ def _bank_events_list(bank) -> list:
             "emphasis": round(event.emphasis, 2),
             "survives_silence": getattr(event, "survives_silence", False),
             "structural_authority": getattr(event, "structural_authority", True),
+            "origin_source": getattr(event, "origin_source", ""),
+            "origin_reason": getattr(event, "origin_reason", ""),
+            "resolution_reason": getattr(event, "resolution_reason", ""),
+            "source": getattr(event, "source", ""),
+            "source_label": source_label,
+            "reason": getattr(event, "reason", ""),
+            "intent_id": getattr(event, "intent_id", ""),
+            "resolved_event_id": getattr(event, "resolved_event_id", ""),
+            "global_step": getattr(event, "global_step", -1),
+            "musical_step": getattr(event, "musical_step", -1),
+            "phrase_index": getattr(event, "phrase_index", -1),
+            "bar_index": getattr(event, "bar_index", -1),
             "deformation": {k: round(v, 3) for k, v in event.deformation.items()},
         })
     return events
+
+
+_STREAM_AUTHORITY_LAYERS = {
+    # layer: (authority_flag_name, exempt_roles)
+    "kick":     ("_KICK_AUTHORITY",     set()),
+    "snare":    ("_SNARE_AUTHORITY",    {"survivor"}),
+    "hat":      ("_HAT_AUTHORITY",      {"survivor"}),
+    "hook":     ("_HOOK_AUTHORITY",     set()),
+    "bassline": ("_BASSLINE_AUTHORITY", set()),
+    "sub":      ("_SUB_AUTHORITY",      set()),
+    "stab":     ("_STAB_AUTHORITY",     set()),
+}
+
+
+def _assert_stream_authority(bank) -> None:
+    """Raise if any stream-owned layer contains a non-stream event."""
+    import sys
+    this_module = sys.modules[__name__]
+    violations: list[str] = []
+    for event in bank.all_events():
+        layer = event.layer
+        if layer not in _STREAM_AUTHORITY_LAYERS:
+            continue
+        flag_name, exempt_roles = _STREAM_AUTHORITY_LAYERS[layer]
+        authority = getattr(this_module, flag_name, "legacy")
+        if authority != "stream":
+            continue
+        if event.role in exempt_roles:
+            continue
+        if getattr(event, "source", "") != "stream":
+            violations.append(
+                f"{layer}@{event.time}:{getattr(event, 'source', '') or 'no-source'}"
+            )
+    if violations:
+        raise RuntimeError(
+            "stream authority violation: " + ", ".join(violations[:16])
+        )
 
 
 def _force_state_dict(include_bank: bool = True) -> dict:
@@ -881,6 +1245,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
     }
     if include_bank:
         d["bank_events"] = _bank_events_list(_current_bank)
+        d["structure_frames"] = _stream_structure_frames()
         d["phrase_metadata"] = _phrase_metadata_list()
         d["phrase_context"] = _phrase_context_steps()
     return d
@@ -1053,6 +1418,9 @@ def _playback_loop() -> None:
             _engine.force_state, bank_idx, _engine.landscape_position,
             curve_overrides=overrides,
             active_archetype=_active_archetype_name,
+            kick_authority=_KICK_AUTHORITY,
+            snare_authority=_SNARE_AUTHORITY,
+            hat_authority=_HAT_AUTHORITY,
         )
         _apply_behaviour_modules_to_bank(bank, overrides)
         _current_bank = bank

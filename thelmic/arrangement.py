@@ -94,7 +94,15 @@ def _sparsity_reason(state) -> str:
     return "none"
 
 
-def ensure_beat_bed(bank: Bank, plan: PhrasePlan, state) -> dict:
+def ensure_beat_bed(
+    bank: Bank,
+    plan: PhrasePlan,
+    state,
+    *,
+    kick_authority: str = "legacy",
+    snare_authority: str = "legacy",
+    hat_authority: str = "legacy",
+) -> dict:
     """Populate kick/snare/hat as the default rhythmic bed.
 
     Silence remains authoritative: muted steps are never repopulated here.
@@ -119,6 +127,12 @@ def ensure_beat_bed(bank: Bank, plan: PhrasePlan, state) -> dict:
         "snare": (SNARE_NOTE, (4, 12), 88, 0.06),
         "hat": (CLOSED_HAT_NOTE, tuple(range(0, STEPS_PER_BAR, 2)), 58, 0.03),
     }
+    if kick_authority == "stream":
+        targets.pop("kick", None)
+    if snare_authority == "stream":
+        targets.pop("snare", None)
+    if hat_authority == "stream":
+        targets.pop("hat", None)
     for bar in _bank_bars(bank):
         for layer, (note, steps, velocity, duration) in targets.items():
             for step in steps:

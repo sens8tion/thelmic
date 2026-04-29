@@ -71,6 +71,120 @@ Rendering hierarchy:
 - Drop/relock: distinct event boundary; it is not visually equivalent to a
   phrase boundary unless phrase authority says they coincide.
 
+## Stream Processing Refactor
+
+The stream-processing refactor is being built alongside the current
+implementation. The legacy sequencer remains runnable while the new spine is
+introduced and migrated into.
+
+Target pipeline:
+
+```text
+TransportClock
+-> TickStream
+-> StructureStream
+-> ControlStream
+-> IntentStreams
+-> TransformStream
+-> ResolveStream
+-> EventStream
+-> RenderStreams
+```
+
+The critical architectural rule is:
+
+```text
+StructureStream is the only source of truth for musical time and structure.
+```
+
+No generator, resolver, UI layer, MIDI renderer, or debug view may independently
+calculate:
+
+```text
+bar_index
+step_in_bar
+phrase_index
+subphrase_index
+phrase boundaries
+sub-phrase boundaries
+drop/relock state
+```
+
+New stream foundation:
+
+- `thelmic/stream_engine.py`
+  - `TransportClock`
+  - `Tick`
+  - `StructureProfile`
+  - `StructureStream`
+  - `StructureFrame`
+  - `ControlFrame`
+  - `Intent`
+  - `IntentStream`
+  - `TransformStream`
+  - `ResolveStream`
+  - `EventStream`
+  - `ResolvedEvent`
+  - `SuppressionEvent`
+
+Stream-owned baseline checkpoint:
+
+- Current checkpoint: stream-owned runtime baseline.
+- Active runtime path is `StructureFrame -> IntentStreams -> ResolveStream -> EventStream -> adapter -> UI/MIDI`.
+- All final musical events in the active runtime must be stream-originated and carry `intent_id`, `resolved_event_id`, `musical_step`, and `global_step`.
+- Runtime invariants reject any active final event with `source != "stream"`.
+- Caveat: legacy rollback authority flags and compatibility code still exist in the repository, but the active runtime rejects final legacy events rather than allowing mixed ownership.
+- `musical_step` is bank-relative and must remain inside the bank window; `global_step` is absolute and must equal `bank_index * BANK_SIZE + musical_step`.
+
+Current refactor status:
+
+| Stream Phase | Status | Meaning |
+|---|---|---|
+| Phase 0 freeze | complete | legacy code remains present, but active final output is stream-owned |
+| Phase 1 StructureStream | complete | canonical `Tick` and `StructureFrame` exist with tests for bar, phrase, sub-phrase, drop, and relock alignment |
+| Phase 2 UI alignment | complete | UI renders `StructureFrame` and final `EventStream` payload data rather than inferring structure |
+| Phase 3 first intent stream | complete | hook migrated first and emits stream-origin resolved events |
+| Phase 4 ResolveStream | complete baseline | all active voices emit intents and final events are resolved with provenance |
+| Phase 5 gradual migration | complete baseline | kick, snare, hat, bassline, sub, hook, call/response, stab, ghost/support, and drop/relock are stream-owned in active runtime |
+| Phase 6 cleanup | in progress | legacy compatibility code remains behind authority gates; final mixed ownership fails loudly |
+
+`StructureFrame` carries:
+
+```text
+global_step
+time
+musical_step
+bar_index
+step_in_bar
+phrase_index
+step_in_phrase
+subphrase_index
+step_in_subphrase
+phrase_role
+subphrase_role
+is_bar_start
+is_phrase_start
+is_subphrase_start
+is_drop
+is_relock
+pressure
+impact
+density
+silence
+```
+
+Render streams are consumers only:
+
+- MIDI renderer consumes `EventStream`.
+- UI note grid consumes `EventStream`.
+- UI phrase/sub-phrase overlay consumes `StructureFrame`.
+- CC / Pression renderer consumes resolved stream/control state.
+- Debug inspector consumes `StructureFrame`, `Intent`, `ResolvedEvent`, and
+  `SuppressionEvent`.
+
+Every final event must be traceable to an `Intent`. Every suppression must be
+traceable to `ResolveStream` with a reason.
+
 Current rule:
 
 ```text

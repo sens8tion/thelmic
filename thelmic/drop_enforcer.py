@@ -95,6 +95,10 @@ class DropStats:
     bass_at_drop: int = 0
     bassline_at_drop: int = 0
     sub_at_drop: int = 0
+    kick_requirements_deferred: int = 0
+    legacy_kick_events_suppressed: int = 0
+    hook_requirements_deferred: int = 0
+    legacy_hook_events_suppressed: int = 0
 
     def to_dict(self) -> dict[str, int | str]:
         return {
@@ -114,6 +118,10 @@ class DropStats:
             "bass_at_drop":                    self.bass_at_drop,
             "bassline_at_drop":                self.bassline_at_drop,
             "sub_at_drop":                     self.sub_at_drop,
+            "kick_requirements_deferred":      self.kick_requirements_deferred,
+            "legacy_kick_events_suppressed":   self.legacy_kick_events_suppressed,
+            "hook_requirements_deferred":      self.hook_requirements_deferred,
+            "legacy_hook_events_suppressed":   self.legacy_hook_events_suppressed,
         }
 
 
@@ -283,7 +291,13 @@ def _survivor_event(
     velocity: int,
     layer: str,
     tightening: float,
+    *,
+    bank_index: int,
 ) -> MIDIEvent:
+    bar, step = time_to_bar_step(time_str)
+    musical_step = (bar - 1) * 16 + step
+    global_step = bank_index * 256 + musical_step
+    intent_id = f"stream_survivor:{global_step}:{layer}"
     return replace(
         template,
         time=time_str,
@@ -299,6 +313,17 @@ def _survivor_event(
         active=True,
         survives_silence=True,
         structural_authority=False,
+        source="stream",
+        reason="survivor_timing_carrier",
+        intent_id=intent_id,
+        resolved_event_id=f"resolved:{intent_id}",
+        global_step=global_step,
+        musical_step=musical_step,
+        phrase_index=0,
+        bar_index=bar,
+        origin_source="stream_survivor",
+        origin_reason="survivor_timing_carrier",
+        resolution_reason="resolved",
         deformation={"survivor_signal": round(tightening, 3)},
     )
 
@@ -366,7 +391,8 @@ def add_survivor_signal(bank: Bank, plan: PhrasePlan) -> dict:
                     continue
                 event_velocity = 0 if layer == "survivor" else max(1, int(velocity * multiplier))
                 event = _survivor_event(
-                    template, time_str, note, event_velocity, layer, tightening
+                    template, time_str, note, event_velocity, layer, tightening,
+                    bank_index=bank.bank_index,
                 )
                 _append_to_bar(bank, event)
                 existing.add(key)
@@ -542,6 +568,8 @@ def _check_pre_drop_contrast(
 def _suppress_illegal_events(
     bank: Bank, plan: PhrasePlan, drop_bar: int,
     plan_bars: int, stats: DropStats,
+    hook_authority: str = "legacy",
+    kick_authority: str = "legacy",
 ) -> None:
     """Remove events that must not exist in a DROP_RELOCK bar.
 
@@ -570,6 +598,20 @@ def _suppress_illegal_events(
 
             # 1. Suppress unresolved call/response
             role = e.role.lower()
+            if (
+                kick_authority == "stream"
+                and e.layer == "kick"
+                and getattr(e, "origin_source", "") != "stream_kick"
+            ):
+                stats.legacy_kick_events_suppressed += 1
+                continue
+            if (
+                hook_authority == "stream"
+                and e.layer == "hook"
+                and getattr(e, "origin_source", "") != "stream_hook"
+            ):
+                stats.legacy_hook_events_suppressed += 1
+                continue
             if "call" in role or "response" in role:
                 stats.drop_illegal_events_suppressed += 1
                 continue
@@ -596,6 +638,10 @@ def enforce_drop_relock(
     plan: PhrasePlan,
     commit_state: DropCommitState | None = None,
     syntax_stats: dict | None = None,
+    hook_authority: str = "legacy",
+    kick_authority: str = "legacy",
+    bassline_authority: str = "legacy",
+    sub_authority: str = "legacy",
 ) -> dict[str, int | str]:
     """Enforce DROP_RELOCK construction and compliance.
 
@@ -651,16 +697,32 @@ def enforce_drop_relock(
         stats.active_state_after = after
 
         # Illegal event suppression runs first (before we add new events)
-        _suppress_illegal_events(bank, plan, bar, plan_bars, stats)
+        _suppress_illegal_events(
+            bank, plan, bar, plan_bars, stats,
+            hook_authority=hook_authority,
+            kick_authority=kick_authority,
+        )
 
         # Snapshot bar events after suppression
         bar_events = _events_for_bar(bank, bar)
 
-        # Structural presence at the drop step
-        _ensure_bass_at_drop(bank, plan, bar, bar_events, stats)
-        _ensure_sub_at_drop(bank, plan, bar, bar_events, stats)
-        _ensure_kick_at_drop(bank, bar, bar_events, stats)
-        _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
+        # Structural presence at the drop step — deferred when stream owns the voice
+        if bassline_authority == "stream":
+            stats.drop_relock_events_adjusted += 1  # deferred to stream
+        else:
+            _ensure_bass_at_drop(bank, plan, bar, bar_events, stats)
+        if sub_authority == "stream":
+            pass   # deferred to stream_sub
+        else:
+            _ensure_sub_at_drop(bank, plan, bar, bar_events, stats)
+        if kick_authority == "stream":
+            stats.kick_requirements_deferred += 1
+        else:
+            _ensure_kick_at_drop(bank, bar, bar_events, stats)
+        if hook_authority == "stream":
+            stats.hook_requirements_deferred += 1
+        else:
+            _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
         refreshed = _events_for_bar(bank, bar)
         if _has_layer_at_step(refreshed, bar, DROP_STEP, "kick"):
             stats.kick_at_drop += 1
