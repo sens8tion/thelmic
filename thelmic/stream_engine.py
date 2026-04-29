@@ -60,6 +60,7 @@ class StructureProfile:
 
     phrase_length_bars: int = 16
     subphrase_length_bars: int = 8
+    origin_step: int = 0
     relock_offset_steps: int = 0
     phrase_roles: tuple[PhraseRole, ...] = (
         PhraseRole.GROOVE,
@@ -95,6 +96,8 @@ class StructureProfile:
             raise ValueError("subphrase_length_bars must be 4, 8, or 16")
         if self.relock_offset_steps < 0:
             raise ValueError("relock_offset_steps must be non-negative")
+        if self.origin_step < 0:
+            raise ValueError("origin_step must be non-negative")
         if not self.phrase_roles:
             raise ValueError("at least one phrase role is required")
         if not self.subphrase_roles:
@@ -246,7 +249,7 @@ class StructureStream:
 
     def frame_for_tick(self, tick: Tick) -> StructureFrame:
         profile = self.profile
-        musical_step = tick.global_step - profile.relock_offset_steps
+        musical_step = tick.global_step - profile.origin_step - profile.relock_offset_steps
         bar_index = _floor_div(musical_step, STEPS_PER_BAR)
         step_in_bar = musical_step - bar_index * STEPS_PER_BAR
         phrase_index = _floor_div(musical_step, profile.phrase_length_steps)

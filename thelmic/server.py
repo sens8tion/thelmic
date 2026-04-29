@@ -53,6 +53,7 @@ from thelmic.drop_enforcer import DropCommitState, add_survivor_signal, enforce_
 from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.phase11 import Phase11State, enforce_priority_and_sparsity
+from thelmic.stream_engine import StructureProfile, StructureStream, Tick
 from thelmic.transition_engine import TransitionEngine
 
 # Roles each dimension currently plays — updated as deformations are wired in
@@ -134,6 +135,7 @@ _pending_archetype_name: Optional[str] = None
 _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _drop_commit_state = DropCommitState()
 _phase11_state = Phase11State()
+_structure_stream = StructureStream()
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
     "next_bank_prepare_ms": 0.0,
@@ -721,6 +723,31 @@ def _sub_phrase_role_for_index(index: int, count: int) -> str:
     return "transformation"
 
 
+def _stream_structure_frames() -> list[dict]:
+    """Read-only StructureFrame window for UI/debug overlays.
+
+    This is the new canonical stream spine exposed to the active runtime.
+    It does not drive note generation or MIDI yet.
+    """
+    steps_per_bar = 16
+    total_bars = 16
+    total_steps = total_bars * steps_per_bar
+    bank_index = _current_bank.bank_index if _current_bank is not None else 0
+    bank_start_step = bank_index * total_steps
+    stream = StructureStream(
+        StructureProfile(
+            phrase_length_bars=16,
+            subphrase_length_bars=8,
+            origin_step=bank_start_step,
+        )
+    )
+    ticks = (
+        Tick(global_step=bank_start_step + step, time=0.0)
+        for step in range(total_steps)
+    )
+    return [frame.to_dict() for frame in stream.frames(ticks)]
+
+
 def _phrase_context_steps() -> list[dict]:
     """Resolved per-step phrase context for UI and later generator consumers.
 
@@ -881,6 +908,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
     }
     if include_bank:
         d["bank_events"] = _bank_events_list(_current_bank)
+        d["structure_frames"] = _stream_structure_frames()
         d["phrase_metadata"] = _phrase_metadata_list()
         d["phrase_context"] = _phrase_context_steps()
     return d

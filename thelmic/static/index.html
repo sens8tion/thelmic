@@ -1373,10 +1373,10 @@
 
       // Sequencer
       if (s.bank_events !== undefined) {
-        if (s.phrase_context !== undefined) updatePhraseContext(s.phrase_context);
+        if (s.structure_frames !== undefined) updateStructureFrames(s.structure_frames);
         renderSequencer(s.bank_events, bankSlot, bankTotal);
         renderPhraseDebugRow();
-        renderPhraseOverlay(s.phrase_metadata || []);
+        renderPhraseOverlay();
       }
     }
 
@@ -1514,10 +1514,11 @@
     const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
     const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
     const HIDDEN_DEFORMATION_STRIPS = new Set(['survivor_signal']);
+    let _barBoundarySteps = new Set();
     let _phraseBoundarySteps = new Set();
     let _subPhraseBoundarySteps = new Set();
     let _dropBoundarySteps = new Set();
-    let _phraseContextByStep = [];
+    let _structureFrameByStep = [];
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1559,22 +1560,26 @@
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
     }
 
-    function updatePhraseContext(contextSteps) {
-      _phraseContextByStep = Array.isArray(contextSteps) ? contextSteps : [];
+    function updateStructureFrames(frames) {
+      _structureFrameByStep = Array.isArray(frames) ? frames : [];
+      _barBoundarySteps = new Set();
       _phraseBoundarySteps = new Set();
       _subPhraseBoundarySteps = new Set();
       _dropBoundarySteps = new Set();
-      _phraseContextByStep.forEach(ctx => {
-        if (!ctx || !Number.isInteger(ctx.musical_step)) return;
-        if (ctx.is_phrase_start) _phraseBoundarySteps.add(ctx.musical_step);
-        if (ctx.is_sub_phrase_start || ctx.is_subphrase_start) {
-          _subPhraseBoundarySteps.add(ctx.musical_step);
+      _structureFrameByStep.forEach(frame => {
+        if (!frame || !Number.isInteger(frame.musical_step)) return;
+        if (frame.is_bar_start) _barBoundarySteps.add(frame.musical_step);
+        if (frame.is_phrase_start) _phraseBoundarySteps.add(frame.musical_step);
+        if (frame.is_subphrase_start) {
+          _subPhraseBoundarySteps.add(frame.musical_step);
         }
+        if (frame.is_drop || frame.is_relock) _dropBoundarySteps.add(frame.musical_step);
       });
     }
 
     function applyTimebaseClasses(cell, sourceStep) {
-      cell.classList.remove('phrase-start', 'sub-phrase-start', 'drop-start');
+      cell.classList.remove('bar-start', 'phrase-start', 'sub-phrase-start', 'drop-start');
+      if (_barBoundarySteps.has(sourceStep)) cell.classList.add('bar-start');
       if (_phraseBoundarySteps.has(sourceStep)) cell.classList.add('phrase-start');
       else if (_subPhraseBoundarySteps.has(sourceStep)) cell.classList.add('sub-phrase-start');
       if (_dropBoundarySteps.has(sourceStep)) cell.classList.add('drop-start');
@@ -1715,7 +1720,6 @@
             cell.dataset.renderStep = s;
             cell.dataset.deformName = name;
             cell.dataset.baseIntensity = d;
-            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
             applyTimebaseClasses(cell, sourceStep);
             if (d > 0) {
               const alpha = 0.15 + d * 0.85;
@@ -1801,7 +1805,6 @@
             cell.dataset.step      = sourceStep;
             cell.dataset.renderStep = s;
             cell.dataset.layer     = role;
-            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
             applyTimebaseClasses(cell, sourceStep);
             _paintCell(cell, role, sourceStep, stepMap);
             row.appendChild(cell);
@@ -1839,8 +1842,6 @@
 
     // ── Phrase overlay ──
 
-    let _phraseMetadata = [];
-
     // Badge tag classification
     function _badgeClass(rule) {
       if (rule === 'hook-mode' || rule === 'hook-start' || rule === 'hook-repeat')
@@ -1856,26 +1857,22 @@
       return '';
     }
 
-    function renderPhraseOverlay(phraseMeta) {
-      _phraseMetadata = phraseMeta || [];
+    function renderPhraseOverlay() {
       const wrap = document.getElementById('phrase-overlay-wrap');
       if (!wrap) return;
       wrap.innerHTML = '';
 
-      if (!_phraseContextByStep.length) return;
+      if (!_structureFrameByStep.length) return;
 
-      const phraseEntries = _phraseMetadata.filter(meta => meta && meta.type !== 'timebase');
-      const phraseByIndex = new Map(phraseEntries.map(meta => [meta.phrase_index, meta]));
-
-      _phraseContextByStep.forEach(sub => {
+      _structureFrameByStep.forEach(sub => {
         const subStep = sub.musical_step;
         if (!Number.isInteger(subStep) || _phraseBoundarySteps.has(subStep)) return;
-        if (!(sub.is_subphrase_start || sub.is_sub_phrase_start)) return;
+        if (!sub.is_subphrase_start) return;
         [subStep, subStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
           marker.className = 'phrase-marker sub-phrase-marker';
           marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
-          const role = sub.sub_phrase_role || sub.subphrase_role;
+          const role = sub.subphrase_role;
           if (role) {
             const label = document.createElement('div');
             label.className = 'sub-phrase-label';
@@ -1886,20 +1883,20 @@
         });
       });
 
-      _phraseContextByStep.forEach(ctx => {
+      _structureFrameByStep.forEach(ctx => {
         if (!ctx || !ctx.is_phrase_start) return;
-        const meta = phraseByIndex.get(ctx.phrase_index) || {};
+        const meta = {};
         // Each phrase boundary appears twice (double-buffer render)
         const phraseStep = ctx.musical_step;
         [phraseStep, phraseStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
-          marker.className = 'phrase-marker' + (ctx.phrase_mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
+          marker.className = 'phrase-marker';
           marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
 
           // Label: "HOOK · two_step · peak"
           const parts = [];
-          if (ctx.phrase_mode === 'HOOK_MODE') parts.push('HOOK');
-          else if (ctx.phrase_mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
+          if (ctx.phrase_role) parts.push(ctx.phrase_role.replace(/_/g, ' ').toUpperCase());
+          if (ctx.is_relock) parts.push('RELOCK');
           if (meta.archetype && meta.archetype !== '—')
             parts.push(meta.archetype.replace(/_/g, '·'));
           if (meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
@@ -1935,16 +1932,15 @@
       const row = document.getElementById('phrase-debug-row');
       if (!row) return;
       row.innerHTML = '';
-      if (!_phraseContextByStep.length) return;
+      if (!_structureFrameByStep.length) return;
 
       for (let s = 0; s < RENDER_STEPS; s++) {
         const sourceStep = s % TOTAL_STEPS;
-        const ctx = _phraseContextByStep[sourceStep];
+        const ctx = _structureFrameByStep[sourceStep];
         const cell = document.createElement('div');
         cell.className = 'phrase-debug-cell';
         cell.dataset.step = sourceStep;
         cell.dataset.renderStep = s;
-        if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
         applyTimebaseClasses(cell, sourceStep);
         if (ctx) {
           cell.title = [
@@ -1952,12 +1948,12 @@
             `musical_step=${ctx.musical_step}`,
             `bar_index=${ctx.bar_index}`,
             `phrase_index=${ctx.phrase_index}`,
-            `subphrase_index=${ctx.sub_phrase_index}`,
+            `subphrase_index=${ctx.subphrase_index}`,
             `is_phrase_start=${ctx.is_phrase_start}`,
-            `is_subphrase_start=${ctx.is_subphrase_start || ctx.is_sub_phrase_start}`,
+            `is_subphrase_start=${ctx.is_subphrase_start}`,
           ].join(' ');
           if (ctx.is_phrase_start) cell.textContent = `P${ctx.phrase_index}`;
-          else if (ctx.is_subphrase_start || ctx.is_sub_phrase_start) cell.textContent = `s${ctx.sub_phrase_index}`;
+          else if (ctx.is_subphrase_start) cell.textContent = `s${ctx.subphrase_index}`;
         }
         row.appendChild(cell);
       }

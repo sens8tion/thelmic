@@ -72,6 +72,24 @@ def test_structure_stream_accounts_for_relock_offset_in_musical_time():
     assert frame.is_relock is True
 
 
+def test_structure_stream_supports_visible_window_origin():
+    stream = StructureStream(
+        StructureProfile(
+            phrase_length_bars=16,
+            subphrase_length_bars=8,
+            origin_step=512,
+        )
+    )
+
+    frame = stream.frame_for_tick(Tick(global_step=512, time=0.0))
+
+    assert frame.global_step == 512
+    assert frame.musical_step == 0
+    assert frame.bar_index == 1
+    assert frame.is_bar_start is True
+    assert frame.is_phrase_start is True
+
+
 def test_phrase_and_subphrase_boundaries_are_deterministic():
     stream = StructureStream(StructureProfile(phrase_length_bars=16, subphrase_length_bars=4))
 

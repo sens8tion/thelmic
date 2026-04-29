@@ -71,7 +71,8 @@ def test_ui_has_no_independent_phrase_marker_calculation():
     assert "phrase_markers" not in source
     assert "sub_phrase_markers" not in source
     assert "sourceStep % (STEPS * 4)" not in source
-    assert "s.phrase_context" in source
+    assert "s.structure_frames" in source
+    assert "s.phrase_context" not in source
     assert "is_phrase_start" in source
     assert "is_subphrase_start" in source
 
