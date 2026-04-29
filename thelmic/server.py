@@ -53,6 +53,7 @@ _midi_port_name: str | None = None
 _play_thread: threading.Thread | None = None
 _stop_event = threading.Event()
 _state_lock = threading.Lock()
+_broadcast_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _state(include_bank: bool = True) -> dict:
@@ -152,11 +153,10 @@ async def _broadcast_state(include_bank: bool = True) -> None:
 
 
 def _queue_broadcast(include_bank: bool = True) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
+    loop = _broadcast_loop
+    if loop is None or loop.is_closed():
         return
-    loop.create_task(_broadcast_state(include_bank=include_bank))
+    asyncio.run_coroutine_threadsafe(_broadcast_state(include_bank=include_bank), loop)
 
 
 def _play_loop() -> None:
@@ -183,6 +183,7 @@ def _play_loop() -> None:
             _current_bank = generate_bank(_bank_index)
             _playhead_step = 0
             _bank_started_at_ms = time.time() * 1000
+        _queue_broadcast(include_bank=True)
 
 
 def _start_playback() -> None:
@@ -211,7 +212,8 @@ async def index() -> str:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    global _bpm, _current_bank, _bank_index, _midi, _midi_port_name
+    global _bpm, _current_bank, _bank_index, _midi, _midi_port_name, _broadcast_loop
+    _broadcast_loop = asyncio.get_running_loop()
     await ws.accept()
     _clients.add(ws)
     await ws.send_text(json.dumps(_state(include_bank=True)))

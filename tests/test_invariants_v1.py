@@ -1,4 +1,5 @@
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import pytest
 
@@ -162,3 +163,71 @@ def test_pression_is_disabled_and_absent_from_output():
     assert state["pression_disabled"] is True
     assert state["runtime"]["pression_enabled"] is False
     assert all("pression" not in event for event in state["bank_events"])
+
+
+def test_display_event_source_is_actual_bank_event_payload():
+    state = server._state(include_bank=True)
+    emitted = {
+        (event.layer, event.musical_step)
+        for event in server._current_bank.all_events()
+        if event.active
+    }
+    displayed = {
+        (event["layer"], event["musical_step"])
+        for event in state["bank_events"]
+    }
+
+    assert displayed == emitted
+
+
+def test_ui_does_not_generate_independent_display_pattern():
+    html = Path("thelmic/static/index.html").read_text(encoding="utf-8")
+
+    assert "state.bank_events" in html
+    assert "byLayerStep" in html
+    assert "continuous_kick_anchor" not in html
+    assert "stable_backbeat" not in html
+    assert "continuous_hat_subdivision" not in html
+
+
+def test_transport_rollover_queues_actual_stream_bank_for_display(monkeypatch):
+    calls = []
+
+    class FakeMidi:
+        def play_bank_blocking(self, *_args, **_kwargs):
+            server._stop_event.set()
+            return 1.0
+
+    monkeypatch.setattr(server, "_queue_broadcast", lambda include_bank=True: calls.append(include_bank))
+    with server._state_lock:
+        original_bank = server._current_bank
+        original_index = server._bank_index
+        original_started = server._bank_started_at_ms
+        original_midi = server._midi
+        server._current_bank = generate_bank(0)
+        server._bank_index = 0
+        server._midi = FakeMidi()
+    server._stop_event.clear()
+
+    try:
+        server._play_loop()
+        with server._state_lock:
+            assert server._bank_index == 1
+            emitted = {
+                (event.layer, event.musical_step)
+                for event in server._current_bank.all_events()
+                if event.active
+            }
+        displayed = {
+            (event["layer"], event["musical_step"])
+            for event in server._state(include_bank=True)["bank_events"]
+        }
+        assert displayed == emitted
+        assert calls == [True]
+    finally:
+        server._stop_event.set()
+        with server._state_lock:
+            server._current_bank = original_bank
+            server._bank_index = original_index
+            server._bank_started_at_ms = original_started
+            server._midi = original_midi
