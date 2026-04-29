@@ -134,6 +134,8 @@ class StructureFrame:
     impact: float
     density: float
     silence: float
+    density_intent: float = 0.0
+    silence_intent: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -157,6 +159,8 @@ class StructureFrame:
             "impact": round(self.impact, 3),
             "density": round(self.density, 3),
             "silence": round(self.silence, 3),
+            "density_intent": round(self.density_intent, 3),
+            "silence_intent": round(self.silence_intent, 3),
         }
 
     def permits_hook(self) -> bool:
@@ -299,6 +303,8 @@ class StructureStream:
             impact=impact,
             density=density,
             silence=silence,
+            density_intent=density,
+            silence_intent=silence,
         )
 
 
@@ -425,14 +431,17 @@ def enrich_with_control(frame: StructureFrame, control: ControlFrame) -> Structu
     """Return a frame enriched by external control without changing time fields."""
 
     density = _clamp(frame.density * (0.75 + control.landscape_position * 0.5))
-    return replace(frame, density=density)
+    return replace(frame, density=density, density_intent=density)
 
 
 def _macro_values(step_in_phrase: int, phrase_length_steps: int) -> tuple[float, float, float, float]:
     progress = 0.0 if phrase_length_steps <= 1 else step_in_phrase / (phrase_length_steps - 1)
     pressure = progress
     impact = 1.0 if step_in_phrase == 0 else 0.0
-    density = _clamp(0.35 + 0.45 * min(progress, 1.0 - max(0.0, progress - 0.75) * 2.0))
+    # Density is activity intent. Silence is withholding intent. Keep them
+    # independent so a pre-drop gap can be silent while still carrying high
+    # underlying tension/activity pressure.
+    density = _clamp(0.35 + 0.45 * min(progress, 1.0))
     silence = _clamp((progress - 0.875) / 0.125) if progress >= 0.875 else 0.0
     return pressure, impact, density, silence
 

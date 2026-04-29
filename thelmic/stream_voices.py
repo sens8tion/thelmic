@@ -62,6 +62,7 @@ RESPONSE_NOTE   = 57   # A3
 STAB_CALL_NOTE  = 62   # D4
 STAB_RESP_NOTE  = 57   # A3
 GHOST_NOTE      = 38   # snare ghost
+SURVIVOR_NOTE   = CLOSED_HAT_NOTE
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +329,48 @@ class GhostIntentStream:
 
 
 # ---------------------------------------------------------------------------
+# Survivor / pre-drop timing carrier
+# ---------------------------------------------------------------------------
+
+class SurvivorIntentStream:
+    source = "stream_survivor"
+
+    def intents_for_frame(self, frame: StructureFrame) -> tuple[Intent, ...]:
+        if frame.silence <= 0.0:
+            return ()
+        tightening = max(0.0, min(1.0, frame.silence))
+        interval = _survivor_interval(tightening)
+        if frame.step_in_bar % interval != 0:
+            return ()
+        velocity = _survivor_velocity(tightening)
+        return (
+            _make_intent(
+                frame, self.source, "hat", "survivor",
+                velocity, 0.025, "survivor_timing_carrier", SURVIVOR_NOTE,
+                priority=1,
+                survives_silence=True,
+                structural_authority=False,
+                tightening=round(tightening, 3),
+                density_intent=frame.density_intent,
+                silence_intent=frame.silence_intent,
+            ),
+        )
+
+
+def _survivor_interval(tightening: float) -> int:
+    if tightening >= 0.75:
+        return 1
+    if tightening >= 0.35:
+        return 2
+    return 4
+
+
+def _survivor_velocity(tightening: float) -> int:
+    # Quietest at the final held-breath moment.
+    return max(5, min(24, int(24 - tightening * 19)))
+
+
+# ---------------------------------------------------------------------------
 # Drop / relock requirements
 # ---------------------------------------------------------------------------
 
@@ -409,6 +452,7 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         expected_weight=0.8,
         should_resolve=False,
         active=True,
+        survives_silence=bool(intent.payload.get("survives_silence", False)),
         structural_authority=(intent.instrument in ("kick", "bassline", "sub")),
         deformation={**template.deformation, layer: 1.0, intent.source: 1.0},
         # Full provenance fields
@@ -443,7 +487,14 @@ def _render(
     resolver = resolver or ResolveStream()
     template = _source_template(template_events)
     if template is None:
-        return [], {f"{stat_prefix}_events_resolved": 0}
+        return [], {
+            f"{stat_prefix}_source": "stream_engine",
+            f"{stat_prefix}_intents_attempted": 0,
+            f"{stat_prefix}_events_resolved": 0,
+            f"{stat_prefix}_intents_suppressed": 0,
+            f"{stat_prefix}_suppressions": {},
+            f"{stat_prefix}_requirement_trace": [],
+        }
 
     rendered: list[MIDIEvent] = []
     attempted = resolved = suppressed = 0
@@ -535,6 +586,11 @@ def render_stream_stab_events(frames, template_events, resolver=None):
 def render_stream_ghost_events(frames, template_events, resolver=None):
     return _render(frames, template_events, GhostIntentStream(),
                    stat_prefix="ghost", resolver=resolver)
+
+
+def render_stream_survivor_events(frames, template_events, resolver=None):
+    return _render(frames, template_events, SurvivorIntentStream(),
+                   stat_prefix="survivor", resolver=resolver)
 
 
 def render_stream_drop_relock_events(frames, template_events, resolver=None):

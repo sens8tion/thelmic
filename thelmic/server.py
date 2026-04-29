@@ -42,6 +42,7 @@ from thelmic.stream_voices import (
     render_stream_sub_events,
     render_stream_stab_events,
     render_stream_ghost_events,
+    render_stream_survivor_events,
     render_stream_drop_relock_events,
 )
 from thelmic.pression import (
@@ -58,7 +59,7 @@ from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
 )
-from thelmic.drop_enforcer import DropCommitState, add_survivor_signal, enforce_drop_relock
+from thelmic.drop_enforcer import DropCommitState, enforce_drop_relock
 from thelmic.support_enforcer import enforce_supporting_layer_compliance
 from thelmic.syntax_enforcer import enforce_phrase_syntax
 from thelmic.phase11 import Phase11State, enforce_priority_and_sparsity
@@ -551,6 +552,17 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         ghost_stream_stats = {"ghost_source": "legacy"}
 
     # ── Drop/relock stream ────────────────────────────────────────────────────
+    stream_survivor_events, survivor_stats = render_stream_survivor_events(
+        structure_frames, list(bank.all_events()),
+    )
+    appended_stream_survivors = _append_events_to_bank(bank, stream_survivor_events)
+    survivor_stats.update({
+        "survivor_ticks_generated": len(stream_survivor_events),
+        "survivor_ticks_after_suppression": len(appended_stream_survivors),
+        "survivor_ticks_in_final_output": len(appended_stream_survivors),
+        "survivor_render_lane": "hat",
+    })
+
     if _DROP_AUTHORITY == "stream":
         stream_drop_events, drop_stream_stats = render_stream_drop_relock_events(
             structure_frames, list(bank.all_events()),
@@ -569,7 +581,6 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         snare_authority=_SNARE_AUTHORITY,
         hat_authority=_HAT_AUTHORITY,
     )
-    survivor_stats = add_survivor_signal(bank, _phrase_plan)
     survivor_after_generation = _survivor_events(bank)
     survivor_signature = (
         _survivor_signature(survivor_after_generation[0])
