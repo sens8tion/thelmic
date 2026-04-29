@@ -1,4 +1,5 @@
 from collections import Counter, defaultdict
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,17 @@ def test_simple_continuous_v1_output_shape_is_locked():
         "kick": 32,
         "snare": 31,
     }
+
+
+def test_v1_01_emitted_stream_fingerprint_is_locked():
+    payload = "\n".join(
+        f"{event.musical_step}:{event.layer}:{event.role}:{event.note}:{event.velocity}:{event.duration}"
+        for event in _events()
+    )
+
+    assert hashlib.sha256(payload.encode()).hexdigest() == (
+        "5665cfd22001a489ca2a20b9742a7c9819abc375d1169344a1a0f23ffbeca504"
+    )
 
 
 def test_v1_01_runtime_version_freezes_v1_rules_baseline():
