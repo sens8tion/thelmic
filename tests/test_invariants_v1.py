@@ -6,10 +6,14 @@ import pytest
 
 from thelmic.bank_generator import BankGenerator
 from thelmic.motif_engine import (
+    MutationClassification,
     RULE_SOURCE,
+    Motif,
     MotifType,
+    classify_motif_change,
     empty_future_motifs,
     motifs_for_events,
+    validate_motif_change_boundary,
     validate_motif_contract,
 )
 from thelmic.note_generation_chain import BANK_STEPS, VERSION, generate_bank, structure_frames
@@ -18,6 +22,17 @@ from thelmic import server
 
 def _events():
     return generate_bank(0).all_events()
+
+
+def _motif_with_refs(size=10):
+    return Motif(
+        id="test:motif",
+        type=MotifType.PERCUSSIVE_PATTERN,
+        instrument="hat",
+        phrase_start=0,
+        phrase_end=BANK_STEPS,
+        event_references=tuple(f"event:{index}" for index in range(size)),
+    )
 
 
 def test_v0_9_engine_entrypoint_is_disabled():
@@ -107,6 +122,83 @@ def test_motif_engine_points_to_music_rules_as_rule_source():
 
     assert RULE_SOURCE == "musical_rules.md"
     assert all(motif.to_dict()["rule_source"] == "musical_rules.md" for motif in motifs)
+
+
+def test_motif_validator_accepts_single_event_addition():
+    motif = _motif_with_refs()
+    validation = classify_motif_change(
+        motif,
+        motif.event_references + ("event:10",),
+    )
+
+    assert validation.classification == MutationClassification.LEGAL
+    assert validation.added_count == 1
+    assert validation.removed_count == 0
+    assert validation.reason == "single_event_add_or_remove"
+
+
+def test_motif_validator_accepts_single_event_removal():
+    motif = _motif_with_refs()
+    validation = classify_motif_change(motif, motif.event_references[:-1])
+
+    assert validation.classification == MutationClassification.LEGAL
+    assert validation.added_count == 0
+    assert validation.removed_count == 1
+    assert validation.reason == "single_event_add_or_remove"
+
+
+def test_motif_validator_accepts_change_at_or_below_20_percent():
+    motif = _motif_with_refs()
+    changed = list(motif.event_references)
+    changed[2] = "event:mutated:2"
+    changed[7] = "event:mutated:7"
+    validation = classify_motif_change(motif, changed)
+
+    assert validation.classification == MutationClassification.LEGAL
+    assert validation.changed_count == 2
+    assert validation.change_ratio == pytest.approx(0.20)
+    assert validation.reason == "change_ratio_within_20_percent"
+
+
+def test_motif_validator_marks_change_above_20_percent_as_structural():
+    motif = _motif_with_refs()
+    changed = list(motif.event_references)
+    changed[1] = "event:mutated:1"
+    changed[4] = "event:mutated:4"
+    changed[8] = "event:mutated:8"
+    validation = classify_motif_change(motif, changed)
+
+    assert validation.classification == MutationClassification.STRUCTURAL
+    assert validation.changed_count == 3
+    assert validation.change_ratio == pytest.approx(0.30)
+    assert validation.reason == "change_ratio_above_20_percent"
+
+
+def test_motif_validator_marks_multiple_adds_or_removes_as_structural():
+    motif = _motif_with_refs()
+    added = classify_motif_change(
+        motif,
+        motif.event_references + ("event:10", "event:11"),
+    )
+    removed = classify_motif_change(motif, motif.event_references[:-2])
+
+    assert added.classification == MutationClassification.STRUCTURAL
+    assert added.reason == "add_remove_more_than_one_event"
+    assert removed.classification == MutationClassification.STRUCTURAL
+    assert removed.reason == "add_remove_more_than_one_event"
+
+
+def test_structural_motif_change_is_rejected_outside_drop_boundary():
+    motif = _motif_with_refs()
+    validation = classify_motif_change(
+        motif,
+        motif.event_references + ("event:10", "event:11"),
+    )
+
+    with pytest.raises(ValueError, match="outside drop boundary"):
+        validate_motif_change_boundary(validation, is_drop=False)
+
+    validate_motif_change_boundary(validation, is_drop=True)
 
 
 def test_v1_01_runtime_version_freezes_v1_rules_baseline():
