@@ -1,4 +1,4 @@
-"""Thelmic v1.0 server.
+"""Thelmic v1.01 server.
 
 Only the v1.0 path is active. The server is behaviour-transparent plumbing:
 it exposes state, transport, UI, and MIDI output for final events produced by
@@ -27,7 +27,7 @@ from thelmic.note_generation_chain import BANK_STEPS, generate_bank, structure_f
 from thelmic.stream_engine import VERSION as STREAM_ENGINE_VERSION
 
 
-THELMIC_VERSION = "v1.0.0"
+THELMIC_VERSION = "v1.01"
 MUSIC_RULES_VERSION = "v1.0"
 MOTIF_ENGINE_VERSION = "v1.0"
 PRESSION_ENGINE_VERSION = "v0.9-disabled"
@@ -45,6 +45,8 @@ _clients: set[WebSocket] = set()
 _playing = False
 _bpm = 174.0
 _bank_index = 0
+_playhead_step = 0
+_bank_started_at_ms = 0.0
 _current_bank: Bank = generate_bank(0)
 _midi: MIDIOut | None = None
 _midi_port_name: str | None = None
@@ -68,6 +70,9 @@ def _state(include_bank: bool = True) -> dict:
         "test_contract_version": TEST_CONTRACT_VERSION,
         "runtime_mode": "simple continuous v1 output",
         "playing": _playing,
+        "playhead_step": _playhead_step,
+        "bank_started_at_ms": _bank_started_at_ms,
+        "bank_duration_ms": (60.0 / _bpm) * 4 * BARS_PER_PHRASE * PHRASES_PER_BANK * 1000,
         "bpm": _bpm,
         "landscape_position": 0.0,
         "selected_archetype": "v1-rule-driven",
@@ -155,11 +160,12 @@ def _queue_broadcast(include_bank: bool = True) -> None:
 
 
 def _play_loop() -> None:
-    global _bank_index, _current_bank
+    global _bank_index, _current_bank, _playhead_step, _bank_started_at_ms
     next_start = time.perf_counter()
     while not _stop_event.is_set():
         with _state_lock:
             bank = _current_bank
+            _playhead_step = 0
         if _midi is not None:
             try:
                 next_start = _midi.play_bank_blocking(bank, bpm=_bpm, start_time=next_start)
@@ -175,22 +181,27 @@ def _play_loop() -> None:
         with _state_lock:
             _bank_index += 1
             _current_bank = generate_bank(_bank_index)
+            _playhead_step = 0
+            _bank_started_at_ms = time.time() * 1000
 
 
 def _start_playback() -> None:
-    global _playing, _play_thread
+    global _playing, _play_thread, _bank_started_at_ms
     if _playing:
         return
     _stop_event.clear()
     _playing = True
+    _bank_started_at_ms = time.time() * 1000
     _play_thread = threading.Thread(target=_play_loop, daemon=True)
     _play_thread.start()
 
 
 def _stop_playback() -> None:
-    global _playing
+    global _playing, _playhead_step, _bank_started_at_ms
     _playing = False
     _stop_event.set()
+    _playhead_step = 0
+    _bank_started_at_ms = 0.0
 
 
 @app.get("/", response_class=HTMLResponse)

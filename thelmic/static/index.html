@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Thelmic v1.0</title>
+  <title>Thelmic v1.01</title>
   <style>
     :root {
       color-scheme: dark;
@@ -89,6 +89,7 @@
       position: relative;
       border-left: 1px solid transparent;
     }
+    .playhead { box-shadow: inset 2px 0 0 var(--accent); }
     .bar { border-left-color: #555; }
     .phrase { border-left-color: var(--accent); }
     .hit::after {
@@ -112,7 +113,7 @@
 </head>
 <body>
   <header>
-    <h1>THELMIC V1.0</h1>
+    <h1>THELMIC V1.01</h1>
     <div class="status">
       <div id="runtime">connecting</div>
       <div id="versions"></div>
@@ -132,8 +133,11 @@
 
   <script>
     const STEPS = 64;
+    const BANK_STEPS = 256;
+    const PLAYHEAD_COLUMN = 16;
     const layers = ["kick", "snare", "hat"];
     let ws;
+    let latestState = null;
 
     function connect() {
       ws = new WebSocket(`ws://${location.host}/ws`);
@@ -144,7 +148,10 @@
       };
       ws.onmessage = event => {
         const state = JSON.parse(event.data);
-        if (state.type === "state") render(state);
+        if (state.type === "state") {
+          latestState = state;
+          render(state);
+        }
       };
     }
 
@@ -170,9 +177,30 @@
       document.getElementById("versions").textContent = `${state.thelmic_version} / rules ${state.music_rules_version}`;
       document.getElementById("bpm").value = state.bpm || 174;
 
+      drawGrid(state);
+
+      document.getElementById("meta").innerHTML = `
+        <div>events: ${(state.runtime && state.runtime.event_count) || (state.bank_events || []).length}</div>
+        <div>pression: ${state.pression_engine_version}</div>
+        <div>legacy fallback: ${state.runtime && state.runtime.legacy_fallback_enabled}</div>
+        <div>post-generation rescue: ${state.runtime && state.runtime.post_generation_rescue_enabled}</div>
+      `;
+    }
+
+    function currentStep(state) {
+      if (!state.playing || !state.bank_started_at_ms || !state.bank_duration_ms) {
+        return state.playhead_step || 0;
+      }
+      const elapsed = (Date.now() - state.bank_started_at_ms) % state.bank_duration_ms;
+      return Math.max(0, Math.min(BANK_STEPS - 1, Math.floor((elapsed / state.bank_duration_ms) * BANK_STEPS)));
+    }
+
+    function drawGrid(state) {
       const frames = state.structure_frames || [];
       const events = state.bank_events || [];
       const byLayerStep = new Set(events.map(event => `${event.layer}:${event.musical_step}`));
+      const playheadStep = currentStep(state);
+      const windowStart = Math.max(0, Math.min(BANK_STEPS - STEPS, playheadStep - PLAYHEAD_COLUMN));
       const grid = document.getElementById("grid");
       grid.innerHTML = "";
 
@@ -181,28 +209,29 @@
         label.className = "label";
         label.textContent = layer;
         grid.appendChild(label);
-        for (let step = 0; step < STEPS; step++) {
+        for (let column = 0; column < STEPS; column++) {
+          const step = windowStart + column;
           const frame = frames[step] || {};
           const cell = document.createElement("div");
           cell.className = `cell ${layer}`;
           if (frame.is_bar_start) cell.classList.add("bar");
           if (frame.is_phrase_start) cell.classList.add("phrase");
+          if (step === playheadStep) cell.classList.add("playhead");
           if (byLayerStep.has(`${layer}:${step}`)) cell.classList.add("hit");
           cell.title = `step ${step} bar ${frame.bar_index ?? "-"} ${frame.phrase_role ?? ""}`;
           grid.appendChild(cell);
         }
       }
+    }
 
-      document.getElementById("meta").innerHTML = `
-        <div>events: ${(state.runtime && state.runtime.event_count) || events.length}</div>
-        <div>pression: ${state.pression_engine_version}</div>
-        <div>legacy fallback: ${state.runtime && state.runtime.legacy_fallback_enabled}</div>
-        <div>post-generation rescue: ${state.runtime && state.runtime.post_generation_rescue_enabled}</div>
-      `;
+    function animate() {
+      if (latestState && latestState.playing) drawGrid(latestState);
+      requestAnimationFrame(animate);
     }
 
     refreshPorts();
     connect();
+    animate();
   </script>
 </body>
 </html>

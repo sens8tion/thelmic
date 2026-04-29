@@ -35,6 +35,14 @@ def test_simple_continuous_v1_output_shape_is_locked():
     }
 
 
+def test_v1_01_runtime_version_freezes_v1_rules_baseline():
+    state = server._state(include_bank=False)
+
+    assert state["thelmic_version"] == "v1.01"
+    assert state["music_rules_version"] == "v1.0"
+    assert state["runtime"]["output"] == "simple continuous v1 output"
+
+
 def test_percussive_drive_never_collapses():
     by_bar = defaultdict(list)
     for event in _events():
