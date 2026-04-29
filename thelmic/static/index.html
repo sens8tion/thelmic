@@ -1755,7 +1755,8 @@
           cell.dataset.midiChannel = ev.midi_channel ?? '';
           const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
           const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
-          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}`;
+          const originDesc = ev.origin_source ? ` origin:${ev.origin_source}/${ev.origin_reason || 'unknown'} resolved:${ev.resolution_reason || 'unknown'}` : '';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}${originDesc}`;
         } else {
           cell.classList.remove('no-midi');
           cell.style.background = '';

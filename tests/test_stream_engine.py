@@ -152,8 +152,8 @@ def test_resolve_stream_is_central_suppression_authority():
     frame = StructureStream().frame_for_tick(Tick(global_step=255, time=0.0))
     intent = Intent(
         step=frame.global_step,
-        instrument="hook",
-        role="hook",
+        instrument="stab",
+        role="stab",
         velocity=80,
         priority=4,
         source="test",

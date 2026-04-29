@@ -34,7 +34,7 @@ from thelmic.call_response import (
 )
 from thelmic.calls import generate_planned_calls
 from thelmic.responses import generate_planned_responses
-from thelmic.hook import generate_planned_hook
+from thelmic.stream_hooks import render_stream_hook_events
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, audit_pression_compliance,
     DEFAULT_CC_MAP, DIMENSION_NAMES, DIMENSION_COLOURS,
@@ -301,7 +301,11 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         base_events, behaviour, _phrase_plan,
         landscape_position=landscape_position,
     )
-    hook_events: list = generate_planned_hook(base_events, behaviour, _phrase_plan)
+    hook_events, hook_stream_stats = render_stream_hook_events(
+        _stream_structure_frame_objects(),
+        _phrase_plan,
+        base_events,
+    )
     leader = _phase11_state.call_response_leader
     leader_layer = "bassline" if leader == "bass" else leader
 
@@ -362,7 +366,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
     priority_stats = enforce_priority_and_sparsity(bank, _phrase_plan, _phase11_state)
     drop_stats     = enforce_drop_relock(
-        bank, _phrase_plan, _drop_commit_state, syntax_stats
+        bank, _phrase_plan, _drop_commit_state, syntax_stats, hook_authority="stream"
     )
     if drop_stats.get("commit_applied", 0):
         _phase11_state.mark_drop_committed()
@@ -400,6 +404,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug.update(beat_bed_stats)
     _runtime_debug.update(planned_calls.stats)
     _runtime_debug.update(planned_responses.stats)
+    _runtime_debug.update(hook_stream_stats)
     _runtime_debug.update(syntax_stats)
     _runtime_debug.update(support_stats)
     _runtime_debug.update(priority_stats)
@@ -419,7 +424,6 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["silence_length_bars"] = _phase11_state.silence_length_bars
     _runtime_debug["bass_source"] = "phrase_plan"
     _runtime_debug["bass_tonal_centre"] = 36
-    _runtime_debug["hook_source"] = "phrase_plan"
     conformance = round(conformance_for_landscape(landscape_position), 3)
     _runtime_debug["bass_conformance"] = conformance
     _runtime_debug["stab_conformance"] = conformance
@@ -723,7 +727,7 @@ def _sub_phrase_role_for_index(index: int, count: int) -> str:
     return "transformation"
 
 
-def _stream_structure_frames() -> list[dict]:
+def _stream_structure_frame_objects() -> list:
     """Read-only StructureFrame window for UI/debug overlays.
 
     This is the new canonical stream spine exposed to the active runtime.
@@ -745,7 +749,11 @@ def _stream_structure_frames() -> list[dict]:
         Tick(global_step=bank_start_step + step, time=0.0)
         for step in range(total_steps)
     )
-    return [frame.to_dict() for frame in stream.frames(ticks)]
+    return list(stream.frames(ticks))
+
+
+def _stream_structure_frames() -> list[dict]:
+    return [frame.to_dict() for frame in _stream_structure_frame_objects()]
 
 
 def _phrase_context_steps() -> list[dict]:
@@ -819,6 +827,9 @@ def _bank_events_list(bank) -> list:
             "emphasis": round(event.emphasis, 2),
             "survives_silence": getattr(event, "survives_silence", False),
             "structural_authority": getattr(event, "structural_authority", True),
+            "origin_source": getattr(event, "origin_source", ""),
+            "origin_reason": getattr(event, "origin_reason", ""),
+            "resolution_reason": getattr(event, "resolution_reason", ""),
             "deformation": {k: round(v, 3) for k, v in event.deformation.items()},
         })
     return events

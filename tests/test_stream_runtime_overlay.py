@@ -51,3 +51,24 @@ def test_ui_consumes_structure_frames_for_structure_overlay():
     assert "updatePhraseContext" not in source
     assert "_phraseContextByStep" not in source
     assert "sourceStep % STEPS" not in source
+
+
+def test_server_bank_payload_uses_stream_hook_events():
+    server._init_engine()
+    bank = server._generator.generate(
+        server._engine.force_state,
+        0,
+        server._engine.landscape_position,
+    )
+    server._current_bank = bank
+    server._apply_behaviour_modules_to_bank(bank, {})
+
+    payload = server._bank_events_list(bank)
+    hook_events = [event for event in payload if event["layer"] == "hook"]
+
+    assert hook_events
+    assert all(event["origin_source"] == "stream_hook" for event in hook_events)
+    assert all(event["origin_reason"] for event in hook_events)
+    assert all(event["resolution_reason"] == "resolved" for event in hook_events)
+    assert server._runtime_debug["hook_source"] == "stream_engine"
+    assert server._runtime_debug["hook_intents_suppressed"] > 0

@@ -159,6 +159,14 @@ class StructureFrame:
             "silence": round(self.silence, 3),
         }
 
+    def permits_hook(self) -> bool:
+        """Hook may state phrase identity at phrase start and once mid-phrase."""
+
+        phrase_midpoint = self.step_in_phrase // max(1, STEPS_PER_BAR * 8)
+        in_first_bar = self.step_in_phrase < STEPS_PER_BAR
+        in_mid_recap_bar = phrase_midpoint == 1 and self.step_in_subphrase < STEPS_PER_BAR
+        return in_first_bar or in_mid_recap_bar
+
 
 @dataclass(frozen=True)
 class ControlFrame:
@@ -180,6 +188,7 @@ class Intent:
     priority: int = 0
     source: str = ""
     reason: str = ""
+    payload: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -330,6 +339,16 @@ class ResolveStream:
         kept: dict[str, Intent] = {}
         suppressions: list[SuppressionEvent] = []
         for intent in intents:
+            if intent.role == "hook" and not frame.permits_hook():
+                suppressions.append(
+                    SuppressionEvent(
+                        step=frame.global_step,
+                        instrument=intent.instrument,
+                        origin_intent=intent,
+                        reason="hook_not_permitted_by_structure",
+                    )
+                )
+                continue
             if frame.silence >= 1.0 and intent.role != "survivor":
                 suppressions.append(
                     SuppressionEvent(

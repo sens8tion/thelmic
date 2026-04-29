@@ -47,6 +47,9 @@ class MIDIEvent:
     active: bool = True
     survives_silence: bool = False
     structural_authority: bool = True
+    origin_source: str = ""
+    origin_reason: str = ""
+    resolution_reason: str = ""
     deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
 
 

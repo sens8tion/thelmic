@@ -95,6 +95,8 @@ class DropStats:
     bass_at_drop: int = 0
     bassline_at_drop: int = 0
     sub_at_drop: int = 0
+    hook_requirements_deferred: int = 0
+    legacy_hook_events_suppressed: int = 0
 
     def to_dict(self) -> dict[str, int | str]:
         return {
@@ -114,6 +116,8 @@ class DropStats:
             "bass_at_drop":                    self.bass_at_drop,
             "bassline_at_drop":                self.bassline_at_drop,
             "sub_at_drop":                     self.sub_at_drop,
+            "hook_requirements_deferred":      self.hook_requirements_deferred,
+            "legacy_hook_events_suppressed":   self.legacy_hook_events_suppressed,
         }
 
 
@@ -541,7 +545,7 @@ def _check_pre_drop_contrast(
 
 def _suppress_illegal_events(
     bank: Bank, plan: PhrasePlan, drop_bar: int,
-    plan_bars: int, stats: DropStats,
+    plan_bars: int, stats: DropStats, hook_authority: str = "legacy",
 ) -> None:
     """Remove events that must not exist in a DROP_RELOCK bar.
 
@@ -570,6 +574,13 @@ def _suppress_illegal_events(
 
             # 1. Suppress unresolved call/response
             role = e.role.lower()
+            if (
+                hook_authority == "stream"
+                and e.layer == "hook"
+                and getattr(e, "origin_source", "") != "stream_hook"
+            ):
+                stats.legacy_hook_events_suppressed += 1
+                continue
             if "call" in role or "response" in role:
                 stats.drop_illegal_events_suppressed += 1
                 continue
@@ -596,6 +607,7 @@ def enforce_drop_relock(
     plan: PhrasePlan,
     commit_state: DropCommitState | None = None,
     syntax_stats: dict | None = None,
+    hook_authority: str = "legacy",
 ) -> dict[str, int | str]:
     """Enforce DROP_RELOCK construction and compliance.
 
@@ -651,7 +663,7 @@ def enforce_drop_relock(
         stats.active_state_after = after
 
         # Illegal event suppression runs first (before we add new events)
-        _suppress_illegal_events(bank, plan, bar, plan_bars, stats)
+        _suppress_illegal_events(bank, plan, bar, plan_bars, stats, hook_authority)
 
         # Snapshot bar events after suppression
         bar_events = _events_for_bar(bank, bar)
@@ -660,7 +672,10 @@ def enforce_drop_relock(
         _ensure_bass_at_drop(bank, plan, bar, bar_events, stats)
         _ensure_sub_at_drop(bank, plan, bar, bar_events, stats)
         _ensure_kick_at_drop(bank, bar, bar_events, stats)
-        _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
+        if hook_authority == "stream":
+            stats.hook_requirements_deferred += 1
+        else:
+            _ensure_hook_at_drop(bank, plan, bar, bar_events, stats)
         refreshed = _events_for_bar(bank, bar)
         if _has_layer_at_step(refreshed, bar, DROP_STEP, "kick"):
             stats.kick_at_drop += 1
