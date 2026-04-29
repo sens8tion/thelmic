@@ -20,39 +20,216 @@ from thelmic.stream_hooks import bank_step_to_time
 
 
 class KickIntentStream:
+    """Territory-aware kick intent generator.
+
+    Pattern varies by landscape position (Oak / Chaos / Nott):
+
+    Oak  (lpos < 0.33)  — stable two-step, grounded
+      - beats 1 + 3 always (steps 0, 8)
+      - light syncopation only when density rises
+
+    Chaos (0.33–0.67)   — denser, unstable, syncopated
+      - density scales from two-step through 4×4 to dense synco
+      - extra steps at high pressure
+
+    Nott  (lpos > 0.67) — sparse but weighted
+      - very few kicks, heavy on downbeat
+      - pressure adds beat 3 and pre-bar emphasis
+
+    Structure rules (non-negotiable):
+      - is_drop / is_relock always produces a kick (high velocity)
+      - silence > 0.85 suppresses non-structural kicks
+
+    Velocity reflects territory character:
+      - Oak: consistent (~96)
+      - Chaos: density-scaled (90–108)
+      - Nott: pressure-weighted (88–112), heavy downbeat accent
+      - Drop/relock: always +12 bonus
+    """
+
     source = "stream_kick"
 
+    # ── Pattern tables ────────────────────────────────────────────────────
+
+    # (step_in_bar, role)  — anchor = strong beat, ghost = synco fill
+    _OAK_PATTERNS: tuple[tuple[tuple[int, str], ...], ...] = (
+        # density < 0.45: minimal two-step
+        ((0, "anchor"), (8, "anchor")),
+        # density < 0.60: two-step + subtle synco
+        ((0, "anchor"), (6, "ghost"), (8, "anchor")),
+        # density >= 0.60: two-step + offbeat punch
+        ((0, "anchor"), (6, "ghost"), (8, "anchor"), (10, "ghost")),
+    )
+
+    _CHAOS_PATTERNS: tuple[tuple[tuple[int, str], ...], ...] = (
+        # density < 0.45: two-step
+        ((0, "anchor"), (8, "anchor")),
+        # density < 0.58: two-step + synco
+        ((0, "anchor"), (6, "ghost"), (8, "anchor")),
+        # density < 0.70: 4-on-the-floor
+        ((0, "anchor"), (4, "anchor"), (8, "anchor"), (12, "anchor")),
+        # density < 0.82: 4×4 + synco off-beats
+        ((0, "anchor"), (4, "anchor"), (8, "anchor"), (10, "ghost"),
+         (12, "anchor")),
+        # density >= 0.82: dense chaos
+        ((0, "anchor"), (4, "anchor"), (8, "anchor"), (10, "ghost"),
+         (12, "anchor"), (14, "ghost")),
+    )
+
+    _NOTT_PATTERNS: tuple[tuple[tuple[int, str], ...], ...] = (
+        # pressure < 0.30: single downbeat only
+        ((0, "anchor"),),
+        # pressure < 0.55: beats 1 + 3
+        ((0, "anchor"), (8, "anchor")),
+        # pressure >= 0.55: 1+3 with pre-bar emphasis
+        ((0, "anchor"), (8, "anchor"), (12, "ghost")),
+    )
+
+    # ── Public interface ──────────────────────────────────────────────────
+
     def intents_for_frame(self, frame: StructureFrame) -> tuple[Intent, ...]:
-        if not (frame.is_bar_start or frame.is_drop or frame.is_relock):
+        # Structure-mandatory: always kick at drop / relock regardless of territory
+        if frame.is_drop or frame.is_relock:
+            return self._drop_intent(frame)
+
+        # Silence gate: suppress non-structural kicks in pre-drop silence
+        if frame.silence > 0.85:
             return ()
-        velocity = 116 if frame.is_drop else 100
-        reason = "drop_relock_kick" if frame.is_drop or frame.is_relock else "bar_start_kick"
-        return (
-            Intent(
-                step=frame.global_step,
-                instrument="kick",
-                role="anchor",
-                velocity=velocity,
-                duration=0.08,
-                phrase_index=frame.phrase_index,
-                subphrase_index=frame.subphrase_index,
-                priority=8,
-                source=self.source,
-                reason=reason,
-                intent_id=f"{self.source}:{frame.global_step}:{reason}",
-                payload={
-                    "note": KICK_NOTE,
-                    "global_step": frame.global_step,
-                    "musical_step": frame.musical_step,
-                    "bar_index": frame.bar_index,
-                    "phrase_index": frame.phrase_index,
-                    "step_in_bar": frame.step_in_bar,
-                    "is_bar_start": frame.is_bar_start,
-                    "is_phrase_start": frame.is_phrase_start,
-                    "is_drop": frame.is_drop,
-                },
-            ),
+
+        # Territory pattern selection
+        pattern = self._pattern_for_frame(frame)
+
+        # Find this step in the pattern
+        for step, role in pattern:
+            if step == frame.step_in_bar:
+                return (self._make_kick_intent(frame, role),)
+        return ()
+
+    # ── Internals ────────────────────────────────────────────────────────
+
+    def _pattern_for_frame(
+        self, frame: StructureFrame,
+    ) -> tuple[tuple[int, str], ...]:
+        lpos = frame.landscape_position
+        density = frame.density
+        pressure = frame.pressure
+
+        if lpos >= 0.67:
+            # Nott — sparse, pressure-driven
+            if pressure < 0.30:
+                return self._NOTT_PATTERNS[0]
+            if pressure < 0.55:
+                return self._NOTT_PATTERNS[1]
+            return self._NOTT_PATTERNS[2]
+
+        if lpos >= 0.33:
+            # Chaos — density-driven
+            if density < 0.45:
+                return self._CHAOS_PATTERNS[0]
+            if density < 0.58:
+                return self._CHAOS_PATTERNS[1]
+            if density < 0.70:
+                return self._CHAOS_PATTERNS[2]
+            if density < 0.82:
+                return self._CHAOS_PATTERNS[3]
+            return self._CHAOS_PATTERNS[4]
+
+        # Oak — density-modulated two-step
+        if density < 0.45:
+            return self._OAK_PATTERNS[0]
+        if density < 0.60:
+            return self._OAK_PATTERNS[1]
+        return self._OAK_PATTERNS[2]
+
+    def _drop_intent(self, frame: StructureFrame) -> tuple[Intent, ...]:
+        return (self._make_kick_intent(frame, "anchor", drop=True),)
+
+    def _make_kick_intent(
+        self,
+        frame: StructureFrame,
+        role: str,
+        drop: bool = False,
+    ) -> Intent:
+        velocity = self._velocity(frame, role, drop=drop)
+        reason = (
+            "drop_relock_kick" if drop
+            else f"kick_{role}_{_territory(frame.landscape_position)}"
         )
+        return Intent(
+            step=frame.global_step,
+            instrument="kick",
+            role=role,
+            velocity=velocity,
+            duration=0.08,
+            phrase_index=frame.phrase_index,
+            subphrase_index=frame.subphrase_index,
+            priority=8,
+            source=self.source,
+            reason=reason,
+            intent_id=f"{self.source}:{frame.global_step}:{reason}",
+            payload={
+                "note": KICK_NOTE,
+                "global_step": frame.global_step,
+                "musical_step": frame.musical_step,
+                "bar_index": frame.bar_index,
+                "phrase_index": frame.phrase_index,
+                "step_in_bar": frame.step_in_bar,
+                "is_bar_start": frame.is_bar_start,
+                "is_phrase_start": frame.is_phrase_start,
+                "is_drop": frame.is_drop,
+                "territory": _territory(frame.landscape_position),
+                "density": frame.density,
+                "pressure": frame.pressure,
+            },
+        )
+
+    def _velocity(
+        self,
+        frame: StructureFrame,
+        role: str,
+        drop: bool = False,
+    ) -> int:
+        lpos = frame.landscape_position
+        density = frame.density
+        pressure = frame.pressure
+
+        # Territory base
+        if lpos >= 0.67:
+            # Nott: pressure-weighted heavy kick
+            base = 88 + int(pressure * 24)       # 88–112
+        elif lpos >= 0.33:
+            # Chaos: density-scaled dynamic
+            base = 90 + int(density * 18)         # 90–108
+        else:
+            # Oak: stable, consistent
+            base = 94 + int(density * 8)          # 94–102
+
+        # Downbeat accent (step 0 = beat 1)
+        if frame.step_in_bar == 0:
+            base = min(127, base + 6)
+
+        # Ghost kicks are quieter
+        if role == "ghost":
+            base = int(base * 0.58)
+
+        # Drop impact bonus
+        if drop or frame.is_drop or frame.is_relock:
+            base = min(127, base + 14)
+
+        # Phrase build: escalate through BUILD / PRE_DROP
+        from thelmic.stream_engine import PhraseRole
+        if frame.phrase_role in (PhraseRole.BUILD, PhraseRole.PRE_DROP):
+            base = min(127, base + int(pressure * 8))
+
+        return max(1, min(127, base))
+
+
+def _territory(landscape_position: float) -> str:
+    if landscape_position >= 0.67:
+        return "nott"
+    if landscape_position >= 0.33:
+        return "chaos"
+    return "oak"
 
 
 class HatIntentStream:
@@ -182,6 +359,11 @@ def _render_stream_drum_events(
     )
     return rendered, {
         f"{stat_prefix}_source": "stream_engine",
+        f"{stat_prefix}_candidate_intents": attempted,
+        f"{stat_prefix}_emitted_intents": attempted,
+        f"{stat_prefix}_suppressed_intents": suppressed,
+        f"{stat_prefix}_resolved_events": resolved,
+        f"{stat_prefix}_suppression_reasons": suppressions,
         f"{stat_prefix}_intents_attempted": attempted,
         f"{stat_prefix}_events_resolved": resolved,
         f"{stat_prefix}_intents_suppressed": suppressed,
@@ -280,6 +462,11 @@ def _default_template() -> MIDIEvent:
 def _empty_stats(source: str, prefix: str) -> dict:
     return {
         f"{prefix}_source": "stream_engine",
+        f"{prefix}_candidate_intents": 0,
+        f"{prefix}_emitted_intents": 0,
+        f"{prefix}_suppressed_intents": 0,
+        f"{prefix}_resolved_events": 0,
+        f"{prefix}_suppression_reasons": {},
         f"{prefix}_intents_attempted": 0,
         f"{prefix}_events_resolved": 0,
         f"{prefix}_intents_suppressed": 0,

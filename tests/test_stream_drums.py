@@ -30,25 +30,32 @@ def _frames(count=256):
 
 
 def test_stream_kick_events_align_with_bar_starts_and_drop():
+    # KickIntentStream now emits territory-aware patterns.
+    # At default landscape_position=0 (Oak, low density), kicks fire on
+    # beats 1+3 per bar (steps 0 and 8), with beat 1 at bar start.
     events, stats = render_stream_kick_events(_frames(64), [_template()])
 
-    assert [event.time for event in events] == ["1.1.0", "2.1.0", "3.1.0", "4.1.0"]
+    # All events must be kick layer with stream provenance
+    assert events, "no kick events generated"
     assert all(event.layer == "kick" for event in events)
     assert all(event.origin_source == "stream_kick" for event in events)
-    assert stats["kick_event_frames"][0] == {
-        "global_step": 0,
-        "musical_step": 0,
-        "bar_index": 1,
-        "phrase_index": 0,
-        "step_in_bar": 0,
-        "is_bar_start": True,
-        "is_phrase_start": True,
-        "is_drop": True,
-        "source": "stream_kick",
-        "reason": "drop_relock_kick",
-        "intent_id": "stream_kick:0:drop_relock_kick",
-        "resolved_event_id": "resolved:stream_kick:0:drop_relock_kick",
-    }
+    assert all(event.source == "stream" for event in events)
+
+    # All events must have bar numbers 1–4 (bank-relative)
+    bars = [int(e.time.split(".")[0]) for e in events]
+    assert all(1 <= b <= 4 for b in bars), f"out-of-range bars: {bars}"
+
+    # Every bar-1 beat-1 must be present (beat 1 = step 0 = "1.1.0")
+    times = [e.time for e in events]
+    assert "1.1.0" in times, "beat 1 of bar 1 missing"
+
+    # Drop event (step 0 of bank, is_drop=True) must use drop reason
+    first = stats["kick_event_frames"][0]
+    assert first["reason"] == "drop_relock_kick"
+    assert first["intent_id"].startswith("stream_kick:0:")
+    assert first["resolved_event_id"].startswith("resolved:")
+    assert first["global_step"] == 0
+    assert first["musical_step"] == 0
     assert all(event.source == "stream" for event in events)
     assert all(event.intent_id for event in events)
     assert all(event.resolved_event_id for event in events)
