@@ -24,10 +24,10 @@ assertions must be phrased in terms of musical invariants.
 The final output must contain continuous percussive drive in normal state.
 The drive must not collapse into isolated marker hits.
 
-### Drop-Prep Silence
+### Drop-Prep Grid Reminder
 
-Silence is valid only inside drop-prep. Any full silence outside drop-prep is
-invalid.
+Drop-prep is compression before drop. A grid reminder must remain present
+throughout drop-prep.
 
 ### Timing Anchor
 
@@ -49,7 +49,7 @@ Structural changes may commit only at drops.
 
 Only one structural change may occur per phrase.
 
-### Instrument Compliance
+### Instrument Rule Obedience
 
 All instruments must obey the rules. No instrument may bypass motif,
 continuity, drop, or structural exclusivity rules.
@@ -67,4 +67,3 @@ Do not write v1.0 tests that depend on:
 
 Diagnostics may help explain failures, but final-output invariants decide pass
 or fail.
-

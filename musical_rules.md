@@ -75,7 +75,7 @@ Validates final-output invariants.
 
 ```text
 1. Percussive drive never collapses
-2. Silence only occurs in drop-prep
+2. Drop-prep is grid reminder
 3. Timing anchor always survives
 4. Motif persists at least one phrase
 5. Motif mutation <= one event or <= 20 percent
@@ -89,8 +89,7 @@ Validates final-output invariants.
 The system must maintain continuous temporal drive at all times while allowing
 a single controlled anticipation sequence before a drop.
 
-This rule replaces legacy silence rules, drop survivor rules, lane removal
-rules, and rhythm continuity rules.
+This rule replaces legacy lane removal rules and rhythm continuity rules.
 
 ### Timing Anchor
 
@@ -101,9 +100,9 @@ A timing anchor must always be present.
 Normal state requires:
 
 - continuous percussive drive
-- no silence
+- no full-lane removal
 - no fading
-- no energy reduction
+- no drive reduction
 
 ### Drop-Prep State
 
@@ -124,7 +123,7 @@ must not fade in.
 
 The following are disallowed:
 
-- full silence
+- full loss of grid
 - loss of timing reference
 - gradual decay of drive
 - accidental gaps
@@ -161,13 +160,14 @@ Structural changes include:
 - drop-prep activation
 - percussive omission strategy
 
-## Silence
+## Drop-Prep Grid Reminder
 
-Silence may only occur inside drop-prep.
+v1.0 does not have a gap-removal model.
 
-Silence must never remove the timing anchor.
+Drop-prep is compression before drop. It must preserve a clear timing anchor
+or grid reminder.
 
-Full silence is invalid.
+The stream must never lose the grid.
 
 ## Drop
 
@@ -198,7 +198,7 @@ v1.0 test contract.
 No hidden behaviour.
 No post-fix systems.
 No rule bypasses.
-No silent corrections.
+No hidden corrections.
 ```
 
 All behaviour must exist inside declared components and obey v1.0 rules.
