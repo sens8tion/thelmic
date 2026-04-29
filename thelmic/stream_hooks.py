@@ -21,13 +21,33 @@ TICKS_PER_BEAT = 24
 TICKS_PER_STEP = 6
 
 
-def step_to_time(step: int) -> str:
-    bar = step // STEPS_PER_BAR + 1
-    step_in_bar = step % STEPS_PER_BAR
+def bank_step_to_time(musical_step: int) -> str:
+    """Convert a bank-relative musical step (0..255) to a bar.beat.tick string.
+
+    musical_step is ALWAYS bank-relative (0 = first step of this bank).
+    Never pass global_step here — global_step is the absolute transport
+    position and grows without bound across banks.
+
+    Step vocabulary:
+      global_step   — absolute transport position (0, 256, 512 …)
+      musical_step  — bank/window-relative position (always 0..255)
+      step_in_bar   — local bar position (always 0..15)
+    """
+    assert 0 <= musical_step < 256, (
+        f"bank_step_to_time() requires a bank-relative musical_step (0..255), "
+        f"got {musical_step}. Did you accidentally pass global_step?"
+    )
+    bar = musical_step // STEPS_PER_BAR + 1
+    step_in_bar = musical_step % STEPS_PER_BAR
     tick_in_bar = step_in_bar * TICKS_PER_STEP
     beat = tick_in_bar // TICKS_PER_BEAT + 1
     tick = tick_in_bar % TICKS_PER_BEAT
     return f"{bar}.{beat}.{tick}"
+
+
+# Alias kept for any temporary compatibility — remove once all callers are migrated.
+# DO NOT add new call sites pointing here.
+step_to_time = bank_step_to_time
 
 
 class HookIntentStream:
@@ -140,7 +160,7 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
     musical_step = int(intent.payload.get("musical_step", event.step % 256))
     return replace(
         template,
-        time=step_to_time(musical_step),
+        time=bank_step_to_time(musical_step),
         note=pitch,
         velocity=event.velocity,
         duration=event.duration,

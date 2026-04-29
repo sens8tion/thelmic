@@ -1,19 +1,24 @@
 """Stream continuity tests.
 
-Proves that stream kick/hat/hook events are generated correctly across
-multiple banks and do not disappear after the first generated window.
+Step vocabulary (tested explicitly here):
+  global_step   — absolute transport position across all banks (0, 256, 512 …)
+  musical_step  — bank/window-relative position (always 0..255)
+  step_in_bar   — local bar position within one bar (always 0..15)
 
-Root cause of the bug: step_to_time(global_step) was called with the
-absolute global step (e.g. 256 for bank 1 step 0), which produced bar
-numbers ≥ 17 — outside the bank (bars 1–16). Events were silently
-discarded by _append_events_to_bank.
+Root cause of the original bug: step_to_time(global_step) was called with
+the absolute global step (e.g. 256 for bank 1 step 0), which produced bar
+numbers ≥ 17 — outside the bank (bars 1–16). Events were silently dropped.
 
-Fix: use musical_step (bank-relative 0..255) from the intent payload.
+Fix: bank_step_to_time(musical_step) — renamed function that:
+  - only accepts 0..255
+  - asserts if given global_step by mistake
 """
+
+import pytest
 
 from thelmic.bank_generator import MIDIEvent
 from thelmic.stream_drums import render_stream_kick_events, render_stream_hat_events
-from thelmic.stream_hooks import render_stream_hook_events
+from thelmic.stream_hooks import bank_step_to_time, render_stream_hook_events
 from thelmic.stream_engine import StructureProfile, StructureStream, Tick
 
 
@@ -51,6 +56,65 @@ def _valid_bank_times(events):
         parts = e.time.split(".")
         result.append((int(parts[0]), int(parts[1]), int(parts[2])))
     return result
+
+
+# ---------------------------------------------------------------------------
+# bank_step_to_time contract — explicit naming and assertion tests
+# ---------------------------------------------------------------------------
+
+class TestBankStepToTimeContract:
+    """Verify that bank_step_to_time:
+    - accepts only 0..255 (bank-relative musical_step)
+    - rejects global_step values (>= 256)
+    - produces the correct bar.beat.tick for known inputs
+    """
+
+    def test_bank0_step0_produces_bar1(self):
+        assert bank_step_to_time(0) == "1.1.0"
+
+    def test_step16_produces_bar2(self):
+        # step 16 = bar 2, step_in_bar 0
+        assert bank_step_to_time(16) == "2.1.0"
+
+    def test_step255_produces_bar16(self):
+        # step 255 = bar 16 (255//16 + 1 = 16), step_in_bar 15
+        assert bank_step_to_time(255) == "16.4.18"
+
+    def test_bank_step_0_not_bar17(self):
+        """Regression: bank step 0 must be bar 1, not bar 17."""
+        t = bank_step_to_time(0)
+        bar = int(t.split(".")[0])
+        assert bar == 1, f"bank step 0 should be bar 1, got {bar}"
+
+    def test_global_step_256_is_rejected(self):
+        """global_step=256 (bank 1 step 0) must raise — never pass global_step here."""
+        with pytest.raises(AssertionError, match="musical_step"):
+            bank_step_to_time(256)
+
+    def test_global_step_512_is_rejected(self):
+        with pytest.raises(AssertionError):
+            bank_step_to_time(512)
+
+    def test_negative_step_is_rejected(self):
+        with pytest.raises(AssertionError):
+            bank_step_to_time(-1)
+
+    def test_all_valid_steps_produce_bars_1_to_16(self):
+        for step in range(256):
+            t = bank_step_to_time(step)
+            bar = int(t.split(".")[0])
+            assert 1 <= bar <= 16, f"step={step} → bar={bar}"
+
+    def test_step_in_bar_encoding(self):
+        """step_in_bar 0..15 within each bar should encode correctly."""
+        for bar_idx in range(16):
+            for s_in_bar in range(16):
+                musical_step = bar_idx * 16 + s_in_bar
+                t = bank_step_to_time(musical_step)
+                bar_num = int(t.split(".")[0])
+                assert bar_num == bar_idx + 1, (
+                    f"musical_step={musical_step} → bar={bar_num}, expected {bar_idx+1}"
+                )
 
 
 # ---------------------------------------------------------------------------

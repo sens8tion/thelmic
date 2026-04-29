@@ -15,7 +15,7 @@ from thelmic.bank_generator import (
     OPEN_HAT_NOTE,
 )
 from thelmic.stream_engine import Intent, ResolveStream, ResolvedEvent, StructureFrame
-from thelmic.stream_hooks import step_to_time
+from thelmic.stream_hooks import bank_step_to_time
 
 
 class KickIntentStream:
@@ -201,7 +201,7 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
     musical_step = int(intent.payload.get("musical_step", event.step % 256))
     return replace(
         template,
-        time=step_to_time(musical_step),
+        time=bank_step_to_time(musical_step),
         note=note,
         velocity=event.velocity,
         duration=event.duration,
