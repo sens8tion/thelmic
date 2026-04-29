@@ -292,6 +292,20 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
     appended_stream_hats = _append_events_to_bank(bank, stream_hat_events)
     base_events = list(bank.all_events())
+    _runtime_debug["stream_anchor_sources_seen_by_legacy"] = {
+        "kick": sum(
+            1 for event in base_events
+            if event.layer == "kick" and getattr(event, "source", "") == "stream"
+        ),
+        "hat": sum(
+            1 for event in base_events
+            if (
+                event.layer == "hat"
+                and event.role != "survivor"
+                and getattr(event, "source", "") == "stream"
+            )
+        ),
+    }
     landscape_position = _engine.landscape_position
 
     # Collect bars present in this bank
@@ -460,6 +474,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["stab_conformance"] = conformance
     _runtime_debug.update(arrangement_diagnostics(bank, _phase11_state))
     pression_modulated_count = apply_behaviour_dynamics(bank, behaviour)
+    _assert_stream_authority(bank)
 
     # Pre-compute pression timeline for this bank.
     # Pression is computed AFTER enforce_phrase_syntax so it sees only
@@ -865,9 +880,31 @@ def _bank_events_list(bank) -> list:
             "origin_source": getattr(event, "origin_source", ""),
             "origin_reason": getattr(event, "origin_reason", ""),
             "resolution_reason": getattr(event, "resolution_reason", ""),
+            "source": getattr(event, "source", ""),
+            "reason": getattr(event, "reason", ""),
+            "intent_id": getattr(event, "intent_id", ""),
+            "resolved_event_id": getattr(event, "resolved_event_id", ""),
+            "phrase_index": getattr(event, "phrase_index", -1),
+            "bar_index": getattr(event, "bar_index", -1),
             "deformation": {k: round(v, 3) for k, v in event.deformation.items()},
         })
     return events
+
+
+def _assert_stream_authority(bank) -> None:
+    violations: list[str] = []
+    for event in bank.all_events():
+        if _KICK_AUTHORITY == "stream" and event.layer == "kick":
+            if getattr(event, "source", "") != "stream":
+                violations.append(f"kick@{event.time}:{getattr(event, 'source', '') or 'legacy'}")
+        if _HAT_AUTHORITY == "stream" and event.layer == "hat" and event.role != "survivor":
+            if getattr(event, "source", "") != "stream":
+                violations.append(f"hat@{event.time}:{getattr(event, 'source', '') or 'legacy'}")
+    if violations:
+        raise RuntimeError(
+            "stream authority violation: "
+            + ", ".join(violations[:12])
+        )
 
 
 def _force_state_dict(include_bank: bool = True) -> dict:

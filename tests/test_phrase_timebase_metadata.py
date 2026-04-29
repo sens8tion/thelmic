@@ -89,6 +89,8 @@ def test_drop_relock_events_align_with_phrase_starts():
         0,
         server._engine.landscape_position,
         active_archetype=server._active_archetype_name,
+        kick_authority="stream",
+        hat_authority="stream",
     )
     server._current_bank = bank
     server._apply_behaviour_modules_to_bank(bank, {})

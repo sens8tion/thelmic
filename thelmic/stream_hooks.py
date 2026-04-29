@@ -69,7 +69,15 @@ class HookIntentStream:
                     if frame.is_phrase_start
                     else "planned_hook_candidate"
                 ),
-                payload={"pitch": note.pitch},
+                intent_id=f"{self.source}:{frame.global_step}:{note.pitch}",
+                payload={
+                    "pitch": note.pitch,
+                    "global_step": frame.global_step,
+                    "musical_step": frame.musical_step,
+                    "bar_index": frame.bar_index,
+                    "phrase_index": frame.phrase_index,
+                    "step_in_bar": frame.step_in_bar,
+                },
             )
             for note in notes
         )
@@ -145,6 +153,12 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         origin_source=intent.source,
         origin_reason=intent.reason,
         resolution_reason=event.resolution_reason,
+        source="stream",
+        reason=intent.reason,
+        intent_id=intent.intent_id,
+        resolved_event_id=event.resolved_event_id,
+        phrase_index=intent.phrase_index,
+        bar_index=int(intent.payload.get("bar_index", 0)),
     )
 
 

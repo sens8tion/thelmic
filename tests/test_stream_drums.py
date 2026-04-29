@@ -46,7 +46,15 @@ def test_stream_kick_events_align_with_bar_starts_and_drop():
         "is_drop": True,
         "source": "stream_kick",
         "reason": "drop_relock_kick",
+        "intent_id": "stream_kick:0:drop_relock_kick",
+        "resolved_event_id": "resolved:stream_kick:0:drop_relock_kick",
     }
+    assert all(event.source == "stream" for event in events)
+    assert all(event.intent_id for event in events)
+    assert all(event.resolved_event_id for event in events)
+    assert all(event.phrase_index >= 0 for event in events)
+    assert all(event.bar_index >= 1 for event in events)
+    assert all(event.reason for event in events)
 
 
 def test_stream_hat_uses_structure_frame_step_and_density():
@@ -85,4 +93,10 @@ def test_stream_hat_events_are_resolved_with_origin_metadata():
     assert all(event.layer == "hat" for event in events)
     assert all(event.origin_source == "stream_hat" for event in events)
     assert all(event.origin_reason == "density_subdivision_hat" for event in events)
+    assert all(event.source == "stream" for event in events)
+    assert all(event.intent_id.startswith("stream_hat:") for event in events)
+    assert all(event.resolved_event_id.startswith("resolved:stream_hat:") for event in events)
+    assert all(event.phrase_index >= 0 for event in events)
+    assert all(event.bar_index >= 1 for event in events)
+    assert all(event.reason == "density_subdivision_hat" for event in events)
     assert stats["hat_source"] == "stream_engine"

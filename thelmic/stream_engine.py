@@ -188,6 +188,7 @@ class Intent:
     priority: int = 0
     source: str = ""
     reason: str = ""
+    intent_id: str = ""
     payload: dict = field(default_factory=dict)
 
 
@@ -199,6 +200,7 @@ class ResolvedEvent:
     duration: float
     origin_intent: Intent
     resolution_reason: str
+    resolved_event_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -388,6 +390,7 @@ class ResolveStream:
                 duration=intent.duration if intent.duration is not None else 0.08,
                 origin_intent=intent,
                 resolution_reason="resolved",
+                resolved_event_id=_resolved_event_id(intent),
             )
             for intent in kept.values()
         )
@@ -440,3 +443,10 @@ def _floor_div(value: int, divisor: int) -> int:
 
 def _clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def _resolved_event_id(intent: Intent) -> str:
+    source_id = intent.intent_id or (
+        f"{intent.source}:{intent.instrument}:{intent.step}:{intent.reason}"
+    )
+    return f"resolved:{source_id}"

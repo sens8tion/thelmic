@@ -50,6 +50,12 @@ class MIDIEvent:
     origin_source: str = ""
     origin_reason: str = ""
     resolution_reason: str = ""
+    source: str = ""
+    reason: str = ""
+    intent_id: str = ""
+    resolved_event_id: str = ""
+    phrase_index: int = -1
+    bar_index: int = -1
     deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
 
 

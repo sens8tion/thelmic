@@ -35,6 +35,7 @@ class KickIntentStream:
                 priority=8,
                 source=self.source,
                 reason=reason,
+                intent_id=f"{self.source}:{frame.global_step}:{reason}",
                 payload={
                     "note": KICK_NOTE,
                     "global_step": frame.global_step,
@@ -73,7 +74,12 @@ class HatIntentStream:
                 priority=2,
                 source=self.source,
                 reason="density_subdivision_hat",
+                intent_id=f"{self.source}:{frame.global_step}:density_subdivision_hat",
                 payload={
+                    "global_step": frame.global_step,
+                    "musical_step": frame.musical_step,
+                    "bar_index": frame.bar_index,
+                    "phrase_index": frame.phrase_index,
                     "note": note,
                     "density": frame.density,
                     "pressure": frame.pressure,
@@ -156,6 +162,8 @@ def _render_stream_drum_events(
                     "is_drop": payload.get("is_drop"),
                     "source": event.origin_intent.source,
                     "reason": event.origin_intent.reason,
+                    "intent_id": event.origin_intent.intent_id,
+                    "resolved_event_id": event.resolved_event_id,
                 })
 
     return rendered, {
@@ -190,6 +198,12 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         origin_source=intent.source,
         origin_reason=intent.reason,
         resolution_reason=event.resolution_reason,
+        source="stream",
+        reason=intent.reason,
+        intent_id=intent.intent_id,
+        resolved_event_id=event.resolved_event_id,
+        phrase_index=intent.phrase_index,
+        bar_index=int(intent.payload.get("bar_index", 0)),
     )
 
 

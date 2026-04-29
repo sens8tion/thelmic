@@ -1,3 +1,6 @@
+import pytest
+
+from thelmic.bank_generator import Bank, MIDIEvent, Phrase
 from thelmic import server
 
 
@@ -59,6 +62,8 @@ def test_server_bank_payload_uses_stream_hook_events():
         server._engine.force_state,
         0,
         server._engine.landscape_position,
+        kick_authority="stream",
+        hat_authority="stream",
     )
     server._current_bank = bank
     server._apply_behaviour_modules_to_bank(bank, {})
@@ -97,7 +102,80 @@ def test_server_bank_payload_uses_stream_kick_and_hat_events():
     assert hats
     assert all(event["origin_source"] == "stream_kick" for event in kicks)
     assert all(event["origin_source"] == "stream_hat" for event in hats)
+    assert all(event["source"] == "stream" for event in kicks + hats)
+    assert all(event["intent_id"] for event in kicks + hats)
+    assert all(event["resolved_event_id"] for event in kicks + hats)
+    assert all(event["phrase_index"] >= 0 for event in kicks + hats)
+    assert all(event["bar_index"] >= 1 for event in kicks + hats)
+    assert all(event["reason"] for event in kicks + hats)
     assert all(event["resolution_reason"] == "resolved" for event in kicks + hats)
     assert server._runtime_debug["kick_source"] == "stream_engine"
     assert server._runtime_debug["hat_source"] == "stream_engine"
     assert server._runtime_debug["hook_source"] == "stream_engine"
+
+
+def test_legacy_modules_receive_stream_anchors_without_reclassifying_them():
+    server._init_engine()
+    bank = server._generator.generate(
+        server._engine.force_state,
+        0,
+        server._engine.landscape_position,
+        kick_authority="stream",
+        hat_authority="stream",
+    )
+    server._current_bank = bank
+    server._apply_behaviour_modules_to_bank(bank, {})
+
+    seen = server._runtime_debug["stream_anchor_sources_seen_by_legacy"]
+    payload = server._bank_events_list(bank)
+    normal_kicks = [event for event in payload if event["layer"] == "kick"]
+    normal_hats = [
+        event for event in payload
+        if event["layer"] == "hat" and event["role"] != "survivor"
+    ]
+
+    assert seen["kick"] > 0
+    assert seen["hat"] > 0
+    assert any(event["layer"] == "bassline" for event in payload)
+    assert all(event["source"] == "stream" for event in normal_kicks + normal_hats)
+    assert all(event["origin_source"] in {"stream_kick", "stream_hat"} for event in normal_kicks + normal_hats)
+
+
+def test_stream_authority_guard_fails_loudly_on_legacy_kick_or_hat():
+    bank = Bank(
+        bank_index=0,
+        phrases=[
+            Phrase(
+                phrase_index=0,
+                events=[
+                    MIDIEvent(
+                        time="1.1.0",
+                        note=36,
+                        velocity=100,
+                        duration=0.08,
+                        layer="kick",
+                        role="anchor",
+                        emphasis=1.0,
+                        openness=1.0,
+                        expected_weight=1.0,
+                        should_resolve=False,
+                    ),
+                    MIDIEvent(
+                        time="1.1.6",
+                        note=42,
+                        velocity=70,
+                        duration=0.03,
+                        layer="hat",
+                        role="anchor",
+                        emphasis=0.6,
+                        openness=1.0,
+                        expected_weight=0.5,
+                        should_resolve=False,
+                    ),
+                ],
+            )
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="stream authority violation"):
+        server._assert_stream_authority(bank)

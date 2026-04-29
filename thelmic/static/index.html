@@ -1756,7 +1756,10 @@
           const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
           const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
           const originDesc = ev.origin_source ? ` origin:${ev.origin_source}/${ev.origin_reason || 'unknown'} resolved:${ev.resolution_reason || 'unknown'}` : '';
-          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}${originDesc}`;
+          const streamDesc = ev.source
+            ? ` source:${ev.source} reason:${ev.reason || 'unknown'} intent:${ev.intent_id || 'none'} resolved_id:${ev.resolved_event_id || 'none'} phrase:${ev.phrase_index} bar:${ev.bar_index}`
+            : '';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}${originDesc}${streamDesc}`;
         } else {
           cell.classList.remove('no-midi');
           cell.style.background = '';

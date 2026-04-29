@@ -49,6 +49,9 @@ def test_hook_intents_are_structure_frame_candidates():
     assert intents[0].instrument == "hook"
     assert intents[0].source == "stream_hook"
     assert intents[0].reason == "phrase_start_hook"
+    assert intents[0].intent_id == "stream_hook:0:60"
+    assert intents[0].phrase_index == frame.phrase_index
+    assert intents[0].payload["bar_index"] == frame.bar_index
     assert intents[0].payload["pitch"] == 60
 
 
@@ -64,6 +67,12 @@ def test_resolved_stream_hooks_align_to_phrase_start_and_authorised_recap():
     assert all(event.origin_source == "stream_hook" for event in events)
     assert all(event.origin_reason for event in events)
     assert all(event.resolution_reason == "resolved" for event in events)
+    assert all(event.source == "stream" for event in events)
+    assert all(event.reason for event in events)
+    assert all(event.intent_id.startswith("stream_hook:") for event in events)
+    assert all(event.resolved_event_id.startswith("resolved:stream_hook:") for event in events)
+    assert all(event.phrase_index >= 0 for event in events)
+    assert all(event.bar_index >= 1 for event in events)
     assert stats["hook_source"] == "stream_engine"
     assert stats["hook_events_resolved"] == 4
 
