@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from typing import Sequence
+
+_log = logging.getLogger("thelmic.stream_drums")
 
 from thelmic.bank_generator import (
     CLOSED_HAT_NOTE,
@@ -166,6 +169,16 @@ def _render_stream_drum_events(
                     "resolved_event_id": event.resolved_event_id,
                 })
 
+    global_steps = [f.global_step for f in frames]
+    musical_steps = [f.musical_step for f in frames]
+    _log.debug(
+        "%s stream render: frames=%d global_step=%d..%d musical_step=%d..%d "
+        "events_resolved=%d events_suppressed=%d",
+        stat_prefix, len(frames),
+        min(global_steps, default=0), max(global_steps, default=0),
+        min(musical_steps, default=0), max(musical_steps, default=0),
+        resolved, suppressed,
+    )
     return rendered, {
         f"{stat_prefix}_source": "stream_engine",
         f"{stat_prefix}_intents_attempted": attempted,
@@ -178,11 +191,17 @@ def _render_stream_drum_events(
 
 def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
     intent = event.origin_intent
+    _require_stream_provenance(event)
     note = int(intent.payload.get("note", KICK_NOTE))
     layer = intent.instrument
+    # Use musical_step (bank-relative 0..255) not global_step for time conversion.
+    # global_step is absolute across banks (bank1 starts at 256, bank2 at 512 …).
+    # step_to_time() expects a bank-relative step; using global_step produces
+    # bar numbers ≥ 17 for bank 1+, which causes events to be silently dropped.
+    musical_step = int(intent.payload.get("musical_step", event.step % 256))
     return replace(
         template,
-        time=step_to_time(event.step),
+        time=step_to_time(musical_step),
         note=note,
         velocity=event.velocity,
         duration=event.duration,
@@ -205,6 +224,28 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         phrase_index=intent.phrase_index,
         bar_index=int(intent.payload.get("bar_index", 0)),
     )
+
+
+def _require_stream_provenance(event: ResolvedEvent) -> None:
+    intent = event.origin_intent
+    missing: list[str] = []
+    if not intent.source:
+        missing.append("source")
+    if not intent.intent_id:
+        missing.append("intent_id")
+    if not event.resolved_event_id:
+        missing.append("resolved_event_id")
+    if intent.phrase_index < 0:
+        missing.append("phrase_index")
+    if int(intent.payload.get("bar_index", 0)) < 1:
+        missing.append("bar_index")
+    if not intent.reason:
+        missing.append("reason")
+    if missing:
+        raise RuntimeError(
+            f"stream {intent.instrument} event missing provenance: "
+            + ", ".join(missing)
+        )
 
 
 def _source_template(events: Sequence[MIDIEvent]) -> MIDIEvent | None:

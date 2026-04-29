@@ -134,10 +134,13 @@ def render_stream_hook_events(
 
 def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
     intent = event.origin_intent
+    _require_stream_provenance(event)
     pitch = int(intent.payload.get("pitch", 60))
+    # Use musical_step (bank-relative) not global_step — same fix as stream_drums.
+    musical_step = int(intent.payload.get("musical_step", event.step % 256))
     return replace(
         template,
-        time=step_to_time(event.step),
+        time=step_to_time(musical_step),
         note=pitch,
         velocity=event.velocity,
         duration=event.duration,
@@ -160,6 +163,28 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         phrase_index=intent.phrase_index,
         bar_index=int(intent.payload.get("bar_index", 0)),
     )
+
+
+def _require_stream_provenance(event: ResolvedEvent) -> None:
+    intent = event.origin_intent
+    missing: list[str] = []
+    if not intent.source:
+        missing.append("source")
+    if not intent.intent_id:
+        missing.append("intent_id")
+    if not event.resolved_event_id:
+        missing.append("resolved_event_id")
+    if intent.phrase_index < 0:
+        missing.append("phrase_index")
+    if int(intent.payload.get("bar_index", 0)) < 1:
+        missing.append("bar_index")
+    if not intent.reason:
+        missing.append("reason")
+    if missing:
+        raise RuntimeError(
+            f"stream {intent.instrument} event missing provenance: "
+            + ", ".join(missing)
+        )
 
 
 def _source_template(events: Sequence[MIDIEvent]) -> MIDIEvent | None:

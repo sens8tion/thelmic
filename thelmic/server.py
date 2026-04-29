@@ -201,6 +201,61 @@ def _append_events_to_bank(bank, events: list) -> list:
     return appended
 
 
+def _stream_event_trace(events: list) -> list[dict]:
+    trace: list[dict] = []
+    for event in events:
+        if getattr(event, "source", "") != "stream":
+            continue
+        trace.append({
+            "instrument": event.layer,
+            "step": _event_to_step(event),
+            "source": getattr(event, "source", ""),
+            "intent_id": getattr(event, "intent_id", ""),
+            "resolved_event_id": getattr(event, "resolved_event_id", ""),
+            "phrase_index": getattr(event, "phrase_index", -1),
+            "bar_index": getattr(event, "bar_index", -1),
+            "reason": getattr(event, "reason", ""),
+        })
+    return trace
+
+
+def _event_to_step(event) -> int:
+    try:
+        bar, beat, tick = (int(part) for part in event.time.split("."))
+    except ValueError:
+        return -1
+    tick_in_bar = (beat - 1) * 24 + tick
+    return (bar - 1) * 16 + tick_in_bar // 6
+
+
+def _assert_stream_event_provenance(events: list, *, stage: str) -> None:
+    violations: list[str] = []
+    for event in events:
+        if getattr(event, "source", "") != "stream":
+            continue
+        missing = [
+            name for name, value in {
+                "intent_id": getattr(event, "intent_id", ""),
+                "resolved_event_id": getattr(event, "resolved_event_id", ""),
+                "reason": getattr(event, "reason", ""),
+            }.items()
+            if not value
+        ]
+        if getattr(event, "phrase_index", -1) < 0:
+            missing.append("phrase_index")
+        if getattr(event, "bar_index", -1) < 1:
+            missing.append("bar_index")
+        if missing:
+            violations.append(
+                f"{event.layer}@{event.time} missing {','.join(missing)}"
+            )
+    if violations:
+        raise RuntimeError(
+            f"stream provenance violation after {stage}: "
+            + "; ".join(violations[:12])
+        )
+
+
 def _events_per_bar(events: list) -> dict[int, int]:
     counts: dict[int, int] = {}
     for event in events:
@@ -285,13 +340,25 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         structure_frames,
         seed_events,
     )
+    _assert_stream_event_provenance(stream_kick_events, stage="stream_kick_resolve")
     appended_stream_kicks = _append_events_to_bank(bank, stream_kick_events)
+    _assert_stream_event_provenance(appended_stream_kicks, stage="stream_kick_adapter")
     stream_hat_events, hat_stream_stats = render_stream_hat_events(
         structure_frames,
         list(bank.all_events()),
     )
+    _assert_stream_event_provenance(stream_hat_events, stage="stream_hat_resolve")
     appended_stream_hats = _append_events_to_bank(bank, stream_hat_events)
+    _assert_stream_event_provenance(appended_stream_hats, stage="stream_hat_adapter")
     base_events = list(bank.all_events())
+    _runtime_debug["stream_output_trace"] = {
+        "after_resolve": _stream_event_trace(stream_kick_events + stream_hat_events),
+        "after_adapter": _stream_event_trace(appended_stream_kicks + appended_stream_hats),
+    }
+    _log.debug(
+        "stream output after_adapter=%s",
+        _runtime_debug["stream_output_trace"]["after_adapter"][:24],
+    )
     _runtime_debug["stream_anchor_sources_seen_by_legacy"] = {
         "kick": sum(
             1 for event in base_events
@@ -336,6 +403,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         _phrase_plan,
         base_events,
     )
+    _assert_stream_event_provenance(hook_events, stage="stream_hook_resolve")
     leader = _phase11_state.call_response_leader
     leader_layer = "bassline" if leader == "bass" else leader
 
@@ -373,6 +441,8 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     appended_bassline = _append_events_to_bank(bank, bassline_events)
     appended_sub   = _append_events_to_bank(bank, sub_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
+    _assert_stream_event_provenance(appended_hooks, stage="stream_hook_adapter")
+    _runtime_debug["stream_output_trace"]["after_hook_adapter"] = _stream_event_trace(appended_hooks)
     appended_stabs = _append_events_to_bank(bank, stab_events)
     beat_bed_stats = ensure_beat_bed(
         bank,
@@ -475,6 +545,8 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug.update(arrangement_diagnostics(bank, _phase11_state))
     pression_modulated_count = apply_behaviour_dynamics(bank, behaviour)
     _assert_stream_authority(bank)
+    _assert_stream_event_provenance(bank.all_events(), stage="final_bank")
+    _runtime_debug["stream_output_trace"]["final_bank"] = _stream_event_trace(bank.all_events())
 
     # Pre-compute pression timeline for this bank.
     # Pression is computed AFTER enforce_phrase_syntax so it sees only
@@ -778,10 +850,11 @@ def _sub_phrase_role_for_index(index: int, count: int) -> str:
 
 
 def _stream_structure_frame_objects() -> list:
-    """Read-only StructureFrame window for UI/debug overlays.
+    """Generate StructureFrames for the current bank.
 
-    This is the new canonical stream spine exposed to the active runtime.
-    It does not drive note generation or MIDI yet.
+    Called at every bank generation (and quantize boundary regeneration).
+    Each bank gets its own global_step range: bank N covers steps N*256 to N*256+255.
+    musical_step is always 0..255 (bank-relative) and is stored in the frame.
     """
     steps_per_bar = 16
     total_bars = 16
@@ -799,7 +872,12 @@ def _stream_structure_frame_objects() -> list:
         Tick(global_step=bank_start_step + step, time=0.0)
         for step in range(total_steps)
     )
-    return list(stream.frames(ticks))
+    frames = list(stream.frames(ticks))
+    _log.debug(
+        "stream frames generated: bank=%d global_step_range=%d..%d musical_step_range=0..%d",
+        bank_index, bank_start_step, bank_start_step + total_steps - 1, total_steps - 1,
+    )
+    return frames
 
 
 def _stream_structure_frames() -> list[dict]:
@@ -864,6 +942,9 @@ def _bank_events_list(bank) -> list:
     for event in bank.all_events():
         if event.layer == "survivor":
             continue
+        if getattr(event, "source", "") == "stream":
+            _assert_stream_event_provenance([event], stage="server_payload")
+        source_label = "stream" if getattr(event, "source", "") == "stream" else ""
         events.append({
             "time": event.time,
             "layer": event.layer,
@@ -881,6 +962,7 @@ def _bank_events_list(bank) -> list:
             "origin_reason": getattr(event, "origin_reason", ""),
             "resolution_reason": getattr(event, "resolution_reason", ""),
             "source": getattr(event, "source", ""),
+            "source_label": source_label,
             "reason": getattr(event, "reason", ""),
             "intent_id": getattr(event, "intent_id", ""),
             "resolved_event_id": getattr(event, "resolved_event_id", ""),
