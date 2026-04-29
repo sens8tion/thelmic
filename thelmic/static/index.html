@@ -540,14 +540,27 @@
       border-right: 1px solid transparent;
     }
 
+    .seq-cell.no-midi {
+      filter: grayscale(0.75);
+      opacity: 0.35 !important;
+    }
+
     /* Bar dividers (every 16 steps) */
     .seq-cell.bar-start {
       border-left: 1px solid #333;
     }
 
-    /* Phrase dividers (every 64 steps) */
+    /* Phrase dividers are assigned from server-provided musical timebase metadata. */
     .seq-cell.phrase-start {
-      border-left: 1px solid #555;
+      border-left: 2px solid #606060;
+    }
+
+    .seq-cell.sub-phrase-start {
+      border-left: 1px solid #3d3d3d;
+    }
+
+    .seq-cell.drop-start {
+      box-shadow: inset 2px 0 0 rgba(190, 70, 70, 0.55);
     }
 
     /* ── Phrase overlay ── */
@@ -568,12 +581,23 @@
       top: 0;
       height: 200px;     /* tall enough to span all visible lanes */
       width: 0;
-      border-left: 2px solid rgba(180, 150, 60, 0.55);
+      border-left: 2px solid rgba(210, 180, 80, 0.7);
       overflow: visible;
     }
 
     .phrase-marker.mode-cr {
       border-left-color: rgba(150, 100, 190, 0.45);
+    }
+
+    .phrase-marker.sub-phrase-marker {
+      top: 18px;
+      height: 150px;
+      border-left: 1px solid rgba(160, 160, 160, 0.24);
+    }
+
+    .phrase-marker.drop-marker {
+      height: 28px;
+      border-left: 2px solid rgba(190, 70, 70, 0.65);
     }
 
     .phrase-label {
@@ -593,6 +617,54 @@
 
     .phrase-marker.mode-cr .phrase-label {
       color: #b080d0;
+    }
+
+    .phrase-debug-row {
+      display: grid;
+      grid-template-columns: repeat(512, 1fr);
+      height: 16px;
+      width: 800%;
+      background: #080808;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      transform: translateX(0);
+      will-change: transform;
+      margin-bottom: 4px;
+      font-size: 7px;
+      color: #777;
+    }
+
+    .phrase-debug-cell {
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid transparent;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+
+    .phrase-debug-cell.bar-start { border-left: 1px solid #282828; }
+    .phrase-debug-cell.sub-phrase-start {
+      border-left: 1px solid rgba(160, 160, 160, 0.28);
+      color: #999;
+    }
+    .phrase-debug-cell.phrase-start {
+      border-left: 2px solid rgba(210, 180, 80, 0.75);
+      color: #d0b060;
+    }
+
+    .sub-phrase-label {
+      position: absolute;
+      top: 0;
+      left: 3px;
+      font-size: 7px;
+      white-space: nowrap;
+      color: rgba(190, 190, 190, 0.55);
+      text-transform: uppercase;
+      background: rgba(0, 0, 0, 0.58);
+      padding: 1px 3px;
+      border-radius: 1px;
+      line-height: 1.3;
     }
 
     .phrase-badges {
@@ -666,8 +738,9 @@
       height: 100%;
     }
 
-    .deform-cell.bar-start    { border-left: 1px solid #333; }
-    .deform-cell.phrase-start { border-left: 1px solid #555; }
+    .deform-cell.bar-start        { border-left: 1px solid #333; }
+    .deform-cell.phrase-start     { border-left: 2px solid #555; }
+    .deform-cell.sub-phrase-start { border-left: 1px solid #3d3d3d; }
 
     /* ── Transition graph ── */
     .transition-graph-section {
@@ -977,6 +1050,7 @@
         <div class="playhead" id="playhead"></div>
         <!-- Phrase structure overlay — boundary markers, mode labels, rule badges -->
         <div class="phrase-overlay-wrap" id="phrase-overlay-wrap"></div>
+        <div class="phrase-debug-row" id="phrase-debug-row"></div>
         <!-- Deformation intensity strips — one row per active deformation type -->
         <div class="deform-strips-wrap" id="deform-strips"></div>
         <div class="seq-grid" id="seq-grid"></div>
@@ -1299,8 +1373,10 @@
 
       // Sequencer
       if (s.bank_events !== undefined) {
+        if (s.phrase_context !== undefined) updatePhraseContext(s.phrase_context);
         renderSequencer(s.bank_events, bankSlot, bankTotal);
-        if (s.phrase_metadata !== undefined) renderPhraseOverlay(s.phrase_metadata);
+        renderPhraseDebugRow();
+        renderPhraseOverlay(s.phrase_metadata || []);
       }
     }
 
@@ -1437,6 +1513,11 @@
     };
     const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
     const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
+    const HIDDEN_DEFORMATION_STRIPS = new Set(['survivor_signal']);
+    let _phraseBoundarySteps = new Set();
+    let _subPhraseBoundarySteps = new Set();
+    let _dropBoundarySteps = new Set();
+    let _phraseContextByStep = [];
 
     // Deformation colours from server — updated on every state push
     let deformationColours = {};
@@ -1476,6 +1557,27 @@
       const [bar, beat, tick] = timeStr.split('.').map(Number);
       const beatStep = Math.floor((tick / 24) * 4); // tick→16th within beat
       return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
+    }
+
+    function updatePhraseContext(contextSteps) {
+      _phraseContextByStep = Array.isArray(contextSteps) ? contextSteps : [];
+      _phraseBoundarySteps = new Set();
+      _subPhraseBoundarySteps = new Set();
+      _dropBoundarySteps = new Set();
+      _phraseContextByStep.forEach(ctx => {
+        if (!ctx || !Number.isInteger(ctx.musical_step)) return;
+        if (ctx.is_phrase_start) _phraseBoundarySteps.add(ctx.musical_step);
+        if (ctx.is_sub_phrase_start || ctx.is_subphrase_start) {
+          _subPhraseBoundarySteps.add(ctx.musical_step);
+        }
+      });
+    }
+
+    function applyTimebaseClasses(cell, sourceStep) {
+      cell.classList.remove('phrase-start', 'sub-phrase-start', 'drop-start');
+      if (_phraseBoundarySteps.has(sourceStep)) cell.classList.add('phrase-start');
+      else if (_subPhraseBoundarySteps.has(sourceStep)) cell.classList.add('sub-phrase-start');
+      if (_dropBoundarySteps.has(sourceStep)) cell.classList.add('drop-start');
     }
 
     function roleLaneForEvent(event) {
@@ -1527,7 +1629,7 @@
     function applyRollingViewport() {
       const viewport = rollingViewport();
       const translatePercent = (viewport.renderStart / RENDER_STEPS) * 100;
-      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap').forEach(row => {
+      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap, .phrase-debug-row').forEach(row => {
         row.style.transform = `translateX(-${translatePercent}%)`;
       });
       return viewport;
@@ -1560,6 +1662,7 @@
         const deformDict = e.deformation;
         if (deformDict && typeof deformDict === 'object') {
           for (const [name, intensity] of Object.entries(deformDict)) {
+            if (HIDDEN_DEFORMATION_STRIPS.has(name)) continue;
             if (!deformByName[name]) deformByName[name] = new Float32Array(TOTAL_STEPS);
             if (intensity > deformByName[name][step]) deformByName[name][step] = intensity;
           }
@@ -1612,8 +1715,8 @@
             cell.dataset.renderStep = s;
             cell.dataset.deformName = name;
             cell.dataset.baseIntensity = d;
-            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-            else if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            applyTimebaseClasses(cell, sourceStep);
             if (d > 0) {
               const alpha = 0.15 + d * 0.85;
               cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
@@ -1639,19 +1742,26 @@
           const colour = dom ? blendTowardsHex(baseColour, dom.colour, dom.intensity) : baseColour;
           cell.style.background = colour;
           cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
+          cell.classList.toggle('no-midi', !ev.midi_send);
           cell.dataset.role      = visualRole;
           cell.dataset.emphasis  = ev.emphasis;
           cell.dataset.baseColour = baseColour;
           cell.dataset.deform    = JSON.stringify(ev.deformation || {});
+          cell.dataset.midiSend  = ev.midi_send ? 'true' : 'false';
+          cell.dataset.midiChannel = ev.midi_channel ?? '';
           const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
-          cell.title = `${role} ${visualRole} vel:${ev.velocity} deform:${deformDesc}`;
+          const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
+          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}`;
         } else {
+          cell.classList.remove('no-midi');
           cell.style.background = '';
           cell.style.opacity    = '';
           cell.dataset.role     = '';
           cell.dataset.emphasis = '0.2';
           cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
           cell.dataset.deform   = '{}';
+          cell.dataset.midiSend = 'false';
+          cell.dataset.midiChannel = '';
           cell.title = '';
         }
       }
@@ -1662,7 +1772,9 @@
           const role = laneEl.dataset.role;
           if (!role) return;
           laneEl.querySelectorAll('.seq-cell').forEach(cell => {
-            _paintCell(cell, role, parseInt(cell.dataset.step), stepMap);
+            const sourceStep = parseInt(cell.dataset.step);
+            applyTimebaseClasses(cell, sourceStep);
+            _paintCell(cell, role, sourceStep, stepMap);
           });
         });
       } else {
@@ -1689,8 +1801,8 @@
             cell.dataset.step      = sourceStep;
             cell.dataset.renderStep = s;
             cell.dataset.layer     = role;
-            if (sourceStep % (STEPS * 4) === 0) cell.classList.add('phrase-start');
-            else if (sourceStep % STEPS === 0)  cell.classList.add('bar-start');
+            if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+            applyTimebaseClasses(cell, sourceStep);
             _paintCell(cell, role, sourceStep, stepMap);
             row.appendChild(cell);
           }
@@ -1750,25 +1862,44 @@
       if (!wrap) return;
       wrap.innerHTML = '';
 
-      if (!_phraseMetadata.length) return;
+      if (!_phraseContextByStep.length) return;
 
-      // Total render columns = 512 (TOTAL_STEPS × 2)
-      // seq-content width is set by the deform strips (800% of scroll container).
-      // A phrase boundary at render column C is at left = (C / 512) * 100% of seq-content.
-      const RENDER_COLS = 512;
-      const PHRASE_STEPS = 64;  // 4 bars × 16 steps
+      const phraseEntries = _phraseMetadata.filter(meta => meta && meta.type !== 'timebase');
+      const phraseByIndex = new Map(phraseEntries.map(meta => [meta.phrase_index, meta]));
 
-      _phraseMetadata.forEach(meta => {
-        // Each phrase boundary appears twice (double-buffer render)
-        [meta.start_step, meta.start_step + 256].forEach(col => {
+      _phraseContextByStep.forEach(sub => {
+        const subStep = sub.musical_step;
+        if (!Number.isInteger(subStep) || _phraseBoundarySteps.has(subStep)) return;
+        if (!(sub.is_subphrase_start || sub.is_sub_phrase_start)) return;
+        [subStep, subStep + TOTAL_STEPS].forEach(col => {
           const marker = document.createElement('div');
-          marker.className = 'phrase-marker' + (meta.mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
-          marker.style.left = ((col / RENDER_COLS) * 100) + '%';
+          marker.className = 'phrase-marker sub-phrase-marker';
+          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
+          const role = sub.sub_phrase_role || sub.subphrase_role;
+          if (role) {
+            const label = document.createElement('div');
+            label.className = 'sub-phrase-label';
+            label.textContent = role.replace(/_/g, ' ');
+            marker.appendChild(label);
+          }
+          wrap.appendChild(marker);
+        });
+      });
+
+      _phraseContextByStep.forEach(ctx => {
+        if (!ctx || !ctx.is_phrase_start) return;
+        const meta = phraseByIndex.get(ctx.phrase_index) || {};
+        // Each phrase boundary appears twice (double-buffer render)
+        const phraseStep = ctx.musical_step;
+        [phraseStep, phraseStep + TOTAL_STEPS].forEach(col => {
+          const marker = document.createElement('div');
+          marker.className = 'phrase-marker' + (ctx.phrase_mode === 'CALL_RESPONSE_MODE' ? ' mode-cr' : '');
+          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
 
           // Label: "HOOK · two_step · peak"
           const parts = [];
-          if (meta.mode === 'HOOK_MODE') parts.push('HOOK');
-          else if (meta.mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
+          if (ctx.phrase_mode === 'HOOK_MODE') parts.push('HOOK');
+          else if (ctx.phrase_mode === 'CALL_RESPONSE_MODE') parts.push('CALL/R');
           if (meta.archetype && meta.archetype !== '—')
             parts.push(meta.archetype.replace(/_/g, '·'));
           if (meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
@@ -1800,6 +1931,39 @@
     }
 
     // ── Pressure curves live state ──
+    function renderPhraseDebugRow() {
+      const row = document.getElementById('phrase-debug-row');
+      if (!row) return;
+      row.innerHTML = '';
+      if (!_phraseContextByStep.length) return;
+
+      for (let s = 0; s < RENDER_STEPS; s++) {
+        const sourceStep = s % TOTAL_STEPS;
+        const ctx = _phraseContextByStep[sourceStep];
+        const cell = document.createElement('div');
+        cell.className = 'phrase-debug-cell';
+        cell.dataset.step = sourceStep;
+        cell.dataset.renderStep = s;
+        if (sourceStep % STEPS === 0) cell.classList.add('bar-start');
+        applyTimebaseClasses(cell, sourceStep);
+        if (ctx) {
+          cell.title = [
+            `global_step=${ctx.global_step}`,
+            `musical_step=${ctx.musical_step}`,
+            `bar_index=${ctx.bar_index}`,
+            `phrase_index=${ctx.phrase_index}`,
+            `subphrase_index=${ctx.sub_phrase_index}`,
+            `is_phrase_start=${ctx.is_phrase_start}`,
+            `is_subphrase_start=${ctx.is_subphrase_start || ctx.is_sub_phrase_start}`,
+          ].join(' ');
+          if (ctx.is_phrase_start) cell.textContent = `P${ctx.phrase_index}`;
+          else if (ctx.is_subphrase_start || ctx.is_sub_phrase_start) cell.textContent = `s${ctx.sub_phrase_index}`;
+        }
+        row.appendChild(cell);
+      }
+      applyRollingViewport();
+    }
+
     let activeCurveTargets = {};   // {target: last-known value} from state
     let curveCanvases = {};        // {id: {canvas, sparkline, curve}}
     let curveProgressAtState = {}; // {id: progress at last state push}

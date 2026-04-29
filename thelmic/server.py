@@ -44,7 +44,7 @@ from thelmic.deformations import DEFORMATION_COLOURS
 from thelmic.deformations_anchor import apply_anchor_withholding
 from thelmic.deformations_dynamics import apply_behaviour_dynamics
 from thelmic.pressure_curves import CurveEngine
-from thelmic.phrase_plan import PhrasePlan, generate_phrase_plan
+from thelmic.phrase_plan import PhrasePlan, PhraseState, generate_phrase_plan
 from thelmic.rhythm import conformance_for_landscape
 from thelmic.stabs import (
     collect_call_events, generate_stabs_from_calls, generate_stabs_from_bass,
@@ -648,18 +648,22 @@ def _phrase_metadata_list() -> list:
     if _phase11_state.build_length_bars >= 12:
         rules.append("long-build")
 
-    if _runtime_debug.get("survivor_events_final", 0) > 0:
-        rules.append("survivor")
-
+    phrase_context = _phrase_context_steps()
+    phrase_starts = [ctx for ctx in phrase_context if ctx["is_phrase_start"]]
     metadata = []
-    for phrase_idx in range(PHRASES_PER_BANK):
-        start_step = phrase_idx * BARS_PER_PHRASE * STEPS_PER_BAR
-        end_step   = start_step + BARS_PER_PHRASE * STEPS_PER_BAR - 1
+    for ctx in phrase_starts:
         metadata.append({
-            "phrase_id":            f"ph{phrase_idx}",
-            "phrase_index":         phrase_idx,
-            "start_step":           start_step,
-            "end_step":             end_step,
+            "phrase_id":            f"ph{ctx['phrase_index']}",
+            "phrase_index":         ctx["phrase_index"],
+            "start_step":           ctx["musical_step"],
+            "end_step":             ctx["phrase_end_step"],
+            "global_step":          ctx["global_step"],
+            "musical_step":         ctx["musical_step"],
+            "bar_index":            ctx["bar_index"],
+            "sub_phrase_index":     ctx["sub_phrase_index"],
+            "phrase_start_step":    ctx["phrase_start_step"],
+            "sub_phrase_start_step": ctx["sub_phrase_start_step"],
+            "phrase_role":          ctx["phrase_role"],
             "mode":                 mode,
             "archetype":            archetype,
             "drop_role":            drop_role,
@@ -670,6 +674,102 @@ def _phrase_metadata_list() -> list:
             "call_response_leader": cr_leader,
         })
     return metadata
+
+
+def _plan_bar_index(bar: int, plan_bars: int) -> int:
+    return ((bar - 1) % max(1, plan_bars)) + 1
+
+
+def _first_unmuted_step(plan: PhrasePlan, plan_bar: int) -> int:
+    muted = set(plan.silence_mask.muted_steps_by_bar.get(plan_bar, ()))
+    for step in range(16):
+        if step not in muted:
+            return step
+    return 0
+
+
+def _planned_phrase_start_steps(
+    plan: PhrasePlan,
+    total_bars: int,
+    *,
+    steps_per_bar: int = 16,
+) -> list[int]:
+    """Return phrase starts scheduled by PhrasePlan authority.
+
+    A phrase starts at the planned DROP_RELOCK arrival point. The point is the
+    first unmuted step in the DROP_RELOCK plan bar, so pre-drop silence remains
+    inside the previous phrase.
+    """
+    plan_bars = max([1, *plan.phrase_state.keys()])
+    starts: set[int] = set()
+    for bar in range(1 - plan_bars, total_bars + plan_bars + 1):
+        plan_bar = _plan_bar_index(bar, plan_bars)
+        if plan.phrase_state.get(plan_bar) != PhraseState.DROP_RELOCK:
+            continue
+        step = _first_unmuted_step(plan, plan_bar)
+        starts.add((bar - 1) * steps_per_bar + step)
+    return sorted(starts)
+
+
+def _sub_phrase_role_for_index(index: int, count: int) -> str:
+    if index == 0:
+        return "setup"
+    if index >= count - 1:
+        return "release"
+    if index % 2:
+        return "statement"
+    return "transformation"
+
+
+def _phrase_context_steps() -> list[dict]:
+    """Resolved per-step phrase context for UI and later generator consumers.
+
+    The UI must render markers from these flags directly. It must not derive
+    phrase/sub-phrase positions from visual columns.
+    """
+    steps_per_bar = 16
+    total_bars = 16
+    total_steps = total_bars * steps_per_bar
+    bank_index = _current_bank.bank_index if _current_bank is not None else 0
+    bank_start_step = bank_index * total_steps
+    phrase_starts = _planned_phrase_start_steps(_phrase_plan, total_bars, steps_per_bar=steps_per_bar)
+    if not phrase_starts:
+        phrase_starts = [0, total_steps]
+    visible_starts = [step for step in phrase_starts if 0 <= step < total_steps]
+    all_starts = sorted(set(phrase_starts))
+    sub_phrase_steps = 4 * steps_per_bar
+    contexts: list[dict] = []
+    for musical_step in range(total_steps):
+        previous_starts = [step for step in all_starts if step <= musical_step]
+        current_start = previous_starts[-1] if previous_starts else all_starts[0]
+        next_starts = [step for step in all_starts if step > musical_step]
+        next_start = next_starts[0] if next_starts else total_steps
+        phrase_index = sum(1 for step in all_starts if step <= musical_step) - 1
+        phrase_offset = max(0, musical_step - current_start)
+        phrase_length = max(1, next_start - current_start)
+        sub_phrase_index = phrase_offset // sub_phrase_steps
+        sub_phrase_start = current_start + sub_phrase_index * sub_phrase_steps
+        sub_phrase_count = max(1, (phrase_length + sub_phrase_steps - 1) // sub_phrase_steps)
+        is_phrase_start = musical_step in visible_starts
+        is_sub_phrase_start = musical_step == sub_phrase_start
+        contexts.append({
+            "global_step": bank_start_step + musical_step,
+            "musical_step": musical_step,
+            "bar_index": musical_step // steps_per_bar + 1,
+            "step_in_bar": musical_step % steps_per_bar,
+            "phrase_index": phrase_index,
+            "sub_phrase_index": sub_phrase_index,
+            "phrase_start_step": current_start,
+            "phrase_end_step": next_start - 1,
+            "sub_phrase_start_step": sub_phrase_start,
+            "phrase_role": getattr(_phase11_state.trajectory, "drop_role", None) or "groove",
+            "phrase_mode": _phase11_state.phrase_mode.value,
+            "sub_phrase_role": _sub_phrase_role_for_index(sub_phrase_index, sub_phrase_count),
+            "is_phrase_start": is_phrase_start,
+            "is_sub_phrase_start": is_sub_phrase_start,
+            "is_subphrase_start": is_sub_phrase_start,
+        })
+    return contexts
 
 
 def _bank_events_list(bank) -> list:
@@ -782,6 +882,7 @@ def _force_state_dict(include_bank: bool = True) -> dict:
     if include_bank:
         d["bank_events"] = _bank_events_list(_current_bank)
         d["phrase_metadata"] = _phrase_metadata_list()
+        d["phrase_context"] = _phrase_context_steps()
     return d
 
 
