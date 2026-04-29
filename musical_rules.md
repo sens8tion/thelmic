@@ -658,6 +658,103 @@ Kick usually remains. This creates attention, not dead air.
 
 ---
 
+## Kick Stream Rules
+
+> These rules carry stable IDs and are enforced by the compliance system.
+> **implemented** rules must have code declarations and behavioural tests.
+> **planned** rules may be documented without code yet.
+
+---
+
+### RULE-KICK-001 — Territory pattern selection
+
+**status:** implemented  
+**applies_to:** kick  
+**module:** `stream_drums.KickIntentStream._pattern_for_frame`  
+**test:** `test_kick_musical_rules.py::TestOakKickPattern`, `TestChaosKickPattern`, `TestNottKickPattern`
+
+Kick pattern is selected based on `landscape_position` (territory):
+
+- **Oak** (`lpos < 0.33`): stable two-step — beats 1 + 3 (steps 0, 8).
+  Density adds light syncopation only.
+- **Chaos** (`0.33 ≤ lpos < 0.67`): density-scaled from two-step through
+  4-on-the-floor to dense syncopation (5 density tiers).
+- **Nott** (`lpos ≥ 0.67`): sparse, pressure-driven — single downbeat at
+  low pressure; beats 1+3 or 1+3+pre-bar ghost at higher pressure.
+
+---
+
+### RULE-KICK-002 — Density scaling
+
+**status:** implemented  
+**applies_to:** kick  
+**module:** `stream_drums.KickIntentStream._pattern_for_frame`  
+**test:** `test_kick_musical_rules.py::TestChaosKickPattern::test_chaos_scales_with_density`
+
+Within each territory, increasing `density` adds more kick steps.
+Higher density never removes existing steps — it only adds.
+Chaos is most sensitive; Oak adds lightly; Nott does not use density (uses pressure instead).
+
+---
+
+### RULE-KICK-003 — Silence gate
+
+**status:** implemented  
+**applies_to:** kick  
+**module:** `stream_drums.KickIntentStream.intents_for_frame`  
+**test:** `test_kick_musical_rules.py::TestSilenceGate`
+
+When `frame.silence > 0.85`, all non-structural kicks are suppressed.
+`is_drop` and `is_relock` kicks are exempt — they always fire.
+
+---
+
+### RULE-KICK-004 — Drop and relock are non-negotiable
+
+**status:** implemented  
+**applies_to:** kick  
+**module:** `stream_drums.KickIntentStream._drop_intent`  
+**test:** `test_kick_musical_rules.py::TestDropAndRelockAlwaysFire`
+
+`is_drop` and `is_relock` frames always produce a kick intent regardless of
+territory, density, or silence level. Velocity receives a +14 bonus.
+Intent reason is `"drop_relock_kick"`.
+
+---
+
+### RULE-KICK-005 — Velocity profile by territory
+
+**status:** implemented  
+**applies_to:** kick  
+**module:** `stream_drums.KickIntentStream._velocity`  
+**test:** `test_kick_musical_rules.py::TestTerritoryDifference::test_velocity_profile_differs_by_territory`
+
+Each territory has a distinct velocity character:
+
+- **Oak**: consistent 94–102. Minimal variation. Grounded feel.
+- **Chaos**: 90–108. Scales with `density`. Dynamic variation.
+- **Nott**: 88–112. Scales with `pressure`. Heavy downbeat accent.
+
+Ghost-role kicks (syncopated sub-steps) receive ≈58% of base velocity.
+BUILD and PRE_DROP phrase roles receive a pressure-scaled bonus.
+
+---
+
+## Hat Stream Rules
+
+### RULE-HAT-001 — Density subdivision
+
+**status:** implemented  
+**applies_to:** hat  
+**module:** `stream_drums.HatIntentStream.intents_for_frame`  
+**test:** `tests/test_stream_drums.py::test_stream_hat_uses_structure_frame_step_and_density`
+
+Hat subdivision interval is determined by `density`:
+- `density < 0.62` and `pressure < 0.65`: every 4 steps (quarter notes)
+- otherwise: every 2 steps (eighth notes)
+
+---
+
 ## Call / Response Rules
 
 **[HARD]** All call events must originate from `PhrasePlan.call_slots`.
