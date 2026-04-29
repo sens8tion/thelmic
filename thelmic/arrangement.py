@@ -100,6 +100,7 @@ def ensure_beat_bed(
     state,
     *,
     kick_authority: str = "legacy",
+    snare_authority: str = "legacy",
     hat_authority: str = "legacy",
 ) -> dict:
     """Populate kick/snare/hat as the default rhythmic bed.
@@ -128,6 +129,8 @@ def ensure_beat_bed(
     }
     if kick_authority == "stream":
         targets.pop("kick", None)
+    if snare_authority == "stream":
+        targets.pop("snare", None)
     if hat_authority == "stream":
         targets.pop("hat", None)
     for bar in _bank_bars(bank):

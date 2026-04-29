@@ -13,6 +13,7 @@ from thelmic.bank_generator import (
     KICK_NOTE,
     MIDIEvent,
     OPEN_HAT_NOTE,
+    SNARE_NOTE,
 )
 from thelmic.stream_engine import Intent, ResolveStream, ResolvedEvent, StructureFrame
 from thelmic.stream_hooks import bank_step_to_time
@@ -221,6 +222,8 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         reason=intent.reason,
         intent_id=intent.intent_id,
         resolved_event_id=event.resolved_event_id,
+        global_step=int(intent.payload.get("global_step", event.step)),
+        musical_step=musical_step,
         phrase_index=intent.phrase_index,
         bar_index=int(intent.payload.get("bar_index", 0)),
     )
@@ -235,6 +238,10 @@ def _require_stream_provenance(event: ResolvedEvent) -> None:
         missing.append("intent_id")
     if not event.resolved_event_id:
         missing.append("resolved_event_id")
+    if int(intent.payload.get("musical_step", -1)) < 0:
+        missing.append("musical_step")
+    if int(intent.payload.get("global_step", -1)) < 0:
+        missing.append("global_step")
     if intent.phrase_index < 0:
         missing.append("phrase_index")
     if int(intent.payload.get("bar_index", 0)) < 1:
@@ -252,7 +259,22 @@ def _source_template(events: Sequence[MIDIEvent]) -> MIDIEvent | None:
     for event in events:
         if getattr(event, "active", True) and event.layer == "snare":
             return event
-    return next((event for event in events if getattr(event, "active", True)), None)
+    return next((event for event in events if getattr(event, "active", True)), _default_template())
+
+
+def _default_template() -> MIDIEvent:
+    return MIDIEvent(
+        time="1.1.0",
+        note=SNARE_NOTE,
+        velocity=90,
+        duration=0.08,
+        layer="snare",
+        role="anchor",
+        emphasis=1.0,
+        openness=1.0,
+        expected_weight=1.0,
+        should_resolve=False,
+    )
 
 
 def _empty_stats(source: str, prefix: str) -> dict:

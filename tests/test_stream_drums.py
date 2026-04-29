@@ -76,14 +76,15 @@ def test_bank_generator_noops_legacy_kick_and_hat_when_stream_authority_enabled(
         ForceState(),
         0,
         kick_authority="stream",
+        snare_authority="stream",
         hat_authority="stream",
     )
 
     layers = [event.layer for event in bank.all_events()]
 
     assert "kick" not in layers
+    assert "snare" not in layers
     assert "hat" not in layers
-    assert "snare" in layers
 
 
 def test_stream_hat_events_are_resolved_with_origin_metadata():

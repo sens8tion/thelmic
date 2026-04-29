@@ -180,6 +180,8 @@ def _to_midi_event(template: MIDIEvent, event: ResolvedEvent) -> MIDIEvent:
         reason=intent.reason,
         intent_id=intent.intent_id,
         resolved_event_id=event.resolved_event_id,
+        global_step=int(intent.payload.get("global_step", event.step)),
+        musical_step=musical_step,
         phrase_index=intent.phrase_index,
         bar_index=int(intent.payload.get("bar_index", 0)),
     )
@@ -194,6 +196,10 @@ def _require_stream_provenance(event: ResolvedEvent) -> None:
         missing.append("intent_id")
     if not event.resolved_event_id:
         missing.append("resolved_event_id")
+    if int(intent.payload.get("musical_step", -1)) < 0:
+        missing.append("musical_step")
+    if int(intent.payload.get("global_step", -1)) < 0:
+        missing.append("global_step")
     if intent.phrase_index < 0:
         missing.append("phrase_index")
     if int(intent.payload.get("bar_index", 0)) < 1:

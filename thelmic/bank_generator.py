@@ -54,6 +54,8 @@ class MIDIEvent:
     reason: str = ""
     intent_id: str = ""
     resolved_event_id: str = ""
+    global_step: int = -1
+    musical_step: int = -1
     phrase_index: int = -1
     bar_index: int = -1
     deformation: dict[str, float] = field(default_factory=dict)  # name→intensity 0→1
@@ -98,6 +100,7 @@ class BankGenerator:
         curve_overrides: dict[str, float] | None = None,
         active_archetype: Optional[str] = None,
         kick_authority: str = "legacy",
+        snare_authority: str = "legacy",
         hat_authority: str = "legacy",
     ) -> Bank:
         """Generate a Bank.
@@ -148,6 +151,7 @@ class BankGenerator:
                 effective, bank_index, phrase_idx, blend,
                 kick_deforms, snare_deforms, hat_deforms,
                 kick_authority=kick_authority,
+                snare_authority=snare_authority,
                 hat_authority=hat_authority,
             )
             bank.phrases.append(phrase)
@@ -169,6 +173,7 @@ class BankGenerator:
         snare_deforms: dict[str, list[float]],
         hat_deforms:   dict[str, list[float]],
         kick_authority: str = "legacy",
+        snare_authority: str = "legacy",
         hat_authority: str = "legacy",
     ) -> Phrase:
         phrase = Phrase(phrase_index=phrase_idx)
@@ -184,9 +189,10 @@ class BankGenerator:
                 phrase.events.extend(self._generate_kick_bar(
                     force, abs_bar, bar, phrase_idx, kick_fired, blend.kick_exp, kick_deforms
                 ))
-            phrase.events.extend(self._generate_snare_bar(
-                force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp, snare_deforms
-            ))
+            if snare_authority != "stream":
+                phrase.events.extend(self._generate_snare_bar(
+                    force, abs_bar, bar, phrase_idx, snare_fired, blend.snare_exp, snare_deforms
+                ))
             if hat_authority != "stream":
                 phrase.events.extend(self._generate_hat_bar(
                     force, abs_bar, hat_fired, blend.hat_exp, hat_deforms

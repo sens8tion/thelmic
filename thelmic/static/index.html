@@ -545,6 +545,11 @@
       opacity: 0.35 !important;
     }
 
+    .seq-cell.stream-origin {
+      outline: 1px solid rgba(120, 200, 255, 0.9);
+      box-shadow: inset 0 -2px 0 rgba(120, 200, 255, 0.75);
+    }
+
     /* Bar dividers (every 16 steps) */
     .seq-cell.bar-start {
       border-left: 1px solid #333;
@@ -1747,12 +1752,14 @@
           cell.style.background = colour;
           cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
           cell.classList.toggle('no-midi', !ev.midi_send);
+          cell.classList.toggle('stream-origin', ev.source_label === 'stream' || ev.source === 'stream');
           cell.dataset.role      = visualRole;
           cell.dataset.emphasis  = ev.emphasis;
           cell.dataset.baseColour = baseColour;
           cell.dataset.deform    = JSON.stringify(ev.deformation || {});
           cell.dataset.midiSend  = ev.midi_send ? 'true' : 'false';
           cell.dataset.midiChannel = ev.midi_channel ?? '';
+          cell.dataset.sourceLabel = ev.source_label || ev.source || '';
           const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
           const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
           const originDesc = ev.origin_source ? ` origin:${ev.origin_source}/${ev.origin_reason || 'unknown'} resolved:${ev.resolution_reason || 'unknown'}` : '';
@@ -1762,6 +1769,7 @@
           cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}${originDesc}${streamDesc}`;
         } else {
           cell.classList.remove('no-midi');
+          cell.classList.remove('stream-origin');
           cell.style.background = '';
           cell.style.opacity    = '';
           cell.dataset.role     = '';
@@ -1770,6 +1778,7 @@
           cell.dataset.deform   = '{}';
           cell.dataset.midiSend = 'false';
           cell.dataset.midiChannel = '';
+          cell.dataset.sourceLabel = '';
           cell.title = '';
         }
       }

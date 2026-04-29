@@ -63,6 +63,7 @@ def test_server_bank_payload_uses_stream_hook_events():
         0,
         server._engine.landscape_position,
         kick_authority="stream",
+        snare_authority="stream",
         hat_authority="stream",
     )
     server._current_bank = bank
@@ -86,6 +87,7 @@ def test_server_bank_payload_uses_stream_kick_and_hat_events():
         0,
         server._engine.landscape_position,
         kick_authority="stream",
+        snare_authority="stream",
         hat_authority="stream",
     )
     server._current_bank = bank
@@ -121,6 +123,7 @@ def test_legacy_modules_receive_stream_anchors_without_reclassifying_them():
         0,
         server._engine.landscape_position,
         kick_authority="stream",
+        snare_authority="stream",
         hat_authority="stream",
     )
     server._current_bank = bank
