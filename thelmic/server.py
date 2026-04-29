@@ -34,6 +34,7 @@ from thelmic.call_response import (
 )
 from thelmic.calls import generate_planned_calls
 from thelmic.responses import generate_planned_responses
+from thelmic.stream_drums import render_stream_hat_events, render_stream_kick_events
 from thelmic.stream_hooks import render_stream_hook_events
 from thelmic.pression import (
     PressionBar, compute_bank_timeline, audit_pression_compliance,
@@ -136,6 +137,9 @@ _runtime_debug: dict = {"anchors_dropped_per_bar": {}}
 _drop_commit_state = DropCommitState()
 _phase11_state = Phase11State()
 _structure_stream = StructureStream()
+_KICK_AUTHORITY = "stream"
+_HAT_AUTHORITY = "stream"
+_HOOK_AUTHORITY = "stream"
 _boundary_timing: dict = {
     "bank_generation_ms": 0.0,
     "next_bank_prepare_ms": 0.0,
@@ -275,6 +279,18 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         behaviour.anchor_velocity = overrides["anchor_velocity"]
     progress = transition.progress if transition else 0.0
     _runtime_debug = apply_anchor_withholding(bank, behaviour, progress)
+    structure_frames = _stream_structure_frame_objects()
+    seed_events = list(bank.all_events())
+    stream_kick_events, kick_stream_stats = render_stream_kick_events(
+        structure_frames,
+        seed_events,
+    )
+    appended_stream_kicks = _append_events_to_bank(bank, stream_kick_events)
+    stream_hat_events, hat_stream_stats = render_stream_hat_events(
+        structure_frames,
+        list(bank.all_events()),
+    )
+    appended_stream_hats = _append_events_to_bank(bank, stream_hat_events)
     base_events = list(bank.all_events())
     landscape_position = _engine.landscape_position
 
@@ -302,7 +318,7 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
         landscape_position=landscape_position,
     )
     hook_events, hook_stream_stats = render_stream_hook_events(
-        _stream_structure_frame_objects(),
+        structure_frames,
         _phrase_plan,
         base_events,
     )
@@ -344,7 +360,13 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     appended_sub   = _append_events_to_bank(bank, sub_events)
     appended_hooks = _append_events_to_bank(bank, hook_events)
     appended_stabs = _append_events_to_bank(bank, stab_events)
-    beat_bed_stats = ensure_beat_bed(bank, _phrase_plan, _phase11_state)
+    beat_bed_stats = ensure_beat_bed(
+        bank,
+        _phrase_plan,
+        _phase11_state,
+        kick_authority=_KICK_AUTHORITY,
+        hat_authority=_HAT_AUTHORITY,
+    )
     survivor_stats = add_survivor_signal(bank, _phrase_plan)
     survivor_after_generation = _survivor_events(bank)
     survivor_signature = (
@@ -366,7 +388,9 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     )
     priority_stats = enforce_priority_and_sparsity(bank, _phrase_plan, _phase11_state)
     drop_stats     = enforce_drop_relock(
-        bank, _phrase_plan, _drop_commit_state, syntax_stats, hook_authority="stream"
+        bank, _phrase_plan, _drop_commit_state, syntax_stats,
+        hook_authority=_HOOK_AUTHORITY,
+        kick_authority=_KICK_AUTHORITY,
     )
     if drop_stats.get("commit_applied", 0):
         _phase11_state.mark_drop_committed()
@@ -401,6 +425,13 @@ def _apply_behaviour_modules_to_bank(bank, overrides: dict[str, float]) -> None:
     _runtime_debug["sub_events_per_bar"]       = _events_per_bar(appended_sub)
     _runtime_debug["hook_events_per_bar"]      = _events_per_bar(appended_hooks)
     _runtime_debug["stab_events_per_bar"]      = _events_per_bar(appended_stabs)
+    _runtime_debug["stream_kick_events_per_bar"] = _events_per_bar(appended_stream_kicks)
+    _runtime_debug["stream_hat_events_per_bar"] = _events_per_bar(appended_stream_hats)
+    _runtime_debug.update(kick_stream_stats)
+    _runtime_debug.update(hat_stream_stats)
+    _runtime_debug["kick_authority"] = _KICK_AUTHORITY
+    _runtime_debug["hat_authority"] = _HAT_AUTHORITY
+    _runtime_debug["hook_authority"] = _HOOK_AUTHORITY
     _runtime_debug.update(beat_bed_stats)
     _runtime_debug.update(planned_calls.stats)
     _runtime_debug.update(planned_responses.stats)
@@ -461,6 +492,8 @@ def _prepare_regenerated_bank(bank_idx: int):
         _engine.force_state, bank_idx, _engine.landscape_position,
         curve_overrides=overrides,
         active_archetype=_active_archetype_name if _playing else None,
+        kick_authority=_KICK_AUTHORITY,
+        hat_authority=_HAT_AUTHORITY,
     )
     _apply_behaviour_modules_to_bank(fresh, overrides)
     elapsed = _record_timing("next_bank_prepare_ms", (time.perf_counter() - t0) * 1000)
@@ -563,6 +596,8 @@ async def _apply_and_preview() -> None:
             _engine.force_state, _current_bank.bank_index, _engine.landscape_position,
             curve_overrides=overrides,
             active_archetype=_active_archetype_name if _playing else None,
+            kick_authority=_KICK_AUTHORITY,
+            hat_authority=_HAT_AUTHORITY,
         )
         _apply_behaviour_modules_to_bank(fresh, overrides)
         # Splice: keep up-to-and-including current phrase, replace the rest
@@ -1092,6 +1127,8 @@ def _playback_loop() -> None:
             _engine.force_state, bank_idx, _engine.landscape_position,
             curve_overrides=overrides,
             active_archetype=_active_archetype_name,
+            kick_authority=_KICK_AUTHORITY,
+            hat_authority=_HAT_AUTHORITY,
         )
         _apply_behaviour_modules_to_bank(bank, overrides)
         _current_bank = bank

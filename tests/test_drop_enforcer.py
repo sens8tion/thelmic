@@ -201,6 +201,14 @@ class TestDropPresence:
         assert not _has_layer_at(bank, 2, DROP_STEP, "hook")
         assert stats["hook_requirements_deferred"] == 1
 
+    def test_kick_requirement_deferred_when_stream_kick_authority_enabled(self):
+        plan, bank = _plan_with_drop(drop_bar=2)
+
+        stats = enforce_drop_relock(bank, plan, kick_authority="stream")
+
+        assert not _has_layer_at(bank, 2, DROP_STEP, "kick")
+        assert stats["kick_requirements_deferred"] == 1
+
     def test_bass_not_added_when_already_present(self):
         plan, bank = _plan_with_drop(drop_bar=2)
         # Manually add bass at drop step

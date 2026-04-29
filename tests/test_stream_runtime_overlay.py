@@ -72,3 +72,32 @@ def test_server_bank_payload_uses_stream_hook_events():
     assert all(event["resolution_reason"] == "resolved" for event in hook_events)
     assert server._runtime_debug["hook_source"] == "stream_engine"
     assert server._runtime_debug["hook_intents_suppressed"] > 0
+
+
+def test_server_bank_payload_uses_stream_kick_and_hat_events():
+    server._init_engine()
+    bank = server._generator.generate(
+        server._engine.force_state,
+        0,
+        server._engine.landscape_position,
+        kick_authority="stream",
+        hat_authority="stream",
+    )
+    server._current_bank = bank
+    server._apply_behaviour_modules_to_bank(bank, {})
+
+    payload = server._bank_events_list(bank)
+    kicks = [event for event in payload if event["layer"] == "kick"]
+    hats = [
+        event for event in payload
+        if event["layer"] == "hat" and event["role"] != "survivor"
+    ]
+
+    assert kicks
+    assert hats
+    assert all(event["origin_source"] == "stream_kick" for event in kicks)
+    assert all(event["origin_source"] == "stream_hat" for event in hats)
+    assert all(event["resolution_reason"] == "resolved" for event in kicks + hats)
+    assert server._runtime_debug["kick_source"] == "stream_engine"
+    assert server._runtime_debug["hat_source"] == "stream_engine"
+    assert server._runtime_debug["hook_source"] == "stream_engine"
