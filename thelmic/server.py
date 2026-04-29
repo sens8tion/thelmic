@@ -22,6 +22,8 @@ from fastapi.staticfiles import StaticFiles
 
 from thelmic.bank_generator import Bank, BARS_PER_PHRASE, PHRASES_PER_BANK
 from thelmic.midi_out import LAYER_CHANNELS, MIDIOut, list_output_ports
+from thelmic.motif_engine import VERSION as MOTIF_ENGINE_VERSION
+from thelmic.motif_engine import empty_future_motifs, motifs_for_events, validate_motif_contract
 from thelmic.note_generation_chain import VERSION as NOTE_GENERATION_VERSION
 from thelmic.note_generation_chain import BANK_STEPS, generate_bank, structure_frames
 from thelmic.stream_engine import VERSION as STREAM_ENGINE_VERSION
@@ -29,7 +31,6 @@ from thelmic.stream_engine import VERSION as STREAM_ENGINE_VERSION
 
 THELMIC_VERSION = "v1.01"
 MUSIC_RULES_VERSION = "v1.0"
-MOTIF_ENGINE_VERSION = "v1.0"
 PRESSION_ENGINE_VERSION = "v0.9-disabled"
 TEST_CONTRACT_VERSION = "v1.0"
 
@@ -60,6 +61,8 @@ def _state(include_bank: bool = True) -> dict:
     with _state_lock:
         bank = _current_bank
         bank_index = _bank_index
+    motifs = motifs_for_events(bank.all_events()) + empty_future_motifs()
+    validate_motif_contract(motifs)
     state = {
         "type": "state",
         "thelmic_version": THELMIC_VERSION,
@@ -104,6 +107,7 @@ def _state(include_bank: bool = True) -> dict:
         "control_vs_chaos": 1.0,
         "resolution_likelihood": 1.0,
         "structure_frames": [frame.to_dict() for frame in structure_frames(bank_index)],
+        "motifs": [motif.to_dict() for motif in motifs],
     }
     if include_bank:
         state["bank_events"] = _bank_events_list(bank)

@@ -5,6 +5,13 @@ from pathlib import Path
 import pytest
 
 from thelmic.bank_generator import BankGenerator
+from thelmic.motif_engine import (
+    RULE_SOURCE,
+    MotifType,
+    empty_future_motifs,
+    motifs_for_events,
+    validate_motif_contract,
+)
 from thelmic.note_generation_chain import BANK_STEPS, VERSION, generate_bank, structure_frames
 from thelmic import server
 
@@ -46,6 +53,60 @@ def test_v1_01_emitted_stream_fingerprint_is_locked():
     assert hashlib.sha256(payload.encode()).hexdigest() == (
         "5665cfd22001a489ca2a20b9742a7c9819abc375d1169344a1a0f23ffbeca504"
     )
+
+
+def test_motif_engine_observes_without_changing_v1_01_output():
+    before = [
+        (event.musical_step, event.layer, event.role, event.note, event.velocity, event.duration)
+        for event in _events()
+    ]
+    motifs = motifs_for_events(_events())
+    after = [
+        (event.musical_step, event.layer, event.role, event.note, event.velocity, event.duration)
+        for event in _events()
+    ]
+
+    assert before == after
+    assert {motif.instrument for motif in motifs} == {"hat", "kick", "snare"}
+
+
+def test_every_active_lane_has_observed_motif():
+    events = _events()
+    active_lanes = {event.layer for event in events if event.active}
+    observed = {
+        motif.instrument
+        for motif in motifs_for_events(events)
+        if motif.state == "observed"
+    }
+
+    assert observed == active_lanes
+
+
+def test_motifs_persist_for_one_phrase_and_do_not_mutate():
+    motifs = motifs_for_events(_events())
+
+    validate_motif_contract(motifs)
+    assert all(motif.phrase_start == 0 for motif in motifs)
+    assert all(motif.phrase_end == BANK_STEPS for motif in motifs)
+    assert all(motif.state == "observed" for motif in motifs)
+
+
+def test_motif_categories_are_declared_without_future_behaviour():
+    declared = empty_future_motifs()
+
+    assert {motif.type for motif in declared} == {
+        MotifType.HOOK,
+        MotifType.CALL_RESPONSE,
+    }
+    assert all(motif.state == "declared_future" for motif in declared)
+    assert all(motif.event_references == () for motif in declared)
+
+
+def test_motif_engine_points_to_music_rules_as_rule_source():
+    motifs = motifs_for_events(_events()) + empty_future_motifs()
+
+    assert RULE_SOURCE == "musical_rules.md"
+    assert all(motif.to_dict()["rule_source"] == "musical_rules.md" for motif in motifs)
 
 
 def test_v1_01_runtime_version_freezes_v1_rules_baseline():
@@ -175,6 +236,18 @@ def test_pression_is_disabled_and_absent_from_output():
     assert state["pression_disabled"] is True
     assert state["runtime"]["pression_enabled"] is False
     assert all("pression" not in event for event in state["bank_events"])
+
+
+def test_runtime_exposes_motifs_without_affecting_display_or_output():
+    state = server._state(include_bank=True)
+
+    assert state["motif_engine_version"] == "v1.0"
+    assert state["motifs"]
+    assert {
+        motif["instrument"]
+        for motif in state["motifs"]
+        if motif["state"] == "observed"
+    } == {"hat", "kick", "snare"}
 
 
 def test_display_event_source_is_actual_bank_event_payload():
