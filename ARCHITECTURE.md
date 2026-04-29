@@ -71,6 +71,111 @@ Rendering hierarchy:
 - Drop/relock: distinct event boundary; it is not visually equivalent to a
   phrase boundary unless phrase authority says they coincide.
 
+## Stream Processing Refactor
+
+The stream-processing refactor is being built alongside the current
+implementation. The legacy sequencer remains runnable while the new spine is
+introduced and migrated into.
+
+Target pipeline:
+
+```text
+TransportClock
+-> TickStream
+-> StructureStream
+-> ControlStream
+-> IntentStreams
+-> TransformStream
+-> ResolveStream
+-> EventStream
+-> RenderStreams
+```
+
+The critical architectural rule is:
+
+```text
+StructureStream is the only source of truth for musical time and structure.
+```
+
+No generator, resolver, UI layer, MIDI renderer, or debug view may independently
+calculate:
+
+```text
+bar_index
+step_in_bar
+phrase_index
+subphrase_index
+phrase boundaries
+sub-phrase boundaries
+drop/relock state
+```
+
+New stream foundation:
+
+- `thelmic/stream_engine.py`
+  - `TransportClock`
+  - `Tick`
+  - `StructureProfile`
+  - `StructureStream`
+  - `StructureFrame`
+  - `ControlFrame`
+  - `Intent`
+  - `IntentStream`
+  - `TransformStream`
+  - `ResolveStream`
+  - `EventStream`
+  - `ResolvedEvent`
+  - `SuppressionEvent`
+
+Current refactor status:
+
+| Stream Phase | Status | Meaning |
+|---|---|---|
+| Phase 0 freeze | started | legacy system remains active; stream work is additive |
+| Phase 1 StructureStream | started | canonical `Tick` and `StructureFrame` exist with tests for bar, phrase, sub-phrase, drop, and relock alignment |
+| Phase 2 UI alignment | pending | UI must render `StructureFrame` data rather than infer structure |
+| Phase 3 first intent stream | pending | migrate one voice to `IntentStream` |
+| Phase 4 ResolveStream | started | initial central suppression/priority object exists, not wired into legacy generation |
+| Phase 5 gradual migration | pending | migrate voices one by one |
+| Phase 6 cleanup | pending | remove legacy timing and display-side structure logic |
+
+`StructureFrame` carries:
+
+```text
+global_step
+time
+musical_step
+bar_index
+step_in_bar
+phrase_index
+step_in_phrase
+subphrase_index
+step_in_subphrase
+phrase_role
+subphrase_role
+is_bar_start
+is_phrase_start
+is_subphrase_start
+is_drop
+is_relock
+pressure
+impact
+density
+silence
+```
+
+Render streams are consumers only:
+
+- MIDI renderer consumes `EventStream`.
+- UI note grid consumes `EventStream`.
+- UI phrase/sub-phrase overlay consumes `StructureFrame`.
+- CC / Pression renderer consumes resolved stream/control state.
+- Debug inspector consumes `StructureFrame`, `Intent`, `ResolvedEvent`, and
+  `SuppressionEvent`.
+
+Every final event must be traceable to an `Intent`. Every suppression must be
+traceable to `ResolveStream` with a reason.
+
 Current rule:
 
 ```text
