@@ -1,4 +1,7 @@
+from thelmic import server
+from thelmic.archetypes import select_archetype
 from thelmic.server import _phrase_context_steps, _phrase_metadata_list
+from thelmic.syntax_enforcer import time_to_bar_step
 
 
 def test_phrase_metadata_exposes_canonical_timebase_markers():
@@ -71,3 +74,54 @@ def test_ui_has_no_independent_phrase_marker_calculation():
     assert "s.phrase_context" in source
     assert "is_phrase_start" in source
     assert "is_subphrase_start" in source
+
+
+def test_drop_relock_events_align_with_phrase_starts():
+    server._init_engine()
+    server._pending_archetype_name = select_archetype(
+        server._engine.force_state.density,
+        server._generator.selected_archetype,
+    ).name
+    server._active_archetype_name = server._pending_archetype_name
+    bank = server._generator.generate(
+        server._engine.force_state,
+        0,
+        server._engine.landscape_position,
+        active_archetype=server._active_archetype_name,
+    )
+    server._current_bank = bank
+    server._apply_behaviour_modules_to_bank(bank, {})
+
+    phrase_starts = {
+        ctx["musical_step"]
+        for ctx in server._phrase_context_steps()
+        if ctx["is_phrase_start"]
+    }
+    drop_steps = set()
+    for event in bank.all_events():
+        if not event.deformation.get("drop_relock"):
+            continue
+        bar, step = time_to_bar_step(event.time)
+        drop_steps.add((bar - 1) * 16 + step)
+
+    assert drop_steps
+    assert drop_steps <= phrase_starts
+
+
+def test_phrase_metadata_does_not_label_survivor_as_phrase_rule():
+    original = dict(server._runtime_debug)
+    try:
+        server._runtime_debug["survivor_events_final"] = 99
+        metadata = server._phrase_metadata_list()
+    finally:
+        server._runtime_debug = original
+
+    assert metadata
+    assert all("survivor" not in meta["rules"] for meta in metadata)
+
+
+def test_ui_hides_survivor_signal_as_non_midi_diagnostic_strip():
+    source = open("thelmic/static/index.html", encoding="utf-8").read()
+
+    assert "HIDDEN_DEFORMATION_STRIPS" in source
+    assert "survivor_signal" in source

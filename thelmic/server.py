@@ -648,9 +648,6 @@ def _phrase_metadata_list() -> list:
     if _phase11_state.build_length_bars >= 12:
         rules.append("long-build")
 
-    if _runtime_debug.get("survivor_events_final", 0) > 0:
-        rules.append("survivor")
-
     phrase_context = _phrase_context_steps()
     phrase_starts = [ctx for ctx in phrase_context if ctx["is_phrase_start"]]
     metadata = []

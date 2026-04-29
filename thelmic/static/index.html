@@ -1513,6 +1513,7 @@
     };
     const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
     const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
+    const HIDDEN_DEFORMATION_STRIPS = new Set(['survivor_signal']);
     let _phraseBoundarySteps = new Set();
     let _subPhraseBoundarySteps = new Set();
     let _dropBoundarySteps = new Set();
@@ -1661,6 +1662,7 @@
         const deformDict = e.deformation;
         if (deformDict && typeof deformDict === 'object') {
           for (const [name, intensity] of Object.entries(deformDict)) {
+            if (HIDDEN_DEFORMATION_STRIPS.has(name)) continue;
             if (!deformByName[name]) deformByName[name] = new Float32Array(TOTAL_STEPS);
             if (intensity > deformByName[name][step]) deformByName[name][step] = intensity;
           }
