@@ -192,8 +192,22 @@ def _handle_action(
 
     # ── add_subdivision ─────────────────────────────────────────────────────
     if action == "add_subdivision":
-        # Generating new events requires voice stream context — deferred.
-        return None, None, "add_requires_voice_context", None
+        # Deferred — Phase 8 (Transformer evolution / Mutation system).
+        #
+        # To add events we need to invoke voice intent streams (kick, snare, hat)
+        # at specific steps, which requires full phrase context and arc state.
+        # Implementing here would duplicate the generation pipeline.
+        #
+        # Correct implementation path:
+        #   1. generate_bank produces a bank with current voice output
+        #   2. transformer_engine proposes a NEW bank step using the voice stream
+        #   3. classify_motif_change validates the delta (≤1 event = LEGAL)
+        #   4. apply_fn inserts the new event
+        #
+        # Until Phase 8 is scheduled, anticipation_build and hat_drive
+        # gracefully no-op here (pre-drop hat thinning still handled by
+        # anticipation_engine.py which operates at generation time).
+        return None, None, "add_requires_voice_context_phase8", None
 
     # ── increase_velocity ───────────────────────────────────────────────────
     if action == "increase_velocity":
