@@ -1,49 +1,128 @@
-"""Thelmic v1.0 note generation chain.
+"""Thelmic v1.0 note generation chain — orchestrator.
 
-This is the only active v1.0 musical event generator. It deliberately emits a
-simple continuous v1 output: stable kick, snare, hat subdivision, and a timing
-anchor during drop-prep. It does not rely on post-generation rescue systems.
+Drives voice intent streams through the StructureFrame sequence and resolves
+them into a Bank.  Musical decisions live in the voice modules; this file
+only assembles and routes.
+
+Phase C adds: phrase engine, bass voice, dimensions from landscape trajectory.
 """
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Optional
 
 from thelmic.bank_generator import (
     BARS_PER_PHRASE,
-    CLOSED_HAT_NOTE,
-    KICK_NOTE,
     MIDIEvent,
-    OPEN_HAT_NOTE,
     PHRASES_PER_BANK,
-    SNARE_NOTE,
     Bank,
     Phrase,
 )
+from thelmic.dimensions import Dimensions, PhraseContext
 from thelmic.stream_engine import Intent, ResolveStream, StructureFrame, StructureProfile, StructureStream, Tick
+from thelmic.voices.kick import KickIntentStream
+from thelmic.voices.snare import SnareIntentStream
+from thelmic.voices.hat import HatIntentStream
+from thelmic.voices.bass import BassIntentStream
+from thelmic.voices.sub import SubIntentStream
+from thelmic.voices.hook import HookIntentStream
+from thelmic.voices.call import CallIntentStream
+from thelmic.voices.response import ResponseIntentStream
+from thelmic.voices.ghost_32nd import Ghost32ndStream
+from thelmic.voices.drones import DroneSpaceyStream, DroneRumbleStream, DroneTensionStream
+from thelmic.phrase_engine import context_for_phrase, pending_archetype_for
+from thelmic.landscape_map import SignatureRhythm
+from thelmic.phrase_arc import compute_arc, ArcDimensions
+from thelmic.anticipation_engine import compute_anticipation, AnticipationState
 
 
-VERSION = "v1.0"
+VERSION    = "v1.0"
 BANK_STEPS = BARS_PER_PHRASE * PHRASES_PER_BANK * 16
 
+_kick_stream     = KickIntentStream()
+_snare_stream    = SnareIntentStream()
+_hat_stream      = HatIntentStream()
+_bass_stream     = BassIntentStream()
+_sub_stream      = SubIntentStream()
+_hook_stream     = HookIntentStream()
+_call_stream     = CallIntentStream()
+_response_stream = ResponseIntentStream()
+_ghost_stream    = Ghost32ndStream()
+_drone_spacey    = DroneSpaceyStream()
+_drone_rumble    = DroneRumbleStream()
+_drone_tension   = DroneTensionStream()
 
-def generate_bank(bank_index: int = 0) -> Bank:
+
+def generate_bank(
+    bank_index: int = 0,
+    dims: Optional[Dimensions] = None,
+    is_drop_phrase: bool = False,
+    signature_rhythm: Optional[SignatureRhythm] = None,
+    previous_active_archetype=None,
+    phrases_until_drop: int = 8,
+    heat: float = 0.5,
+) -> Bank:
+    """Generate one bank of events.
+
+    dims:                     current Dimensions (None = rhythm section only)
+    is_drop_phrase:           whether this phrase commits a structural change
+    signature_rhythm:         active feature's SignatureRhythm (for bass/hook notes)
+    previous_active_archetype: archetype from prior phrase (for commitment logic)
+    """
     profile = StructureProfile(
         phrase_length_bars=BARS_PER_PHRASE * PHRASES_PER_BANK,
         subphrase_length_bars=4,
         origin_step=bank_index * BANK_STEPS,
     )
-    stream = StructureStream(profile)
-    frames = list(
+    stream   = StructureStream(profile)
+    frames   = list(
         stream.frames(
             Tick(global_step=bank_index * BANK_STEPS + step)
             for step in range(BANK_STEPS)
         )
     )
+
+    # Build phrase context once per bank (same phrase for all 256 steps)
+    context: Optional[PhraseContext] = None
+    if dims is not None and signature_rhythm is not None:
+        phrase_start = next(f for f in frames if f.is_phrase_start)
+        context = context_for_phrase(
+            phrase_start, dims, signature_rhythm,
+            previous_active_archetype, is_drop_phrase,
+        )
+
+    _response_stream.reset()
     resolver = ResolveStream()
-    phrases = [Phrase(phrase_index=index) for index in range(PHRASES_PER_BANK)]
+    phrases  = [Phrase(phrase_index=index) for index in range(PHRASES_PER_BANK)]
     for frame in frames:
-        result = resolver.resolve(frame, intents_for_frame(frame))
+        # Compute per-frame arc dimensions (release burst + anticipation withholding)
+        arc = compute_arc(frame.musical_step, is_drop_phrase, phrases_until_drop, heat)
+        # 4-bar minimum hold rule (musical_rules.md): anticipation state changes
+        # at most once per 4-bar block (64 steps). Exception: bars 13-16 of the
+        # final phrase (musical_step ≥ 192 with phrases_until_drop=0) may change
+        # per step — this is the "maximum tension" zone.
+        _STEPS_PER_4BARS = 64
+        is_final_tension = (phrases_until_drop == 0
+                            and frame.musical_step >= 192)
+        if is_final_tension:
+            ant_step = frame.musical_step   # per-step resolution in final 4 bars
+        else:
+            # Quantise to 4-bar block boundary — pattern changes land every 4 bars
+            block_start  = (frame.musical_step // _STEPS_PER_4BARS) * _STEPS_PER_4BARS
+            ant_step     = block_start
+        ant = (
+            compute_anticipation(
+                ant_step, frame.step_in_bar,
+                phrases_until_drop, dims.stability, heat,
+                signature_rhythm.base_pattern_seed if signature_rhythm else 0,
+            )
+            if dims is not None else None
+        )
+        # Merge base dims with arc offsets
+        frame_dims = _apply_arc(dims, arc) if dims is not None else None
+        result = resolver.resolve(frame, intents_for_frame(
+            frame, context, frame_dims, signature_rhythm, arc, ant,
+        ))
         for event in result.events:
             midi_event = _resolved_to_midi_event(event, frame)
             phrases[(midi_event.bar_index - 1) // BARS_PER_PHRASE].events.append(midi_event)
@@ -65,92 +144,81 @@ def structure_frames(bank_index: int = 0) -> list[StructureFrame]:
     )
 
 
-def intents_for_frame(frame: StructureFrame) -> tuple[Intent, ...]:
-    intents: list[Intent] = []
-    intents.extend(_kick(frame))
-    intents.extend(_snare(frame))
-    intents.extend(_hat(frame))
-    intents.extend(_grid_reminder(frame))
-    return tuple(intents)
-
-
-def _kick(frame: StructureFrame) -> Iterable[Intent]:
-    if frame.is_drop:
-        yield _intent(frame, "kick", "timing_anchor", 124, 0.08, "drop_anchor", KICK_NOTE, 10)
-        return
-    if frame.is_drop_prep:
-        if frame.step_in_bar in (0, 8):
-            yield _intent(frame, "kick", "timing_anchor", 108, 0.07, "compressed_kick_anchor", KICK_NOTE, 10)
-        return
-    if frame.step_in_bar in (0, 8):
-        yield _intent(frame, "kick", "timing_anchor", 112, 0.08, "continuous_kick_anchor", KICK_NOTE, 10)
-
-
-def _snare(frame: StructureFrame) -> Iterable[Intent]:
-    if frame.is_drop_prep:
-        if frame.step_in_bar == 12:
-            yield _intent(frame, "snare", "backbeat", 78, 0.05, "drop_prep_backbeat_reference", SNARE_NOTE, 8)
-        return
-    if frame.step_in_bar in (4, 12):
-        yield _intent(frame, "snare", "backbeat", 96, 0.06, "stable_backbeat", SNARE_NOTE, 8)
-
-
-def _hat(frame: StructureFrame) -> Iterable[Intent]:
-    if frame.is_drop_prep:
-        if frame.step_in_bar % 2 == 0:
-            yield _intent(frame, "hat", "grid_reminder", 54, 0.025, "drop_prep_grid_reminder", CLOSED_HAT_NOTE, 5)
-        return
-    if frame.step_in_bar % 2 == 0:
-        note = OPEN_HAT_NOTE if frame.step_in_bar in (6, 14) else CLOSED_HAT_NOTE
-        velocity = 76 if note == OPEN_HAT_NOTE else 64
-        yield _intent(frame, "hat", "subdivision", velocity, 0.035, "continuous_hat_subdivision", note, 5)
-
-
-def _grid_reminder(frame: StructureFrame) -> Iterable[Intent]:
-    if not frame.is_drop_prep:
-        return
-    if frame.step_in_bar % 2 == 1:
-        yield _intent(frame, "hat", "timing_anchor", 38, 0.02, "tightening_grid_reminder", CLOSED_HAT_NOTE, 4)
-
-
-def _intent(
-    frame: StructureFrame,
-    instrument: str,
-    role: str,
-    velocity: int,
-    duration: float,
-    reason: str,
-    note: int,
-    priority: int,
-) -> Intent:
-    intent_id = f"note_generation_chain:{frame.global_step}:{instrument}:{reason}"
-    return Intent(
-        step=frame.global_step,
-        instrument=instrument,
-        role=role,
-        velocity=velocity,
-        duration=duration,
-        phrase_index=frame.phrase_index,
-        subphrase_index=frame.subphrase_index,
-        priority=priority,
-        source="note_generation_chain",
-        reason=reason,
-        intent_id=intent_id,
-        payload={
-            "note": note,
-            "global_step": frame.global_step,
-            "musical_step": frame.musical_step,
-            "bar_index": frame.bar_index,
-            "step_in_bar": frame.step_in_bar,
-            "phrase_index": frame.phrase_index,
-            "is_drop": frame.is_drop,
-            "is_drop_prep": frame.is_drop_prep,
-        },
+def _apply_arc(dims: Dimensions, arc: ArcDimensions) -> Dimensions:
+    """Merge base dims with per-frame arc offsets."""
+    return Dimensions(
+        stability = dims.stability,
+        pressure  = dims.pressure,
+        sparsity  = min(1.0, dims.sparsity + arc.sparsity_offset),
+        release   = arc.emphasis,
+        emphasis  = arc.emphasis,
     )
 
 
+def intents_for_frame(
+    frame: StructureFrame,
+    context: Optional[PhraseContext] = None,
+    dims: Optional[Dimensions] = None,
+    sr: Optional[SignatureRhythm] = None,
+    arc: Optional[ArcDimensions] = None,
+    ant: Optional[AnticipationState] = None,
+) -> tuple[Intent, ...]:
+    intents: list[Intent] = [
+        *_kick_stream.intents_for_frame(frame, context, dims),
+        *_snare_stream.intents_for_frame(frame, context, dims, sr=sr, ant=ant),
+        *_hat_stream.intents_for_frame(frame, context, dims, ant=ant),
+    ]
+    # Ghost 32nd note hats removed: hard dance is mechanically quantized.
+    # Ghost notes create off-grid flutter that conflicts with the genre feel.
+    # Snare ghost notes (via snare.py dissolution fills) are kept — different character.
+    # Re-enable here if wanted: _ghost_stream.intents_for_frame(frame, context, dims, sr)
+    if context is not None and dims is not None and sr is not None:
+        # ── Per-voice sparsity gates (positional instrumentation floor) ──────
+        # Removal order: call/response → hook → (bass and kick never removed)
+        sp = dims.sparsity
+
+        # ── Hook window rule (musical_rules.md) ─────────────────────────────
+        # Hook fires only in bars 0–1 (phrase statement) and sub-phrase
+        # boundaries (bars 4, 12 = hold start, release start).
+        # Hook and call/response are MUTUALLY EXCLUSIVE within a bar.
+        bar_0idx  = frame.bar_index - 1        # 0-indexed bar within phrase
+        _HOOK_BARS = frozenset({0, 1, 4, 12})  # sub-phrase layout: build/hold/release
+        is_hook_bar = bar_0idx in _HOOK_BARS
+
+        hook_active          = sp < 0.50 and is_hook_bar
+        call_response_active = sp < 0.30 and not is_hook_bar   # mutually exclusive
+
+        intents.extend(_bass_stream.intents_for_frame(frame, context, dims, sr))
+
+        # Sub bass: voice handles its own sparsity gate internally (0.65 threshold)
+        intents.extend(_sub_stream.intents_for_frame(frame, context, dims, sr))
+
+        if hook_active:
+            intents.extend(_hook_stream.intents_for_frame(frame, context, dims, sr))
+
+        # Calls and responses: sparsity gate + anticipation gate + hook exclusion
+        if call_response_active:
+            call_allowed     = ant.call_allowed     if ant else True
+            response_allowed = ant.response_allowed if ant else True
+            if call_allowed:
+                call_intents = _call_stream.intents_for_frame(frame, context, dims, sr)
+                if call_intents:
+                    _response_stream.record_call(frame.bar_index)
+                intents.extend(call_intents)
+            if response_allowed:
+                intents.extend(_response_stream.intents_for_frame(frame, context, dims, sr))
+
+    # ── Drone voices (sustained, Ableton-processed) ─────────────────────────
+    if context is not None and dims is not None and sr is not None:
+        intents.extend(_drone_spacey.intents_for_frame(frame, context, dims, sr, ant))
+        intents.extend(_drone_rumble.intents_for_frame(frame, context, dims, sr, ant))
+        intents.extend(_drone_tension.intents_for_frame(frame, context, dims, sr, ant))
+
+    return tuple(intents)
+
+
 def _resolved_to_midi_event(event, frame: StructureFrame) -> MIDIEvent:
-    intent = event.origin_intent
+    intent       = event.origin_intent
     musical_step = int(intent.payload["musical_step"])
     return MIDIEvent(
         time=bank_step_to_time(musical_step),
@@ -179,11 +247,18 @@ def _resolved_to_midi_event(event, frame: StructureFrame) -> MIDIEvent:
     )
 
 
-def bank_step_to_time(step: int) -> str:
-    if not 0 <= step < BANK_STEPS:
+def bank_step_to_time(step) -> str:
+    """Convert a bank step to "bar.beat.tick" notation.
+
+    Accepts integer steps (1/16th notes) or half-steps (0.5 increment = 1/32nd note).
+    With TICKS_PER_BEAT=24 and BEATS_PER_BAR=4: 1 step = 6 ticks, 1 half-step = 3 ticks.
+    """
+    half     = (step % 1) >= 0.5
+    int_step = int(step)
+    if not 0 <= int_step < BANK_STEPS:
         raise ValueError(f"bank step out of range: {step}")
-    bar = step // 16 + 1
-    step_in_bar = step % 16
-    beat = step_in_bar // 4 + 1
-    tick = (step_in_bar % 4) * 6
+    bar         = int_step // 16 + 1
+    step_in_bar = int_step % 16
+    beat        = step_in_bar // 4 + 1
+    tick        = (step_in_bar % 4) * 6 + (3 if half else 0)
     return f"{bar}.{beat}.{tick}"

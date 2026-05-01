@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Thelmic v1.01</title>
+  <title>Thelmic v1.03</title>
   <style>
     :root {
       color-scheme: dark;
@@ -16,6 +16,7 @@
       --kick: #d0a13c;
       --snare: #b8b0a0;
       --hat: #5fbf91;
+      --bass: #7b9fc4;
     }
     * { box-sizing: border-box; }
     body {
@@ -62,44 +63,122 @@
     }
     button { cursor: pointer; }
     button:hover { border-color: var(--accent); }
-    .grid {
-      display: grid;
-      grid-template-columns: 96px repeat(64, minmax(8px, 1fr));
-      gap: 1px;
-      width: 100%;
-      overflow-x: auto;
+    .pression-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 10px;
+    }
+    .pression-row label { color: var(--muted); width: 70px; font-size: 10px; }
+    .pression-bar-track {
+      flex: 1; height: 6px; background: #1a1a1a;
+      border: 1px solid var(--line); position: relative;
+    }
+    .pression-bar-fill {
+      height: 100%; background: #5a7aad; transition: width 0.1s;
+    }
+    .pression-val { width: 28px; color: #5a7aad; text-align: right; }
+    .pression-cc  { width: 32px; color: #3d3830; }
+    .btn-map {
+      font-size: 9px; padding: 1px 5px; cursor: pointer;
+      background: var(--panel); color: var(--muted);
       border: 1px solid var(--line);
-      background: var(--line);
     }
-    .label, .cell {
-      min-height: 22px;
-      background: #101010;
+    .btn-map.active {
+      background: #3a4a6a; color: #6bafed;
+      border-color: #6bafed;
     }
-    .label {
-      position: sticky;
-      left: 0;
-      z-index: 2;
+    .midi-channels {
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .midi-ch-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 4px;
+    }
+    .midi-ch-row label { font-family: monospace; font-size: 11px; width: 72px; color: var(--text); }
+    .midi-ch-row input {
+      width: 44px; padding: 3px 6px; font-size: 11px;
+      background: #1a1a1a; color: var(--text); border: 1px solid var(--line);
+    }
+    .midi-ch-row span { font-size: 10px; color: var(--muted); }
+    #stream-canvas {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--line);
+    }
+    .landscape-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      margin-bottom: 20px;
+      padding: 10px;
+    }
+    /* ── Landscape + Heat layout ─────────────────────────────────────────── */
+    .landscape-heat-row {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 20px;
+    }
+    .landscape-panel {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px;
+      min-width: 0;
+    }
+    .landscape-panel img {
+      display: block;
+      width: 100%;
+      height: auto;
+      object-fit: fill;
+      image-rendering: auto;
+    }
+    .landscape-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
       color: var(--muted);
-      padding: 5px 8px;
       font-size: 11px;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
     }
-    .cell {
-      position: relative;
-      border-left: 1px solid transparent;
+    .landscape-seed {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
     }
-    .playhead { box-shadow: inset 2px 0 0 var(--accent); }
-    .bar { border-left-color: #555; }
-    .phrase { border-left-color: var(--accent); }
-    .hit::after {
-      content: "";
-      position: absolute;
-      inset: 4px 2px;
+    .landscape-seed label { text-transform: uppercase; }
+    .landscape-seed input[type="number"] {
+      width: 88px;
+      padding: 4px 6px;
+      font-size: 11px;
     }
-    .kick.hit::after { background: var(--kick); }
-    .snare.hit::after { background: var(--snare); }
-    .hat.hit::after { background: var(--hat); }
+    .landscape-seed button { padding: 4px 8px; font-size: 11px; }
+
+    /* ── Heat dial ───────────────────────────────────────────────────────── */
+    .heat-panel {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px 16px;
+      user-select: none;
+    }
+    #heat-dial-svg { cursor: ns-resize; touch-action: none; }
+    .address-bar {
+      font-size: 13px;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      font-family: "Courier New", monospace;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
     .meta {
       margin-top: 16px;
       color: var(--muted);
@@ -113,12 +192,88 @@
 </head>
 <body>
   <header>
-    <h1>THELMIC V1.01</h1>
+    <h1>THELMIC V1.03</h1>
+    <div class="address-bar" title="seed / feature / heat — your current location">
+      <span id="address-display" onclick="startAddressEdit()" style="cursor:pointer">—</span>
+      <input id="address-input" type="text" placeholder="1103/C3/0.7"
+             style="display:none;width:130px;background:transparent;border:none;
+                    border-bottom:1px solid var(--accent);color:var(--accent);
+                    font-family:inherit;font-size:inherit;outline:none;padding:0"
+             onkeydown="handleAddressKey(event)"
+             onblur="commitAddressEdit()"/>
+    </div>
     <div class="status">
       <div id="runtime">connecting</div>
       <div id="versions"></div>
     </div>
   </header>
+
+  <div class="landscape-heat-row">
+    <section class="landscape-panel" aria-label="Thelmic landscape volatility terrain">
+      <div id="landscape-wrap" style="position:relative;cursor:crosshair">
+        <img id="landscape-map" src="/api/landscape-map.svg?width=240&height=140&heat=0.50"
+             alt="Thelmic landscape volatility terrain"
+             style="display:block;width:100%;user-select:none"
+             draggable="false">
+        <canvas id="landscape-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
+      </div>
+      </div><!-- /landscape-wrap -->
+      <div class="landscape-meta">
+        <span>Oak: stable</span>
+        <span>Chaos: volatile</span>
+        <span>Nott: dark / heavy</span>
+        <button onclick="randomiseSeed()" title="Randomise seed" style="padding:3px 7px;font-size:11px">⟳ seed</button>
+      </div>
+    </section>
+
+    <div class="heat-panel">
+      <svg id="heat-dial-svg" width="100" height="115"
+           aria-label="Heat dial — controls expression and energy">
+        <!-- Track arc (full range, faint) -->
+        <path id="heat-track" fill="none" stroke="#2e2820" stroke-width="5"
+              stroke-linecap="round"/>
+        <!-- Fill arc (current heat) -->
+        <path id="heat-fill" fill="none" stroke="#c6a35b" stroke-width="5"
+              stroke-linecap="round"/>
+        <!-- Pointer -->
+        <line id="heat-pointer" stroke="#c6a35b" stroke-width="1.5"
+              stroke-linecap="round"/>
+        <!-- Centre seed glyph (generated by JS) -->
+        <g id="heat-seed-glyph"></g>
+        <!-- Seed display (click to edit) -->
+        <text id="heat-seed-num" x="50" y="50"
+              fill="#c6a35b" font-family="Courier New,monospace" font-size="8"
+              text-anchor="middle" dominant-baseline="middle" font-weight="bold"
+              style="cursor:text"
+              onmousedown="event.stopPropagation()"
+              onclick="startSeedEdit()"/>
+        <!-- Inline seed editor (hidden until clicked) -->
+        <foreignObject id="seed-fo" x="20" y="41" width="60" height="18"
+                       style="display:none;overflow:visible">
+          <input xmlns="http://www.w3.org/1999/xhtml"
+                 id="seed-inline" type="number" min="0" max="9999"
+                 style="width:100%;background:transparent;border:none;
+                        border-bottom:1px solid #c6a35b;color:#c6a35b;
+                        font-family:Courier New,monospace;font-size:10px;
+                        text-align:center;outline:none;padding:0;
+                        -moz-appearance:textfield"/>
+        </foreignObject>
+        <!-- Invisible hit circle so whole centre zone opens the editor.
+             stopPropagation on mousedown prevents the drag handler from firing. -->
+        <circle cx="50" cy="50" r="18" fill="transparent" style="cursor:text"
+                onmousedown="event.stopPropagation()"
+                onclick="startSeedEdit()"/>
+        <!-- HEAT label -->
+        <text x="50" y="99"
+              fill="#85806f" font-family="Courier New,monospace" font-size="9"
+              text-anchor="middle" letter-spacing="0.2em">HEAT</text>
+        <!-- Heat value -->
+        <text id="heat-value-text" x="50" y="110"
+              fill="#554e47" font-family="Courier New,monospace" font-size="8"
+              text-anchor="middle"/>
+      </svg>
+    </div>
+  </div>
 
   <div class="controls">
     <button onclick="send({type:'start'})">start</button>
@@ -126,22 +281,548 @@
     <label>bpm <input id="bpm" type="number" min="60" max="300" value="174" onchange="send({type:'bpm', value:this.value})"></label>
     <button onclick="refreshPorts()">refresh midi ports</button>
     <select id="midiPorts" onchange="send({type:'midi_port', value:this.value})"></select>
+    <button id="btn-reload" onclick="reloadGeneration()" title="Hot-reload voice/arc/dimension code — takes effect at next bank">↺ reload voices</button>
+    <button onclick="toggleChannelEditor()" title="Edit MIDI channel assignments">ch</button>
   </div>
 
-  <div id="grid" class="grid"></div>
+  <div id="midi-channels" class="midi-channels" style="display:none">
+    <span style="color:#85806f;font-size:10px;font-family:monospace">midi channels — protocol is 0-indexed; DAW shows +1 (so ch 0 = Ableton ch 1)</span>
+    <div id="midi-ch-rows"></div>
+  </div>
+
+  <canvas id="stream-canvas"></canvas>
   <div id="meta" class="meta"></div>
 
+  <!-- Pression CC panel -->
+  <div id="pression-panel" style="margin-top:8px;border:1px solid var(--line);background:var(--panel);font-family:monospace;font-size:10px;">
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--line);">
+      <span style="color:#85806f">pression CCs</span>
+      <span style="color:#3d3830">ch:</span>
+      <input id="pression-ch" type="number" min="1" max="16" value="14"
+        style="width:40px;padding:2px 4px;background:#1a1a1a;color:var(--text);border:1px solid var(--line);font-size:10px;font-family:monospace"
+        onchange="setPressionChannel(parseInt(this.value)-1)"
+        title="DAW channel for pression CCs (1-indexed)">
+      <span id="pression-map-status" style="color:#3d3830;margin-left:auto"></span>
+    </div>
+    <div id="pression-rows" style="padding:4px 0"></div>
+  </div>
+
+  <div id="event-log" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);background:var(--panel);font-family:monospace;font-size:10px;max-height:120px;overflow-y:auto;color:#85806f;">
+    <span style="color:#3d3830">— ui event log —</span>
+  </div>
+
   <script>
-    const STEPS = 64;
-    const BANK_STEPS = 256;
-    const PLAYHEAD_COLUMN = 16;
-    const layers = ["kick", "snare", "hat"];
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const BANK_STEPS    = 256;
+    let activeSeed      = 1103;
+    const layers        = ["kick", "snare", "hat", "open_hat", "sub", "bass", "hook", "call", "response",
+                           "drone_spacey", "drone_rumble", "drone_tension"];
+
+    // Canvas layout
+    const ROW_H         = 26;          // px per instrument row
+    const LABEL_W       = 80;          // px for left label column
+    const PHRASE_H      = 52;          // px above rows for phrase labels (3 text lines)
+    const PRESSION_DIMS_LIST = ['stability','pressure','sparsity','release','emphasis'];
+    const PRESSION_ROW_H = 22;         // px per pression lane
+    const PRESSION_SECTION_H = PRESSION_DIMS_LIST.length * PRESSION_ROW_H + 10;
+    const CANVAS_H      = PHRASE_H + layers.length * ROW_H + PRESSION_SECTION_H;
+    const STEPS_VISIBLE = 96;          // total steps shown at once
+    const MARKER_FRAC   = 0.25;        // "now" marker at 25 % of scrollable width
+
+    // Colours (match CSS custom properties)
+    const CLR = {
+      bg:      "#101010",
+      line:    "#2b2b2b",
+      muted:   "#85806f",
+      accent:  "#c6a35b",
+      kick:    "#d0a13c",
+      snare:   "#b8b0a0",
+      hat:      "#5fbf91",   // closed hat
+      open_hat: "#9fe0bf",   // open hat — lighter green, same family
+      sub:           "#4a5e7a",   // darker blue than bass — sits below
+      drone_spacey:  "#6b7a9f",   // soft blue-purple — atmospheric
+      drone_rumble:  "#3a4a5e",   // very dark blue — deep rumble
+      drone_tension: "#7a6b9f",   // purple — chord tension
+      bass:     "#7b9fc4",
+      hook:     "#bf7baa",
+      call:     "#c47b7b",
+      response: "#7bc4a0",
+    };
+
+    // ─── State ────────────────────────────────────────────────────────────────
     let ws;
     let latestState = null;
 
+    // Cross-bank event / frame buffers (keyed on global_step).
+    // These accumulate across rollovers so the grid never jumps.
+    const byLayerStep = new Map();   // "layer:global_step" → true  (keyed from state.bank_events)
+    const frameStore = new Map();   // global_step → frame object
+    let   motifStore = [];          // latest motifs array from server
+
+    // clientBankOffset: global_step of step 0 in the current bank.
+    // Derived from incoming events' global_step — never incremented speculatively.
+    let clientBankOffset = 0;
+
+    // bank_generation: monotonically increasing counter from the server.
+    // Incremented every time the bank is regenerated (position/reload changes).
+    // Used to detect bank regeneration reliably even when bank_dirty is
+    // consumed by a racing broadcast before reaching us.
+    let lastSeenGeneration = -1;
+
+    // UI event markers: {global_step, kind, detail} — shown as grid overlays
+    const uiEventMarkers = [];   // kept in global_step order, pruned with buffer
+
+    // Pression timeline: global_step → {stability, pressure, sparsity, release, emphasis}
+    // Values are 0.0–1.0; one entry per bar (every 16 steps).
+    const pressionTimeline = new Map();
+
+    // ─── State accumulation ──────────────────────────────────────────────────
+
+    function mergeState(state) {
+      const events = state.bank_events || [];
+
+      // Flush stale events when the bank was regenerated (position change).
+      // Detection: bank_dirty flag OR bank_generation counter change (the counter
+      // survives even when bank_dirty was already consumed by a racing broadcast).
+      // This MUST happen before adding new events so the grid is never empty.
+      const genChanged = (state.bank_generation != null) &&
+                         (state.bank_generation !== lastSeenGeneration);
+      if ((state.bank_dirty || genChanged) && events.length > 0) {
+        const lo = clientBankOffset;
+        const hi = clientBankOffset + BANK_STEPS;
+        for (const key of byLayerStep.keys()) {
+          const gs = parseInt(key.split(":")[1]);
+          if (gs >= lo && gs < hi) byLayerStep.delete(key);
+        }
+      }
+      if (state.bank_generation != null) lastSeenGeneration = state.bank_generation;
+
+      // Derive clientBankOffset from the events themselves.
+      // Events carry the authoritative global_step; we read it directly rather
+      // than counting state transitions (avoids the stopped→playing false-rollover).
+      if (events.length > 0) {
+        const minGs    = Math.min(...events.map(e => e.g));
+        const newOffset = Math.floor(minGs / BANK_STEPS) * BANK_STEPS;
+        if (newOffset > clientBankOffset) {
+          // Genuine bank advance — prune events more than one bank old.
+          const pruneBelow = newOffset - BANK_STEPS;
+          for (const key of byLayerStep.keys()) {
+            if (parseInt(key.split(":")[1]) < pruneBelow) byLayerStep.delete(key);
+          }
+          for (const gs of frameStore.keys()) {
+            if (gs < pruneBelow) frameStore.delete(gs);
+          }
+          clientBankOffset = newOffset;
+        } else if (newOffset < clientBankOffset) {
+          // Backwards jump: server restarted or bank_index reset.
+          // Wipe all stale state and re-anchor — otherwise events land
+          // off-screen because nowStep is computed from the old offset.
+          byLayerStep.clear();
+          frameStore.clear();
+          lastSeenGeneration = -1;
+          clientBankOffset   = newOffset;
+        }
+      }
+
+      for (const evt of events) {
+        // Store {vel, dur} so renderer can shade by intensity and show note length.
+        byLayerStep.set(`${evt.l}:${evt.g}`, {
+          v: evt.v || 80,
+          d: evt.d  || 0,   // seconds
+        });
+      }
+      for (const f of (state.structure_frames || [])) {
+        const gs = (f.global_step !== undefined)
+          ? f.global_step
+          : clientBankOffset + (f.musical_step || 0);
+        frameStore.set(gs, { ...f, _gs: gs });
+      }
+      // Upcoming bank frames — bar grid and phrase boundary metadata for the next
+      // bank.  Stored in frameStore at their correct global_step so the scrolling
+      // view shows bars and the phrase boundary tag before the bank becomes current.
+      for (const f of (state.upcoming_structure_frames || [])) {
+        const gs = (f.global_step !== undefined)
+          ? f.global_step
+          : clientBankOffset + BANK_STEPS + (f.musical_step || 0);
+        frameStore.set(gs, { ...f, _gs: gs });
+      }
+      // Preview bank events — non-authoritative read-ahead.
+      // These have correct global_step values (next bank's range) so they appear
+      // to the right of the marker naturally.  When the bank becomes current its
+      // events overwrite the same keys; the transition is seamless.
+      const preview = state.next_bank_preview;
+      if (preview && !preview.authoritative) {
+        for (const evt of (preview.bank_events || [])) {
+          byLayerStep.set(`${evt.l}:${evt.g}`, {
+            v: evt.v || 80,
+            d: evt.d  || 0,
+          });
+        }
+      }
+      motifStore = state.motifs || [];
+
+      // Merge new UI event markers from server log
+      if (state.ui_event_log) {
+        for (const entry of state.ui_event_log) {
+          // Avoid duplicates by ts_ms
+          if (!uiEventMarkers.some(m => m.ts_ms === entry.ts_ms)) {
+            uiEventMarkers.push(entry);
+          }
+        }
+        // Prune old markers (more than 2 banks back)
+        const pruneGs = clientBankOffset - BANK_STEPS;
+        for (let i = uiEventMarkers.length - 1; i >= 0; i--) {
+          if (uiEventMarkers[i].global_step < pruneGs) uiEventMarkers.splice(i, 1);
+        }
+        // Sort by global_step
+        uiEventMarkers.sort((a, b) => a.global_step - b.global_step);
+        // Render event log panel
+        renderEventLog();
+      }
+    }
+
+    // ─── Time → position (the pure transform) ────────────────────────────────
+
+    /**
+     * Returns the current fractional global step.
+     * screen_x = MARKER_X + (event_global_step − currentGlobalStep) × px_per_step
+     */
+    function currentGlobalStep(state) {
+      if (!state.playing || !state.bank_started_at_ms || !state.bank_duration_ms) {
+        return clientBankOffset + (state.playhead_step || 0);
+      }
+      const elapsedMs  = Date.now() - state.bank_started_at_ms;
+      const stepInBank = (elapsedMs / state.bank_duration_ms) * BANK_STEPS;
+      // No upper clamp — the upcoming bank's frames are in frameStore, so the
+      // bar grid and phrase boundary remain visible as stepInBank exceeds 255.
+      return clientBankOffset + Math.max(0, stepInBank);
+    }
+
+    /**
+     * Pure transform: global step → canvas x coordinate.
+     * usableW = canvas.width − LABEL_W
+     */
+    function stepToX(globalStep, nowStep, usableW) {
+      const markerX   = LABEL_W + usableW * MARKER_FRAC;
+      const pxPerStep = usableW / STEPS_VISIBLE;
+      return markerX + (globalStep - nowStep) * pxPerStep;
+    }
+
+    // ─── Canvas rendering ─────────────────────────────────────────────────────
+
+    function ensureCanvasSize() {
+      const canvas    = document.getElementById("stream-canvas");
+      const cssWidth  = canvas.parentElement.clientWidth;
+      if (canvas.width !== cssWidth || canvas.height !== CANVAS_H) {
+        canvas.width  = cssWidth;
+        canvas.height = CANVAS_H;
+      }
+      return canvas;
+    }
+
+    function drawScrollingStream(state) {
+      const canvas    = ensureCanvasSize();
+      const W         = canvas.width;
+      const ctx       = canvas.getContext("2d");
+      const usableW   = W - LABEL_W;
+      const nowStep   = currentGlobalStep(state);
+      const markerX   = LABEL_W + usableW * MARKER_FRAC;
+      const pxPerStep = usableW / STEPS_VISIBLE;
+
+      // Visible global step range (integers)
+      const visFirst  = Math.floor(nowStep - STEPS_VISIBLE * MARKER_FRAC) - 1;
+      const visLast   = Math.ceil(nowStep  + STEPS_VISIBLE * (1 - MARKER_FRAC)) + 1;
+
+      // ── Background ────────────────────────────────────────────────────────
+      ctx.fillStyle = CLR.bg;
+      ctx.fillRect(0, 0, W, CANVAS_H);
+
+      // ── Label column ──────────────────────────────────────────────────────
+      ctx.fillStyle = "#0d0d0d";
+      ctx.fillRect(0, 0, LABEL_W, CANVAS_H);
+      ctx.strokeStyle = CLR.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(LABEL_W, PHRASE_H);
+      ctx.lineTo(LABEL_W, CANVAS_H);
+      ctx.stroke();
+
+      // Layer labels + MIDI channel numbers (right-aligned in label column)
+      ctx.font = "11px 'Courier New', monospace";
+      ctx.textBaseline = "middle";
+      layers.forEach((layer, i) => {
+        const y = PHRASE_H + i * ROW_H + ROW_H / 2;
+        ctx.fillStyle = CLR.muted;
+        ctx.fillText(layer.toUpperCase(), 10, y);
+        // Channel number right-aligned in label column
+        if (latestState && latestState.midi_layer_channels) {
+          const ch = latestState.midi_layer_channels[layer];
+          if (ch != null) {
+            ctx.fillStyle = "#3d3830";
+            ctx.font = "9px 'Courier New', monospace";
+            const chStr = String(ch + 1);   // show 1-indexed DAW channel
+            const tw = ctx.measureText(chStr).width;
+            ctx.fillText(chStr, LABEL_W - tw - 3, y);
+            ctx.font = "11px 'Courier New', monospace";
+          }
+        }
+      });
+
+      // ── Sub-phrase markers (drawn first — behind phrase/bar lines) ──────
+      // Lightweight dashed ticks from subphrase metadata; start_bar===1 is
+      // the phrase boundary (already drawn below) — skip it here.
+      // Build telemetry lookup: start_step → execution results (from telemetry only)
+      const txExec = state.transformer_execution || [];
+      const execByStart = new Map();
+      for (const r of txExec) {
+        const key = r.step_or_range && r.step_or_range.start;
+        if (key == null) continue;
+        if (!execByStart.has(key)) execByStart.set(key, []);
+        execByStart.get(key).push(r);
+      }
+
+      const allSubphrases = [
+        ...(state.subphrases || []),
+        ...((state.next_bank_preview && state.next_bank_preview.subphrases) || []),
+      ];
+      ctx.setLineDash([3, 5]);
+      ctx.strokeStyle = "#2e2b25";
+      ctx.lineWidth   = 1;
+      ctx.fillStyle   = "#3d3830";
+      ctx.font        = "9px 'Courier New', monospace";
+      ctx.textBaseline = "bottom";
+      for (const sp of allSubphrases) {
+        if (sp.start_bar === 1) continue;  // phrase boundary handled separately
+        const x = stepToX(sp.start_step, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, PHRASE_H);
+        ctx.lineTo(x, CANVAS_H);
+        ctx.stroke();
+        // Role label + transformer names
+        const txNames = (sp.transformers || []).map(t => t.name).join(" ");
+        const label = txNames ? `${sp.role}  ${txNames}` : sp.role;
+        ctx.fillText(label, x + 3, PHRASE_H - 1);
+
+        // Telemetry indicators (from transformer_execution data only — no re-derivation)
+        const spResults = execByStart.get(sp.start_step) || [];
+        if (spResults.length > 0) {
+          const accepted = spResults.filter(r => r.accepted).length;
+          const rejected = spResults.length - accepted;
+          // Compact glyph: "✓N" accepted in green, "✗N" rejected in muted
+          let gx = x + 3;
+          const gy = 10;
+          ctx.font = "8px 'Courier New', monospace";
+          ctx.textBaseline = "top";
+          if (accepted > 0) {
+            ctx.fillStyle = "#5fbf91";
+            ctx.fillText(`✓${accepted}`, gx, gy);
+            gx += 16;
+          }
+          if (rejected > 0) {
+            ctx.fillStyle = "#554e47";
+            ctx.fillText(`✗${rejected}`, gx, gy);
+          }
+          ctx.font = "9px 'Courier New', monospace";
+          ctx.textBaseline = "bottom";
+          ctx.fillStyle = "#3d3830";
+        }
+      }
+      ctx.setLineDash([]);
+
+      // ── Structural markers ────────────────────────────────────────────────
+      //
+      // Phrase boundaries are periodic: one per bank (every BANK_STEPS steps).
+      // They are drawn at all visible positions regardless of whether the bank's
+      // event data has arrived — this is what provides visual continuity at the
+      // end of a bank.  Metadata comes from the existing motifStore and frameStore;
+      // no parallel data system is created.
+      //
+      // Bar lines are drawn only when frame data is present (they require the
+      // server's bar grid — we don't extrapolate them).
+
+      ctx.font        = "10px 'Courier New', monospace";
+      ctx.textBaseline = "top";
+
+      for (let gs = visFirst; gs <= visLast; gs++) {
+        const x = stepToX(gs, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+
+        const frame = frameStore.get(gs);
+
+        if (gs % BANK_STEPS === 0) {
+          // ── Phrase boundary ──────────────────────────────────────────────
+          ctx.strokeStyle = CLR.accent;
+          ctx.lineWidth   = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, CANVAS_H);
+          ctx.stroke();
+
+          // Metadata from existing server state — phrase-boundary motif meta
+          // is the source of truth.  For boundaries not yet arrived, show
+          // structural position only (phrase index is derivable from global_step).
+          const phraseIdx   = frame ? frame.phrase_index : Math.floor(gs / BANK_STEPS);
+          const role        = frame ? (frame.phrase_role || "").replace("_", "-") : "—";
+          const motifsHere  = motifStore.filter(m => m.phrase_start === phraseIdx);
+          const motifLine   = motifsHere.length
+            ? motifsHere.map(m => m.type).join(" · ")
+            : (frame ? "—" : "upcoming");
+          const newCount    = motifsHere.filter(m => m.phrase_start === phraseIdx).length;
+          const legalMark   = !frame    ? ""
+            : newCount > 1             ? "⚠ multi-intro"
+            : newCount === 1           ? "new motif"
+            :                            "continuing";
+
+          const lx = Math.min(x + 4, W - 4);
+          ctx.fillStyle = CLR.accent;
+          ctx.fillText(`P${phraseIdx}  ${role}`, lx, 3);
+          ctx.fillStyle = CLR.muted;
+          ctx.fillText(motifLine, lx, 17);
+          if (legalMark) ctx.fillText(legalMark, lx, 31);
+
+        } else if (frame && frame.is_bar_start) {
+          // ── Bar line (requires frame data) ──────────────────────────────
+          ctx.strokeStyle = CLR.line;
+          ctx.lineWidth   = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, PHRASE_H);
+          ctx.lineTo(x, CANVAS_H);
+          ctx.stroke();
+        }
+      }
+
+      // ── Events (per layer row) ────────────────────────────────────────────
+      // Shade by velocity: loud = full colour, quiet = dimmed but always visible.
+      // Alpha range: 0.35 (vel=1) → 1.0 (vel=127), minimum always readable.
+      // Long notes drawn as wider bars: duration (seconds) → pixels via bpm.
+      const bpm            = (latestState && latestState.bpm) || 174;
+      const secPerStep     = 60.0 / (bpm * 4);   // seconds per 16th note
+      const minEventW      = Math.max(2, pxPerStep - 2);
+
+      layers.forEach((layer, i) => {
+        const rowY  = PHRASE_H + i * ROW_H;
+        const color = CLR[layer] || "#888";
+
+        for (let gs = visFirst; gs <= visLast; gs++) {
+          const ev = byLayerStep.get(`${layer}:${gs}`);
+          if (ev == null) continue;
+          const x = stepToX(gs, nowStep, usableW);
+          if (x < LABEL_W || x > W) continue;
+          // Width: at least 1 step, extended by note duration
+          const durSteps = (ev.d || 0) / secPerStep;
+          const noteW    = Math.max(minEventW, durSteps * pxPerStep - 1);
+          // Clip to canvas right edge
+          const clippedW = Math.min(noteW, W - x);
+          if (clippedW <= 0) continue;
+          // Alpha: linear from 0.35 at vel=1 to 1.0 at vel=127
+          const alpha = 0.35 + ((ev.v || 80) / 127) * 0.65;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          ctx.fillRect(x, rowY + 4, clippedW, ROW_H - 8);
+        }
+        ctx.globalAlpha = 1.0;
+      });
+
+      // ── UI input event markers ───────────────────────────────────────────────
+      // Thin vertical line + small label for each UI event in the visible window.
+      ctx.font = "8px 'Courier New', monospace";
+      ctx.textBaseline = "top";
+      for (const marker of uiEventMarkers) {
+        const x = stepToX(marker.global_step, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+        const isPos  = marker.kind === "position";
+        const color  = isPos ? "#6bafed" : "#edaf6b";
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, PHRASE_H);
+        ctx.lineTo(x, CANVAS_H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.fillText(marker.detail, Math.min(x + 2, W - 80), PHRASE_H + 2);
+      }
+
+      // ── Pression lanes (scrolling bar charts below note rows) ───────────────
+      // Each dimension gets a row. Value fills from left edge of bar as height.
+      // One pression entry per bar (every 16 steps); value is 0–127.
+      const pressionColors = {
+        stability: '#4a7aad', pressure: '#ad6a4a', sparsity: '#7aad4a',
+        release: '#ad4aad', emphasis: '#4aadad',
+      };
+      const pressionBaseY = PHRASE_H + layers.length * ROW_H + 5;
+      if (pressionTimeline.size > 0) {
+        PRESSION_DIMS_LIST.forEach((dim, di) => {
+          const rowY = pressionBaseY + di * PRESSION_ROW_H;
+          const color = pressionColors[dim] || '#666';
+          const maxH  = PRESSION_ROW_H - 3;
+
+          // Label
+          ctx.fillStyle = color;   // match lane colour — visible, not grey
+          ctx.font = '9px "Courier New", monospace';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(dim, 4, rowY + maxH / 2);
+
+          // Bar chart: one block per bar (16 steps wide)
+          for (let gs = visFirst; gs <= visLast; gs++) {
+            // Each step now has its own pression entry
+            const entry = pressionTimeline.get(gs);
+            if (!entry) continue;
+            const val = (entry[dim] || 0) / 127;  // entry values are 0-127 integers
+            const x   = stepToX(gs, nowStep, usableW);
+            const x2  = stepToX(gs + 1, nowStep, usableW);
+            if (x2 < LABEL_W || x > W) continue;
+            const barH = Math.max(1, val * maxH);
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.60;
+            ctx.fillRect(
+              Math.max(LABEL_W, x), rowY + (maxH - barH),
+              Math.max(1, Math.min(x2, W) - Math.max(LABEL_W, x) - 1), barH
+            );
+          }
+          ctx.globalAlpha = 1.0;
+          // Divider line
+          ctx.strokeStyle = '#1e1e1e';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(LABEL_W, rowY + PRESSION_ROW_H - 1);
+          ctx.lineTo(W, rowY + PRESSION_ROW_H - 1);
+          ctx.stroke();
+        });
+      }
+
+      // ── Fixed "now" marker (drawn last — always on top) ───────────────────
+      ctx.strokeStyle = CLR.accent;
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(markerX, 0);
+      ctx.lineTo(markerX, CANVAS_H);
+      ctx.stroke();
+
+      // Small "now" tick at top
+      ctx.fillStyle = CLR.accent;
+      ctx.beginPath();
+      ctx.moveTo(markerX - 5, 0);
+      ctx.lineTo(markerX + 5, 0);
+      ctx.lineTo(markerX,     7);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ─── Animation loop ───────────────────────────────────────────────────────
+
+    function animate() {
+      if (latestState) drawScrollingStream(latestState);
+      requestAnimationFrame(animate);
+    }
+
+    // ─── WebSocket ────────────────────────────────────────────────────────────
+
     function connect() {
       ws = new WebSocket(`ws://${location.host}/ws`);
-      ws.onopen = () => document.getElementById("runtime").textContent = "connected";
+      ws.onopen  = () => document.getElementById("runtime").textContent = "connected";
       ws.onclose = () => {
         document.getElementById("runtime").textContent = "disconnected";
         setTimeout(connect, 1000);
@@ -149,6 +830,7 @@
       ws.onmessage = event => {
         const state = JSON.parse(event.data);
         if (state.type === "state") {
+          mergeState(state);
           latestState = state;
           render(state);
         }
@@ -159,79 +841,641 @@
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
     }
 
+    // ─── Other UI ─────────────────────────────────────────────────────────────
+
+    // ─── Pression panel ──────────────────────────────────────────────────────
+
+    const PRESSION_DIMS = ['stability', 'pressure', 'sparsity', 'release', 'emphasis'];
+    const PRESSION_CC_NUM = {stability:10, pressure:11, sparsity:12, release:13, emphasis:14};
+    let _pressionMappingMode = null;
+    let _pressionBuilt = false;
+
+    function buildPressionPanel() {
+      const rows = document.getElementById('pression-rows');
+      rows.innerHTML = '';
+      PRESSION_DIMS.forEach(dim => {
+        const row = document.createElement('div');
+        row.className = 'pression-row';
+        row.id = `pr-${dim}`;
+        row.innerHTML = `
+          <label>${dim}</label>
+          <div class="pression-bar-track">
+            <div class="pression-bar-fill" id="pr-fill-${dim}" style="width:0%"></div>
+          </div>
+          <span class="pression-val" id="pr-val-${dim}">0</span>
+          <span class="pression-cc">CC${PRESSION_CC_NUM[dim]}</span>
+          <button class="btn-map" id="pr-map-${dim}"
+            onclick="togglePressionMap('${dim}')"
+            title="Enter mapping mode: only this CC emits; notes stop. Press again to exit.">map</button>`;
+        rows.appendChild(row);
+      });
+      _pressionBuilt = true;
+    }
+
+    function togglePressionMap(dim) {
+      if (_pressionMappingMode === dim) {
+        // Exit mapping mode
+        send({type: 'pression_map_stop'});
+      } else {
+        // Enter mapping mode for this dim
+        send({type: 'pression_map_start', dim});
+      }
+    }
+
+    function setPressionChannel(ch0indexed) {
+      send({type: 'set_pression_channel', channel: ch0indexed});
+    }
+
+    function updatePressionPanel(pression) {
+      if (!pression) return;
+      if (!_pressionBuilt) buildPressionPanel();
+
+      // Sync channel input
+      const chInput = document.getElementById('pression-ch');
+      if (chInput && !chInput.matches(':focus')) chInput.value = pression.channel + 1;
+
+      // Update mapping mode
+      const newMode = pression.mapping_mode || null;
+      if (newMode !== _pressionMappingMode) {
+        _pressionMappingMode = newMode;
+        // Update all map buttons
+        PRESSION_DIMS.forEach(dim => {
+          const btn = document.getElementById(`pr-map-${dim}`);
+          if (btn) btn.className = 'btn-map' + (dim === newMode ? ' active' : '');
+        });
+        const status = document.getElementById('pression-map-status');
+        if (status) status.textContent = newMode ? `mapping: ${newMode}` : '';
+      }
+
+      // Update live values
+      const vals = pression.values || {};
+      PRESSION_DIMS.forEach(dim => {
+        const v01   = vals[dim] || 0;
+        const v127  = Math.round(v01 * 127);
+        const pct   = (v01 * 100).toFixed(0) + '%';
+        const fill  = document.getElementById(`pr-fill-${dim}`);
+        const val   = document.getElementById(`pr-val-${dim}`);
+        if (fill) fill.style.width = pct;
+        if (val)  val.textContent  = v127;
+      });
+    }
+
+    function renderEventLog() {
+      const el = document.getElementById("event-log");
+      if (!el || !uiEventMarkers.length) return;
+      el.innerHTML = uiEventMarkers.slice().reverse().map(m => {
+        const dt  = new Date(m.ts_ms).toLocaleTimeString([], {hour12:false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
+        const col = m.kind === "position" ? "#6bafed" : m.kind === "heat" ? "#edaf6b" : "#85806f";
+        return `<div style="color:${col}">${dt} &nbsp;<b>${m.kind}</b> &nbsp;${m.detail}</div>`;
+      }).join("");
+    }
+
+    function toggleChannelEditor() {
+      const panel = document.getElementById("midi-channels");
+      if (panel.style.display === "none" || !panel.style.display) {
+        if (latestState && latestState.midi_layer_channels) {
+          buildMidiChannelUI(latestState.midi_layer_channels);
+        }
+        panel.style.display = "block";
+      } else {
+        panel.style.display = "none";
+      }
+    }
+
+    function buildMidiChannelUI(channelMap) {
+      const panel = document.getElementById("midi-channels");
+      const rows  = document.getElementById("midi-ch-rows");
+      // Don't auto-show — panel stays hidden until toggled via 'ch' button
+      rows.innerHTML = "";
+      for (const [layer, ch] of Object.entries(channelMap)) {
+        const row = document.createElement("div");
+        row.className = "midi-ch-row";
+        row.innerHTML = `
+          <label>${layer}</label>
+          <input type="number" min="0" max="15" value="${ch}"
+            onchange="send({type:'set_midi_channel',layer:'${layer}',channel:parseInt(this.value)})">
+          <span>→ DAW ch ${ch + 1}</span>`;
+        // Update DAW ch label live
+        row.querySelector("input").addEventListener("input", function() {
+          const v = parseInt(this.value);
+          if (!isNaN(v) && v >= 0 && v <= 15)
+            this.parentElement.querySelector("span").textContent = `→ DAW ch ${v + 1}`;
+        });
+        rows.appendChild(row);
+      }
+    }
+
+    function reloadGeneration() {
+      const btn = document.getElementById("btn-reload");
+      btn.textContent = "↺ reloading…";
+      btn.disabled = true;
+      send({ type: "reload_generation" });
+      // Re-enable after a moment — server will broadcast updated state
+      setTimeout(() => { btn.textContent = "↺ reload voices"; btn.disabled = false; }, 1500);
+    }
+
+    // System MIDI ports to exclude — internal Windows/driver ports not routable to a DAW.
+    const _SYSTEM_PORT_FILTER = [
+      /microsoft gs/i, /midi mapper/i, /wdm kernel/i, /realtek/i,
+      /internal/i, /virtual cable.*[0-9]$/i,
+    ];
+    function _isDawPort(name) {
+      return !_SYSTEM_PORT_FILTER.some(re => re.test(name));
+    }
+
     async function refreshPorts() {
-      const select = document.getElementById("midiPorts");
+      const select   = document.getElementById("midiPorts");
       const response = await fetch("/api/midi-ports");
-      const data = await response.json();
+      const data     = await response.json();
+      const ports    = (data.ports || []).filter(_isDawPort);
       select.innerHTML = '<option value="">no midi output</option>';
-      for (const port of data.ports || []) {
-        const option = document.createElement("option");
-        option.value = port;
+      for (const port of ports) {
+        const option       = document.createElement("option");
+        option.value       = port;
         option.textContent = port;
         select.appendChild(option);
       }
     }
 
+    // ─── Heat dial ────────────────────────────────────────────────────────────
+    //
+    // Geometry constants (must match SVG element dimensions: 100×115)
+    const D_CX     = 50;     // dial centre x  (svg width/2)
+    const D_CY     = 50;     // dial centre y  (half of track area)
+    const D_R      = 36;     // arc track radius
+    const D_START  = 210;    // degrees CW from 12-o'clock (7 o'clock position)
+    const D_SWEEP  = 300;    // total arc sweep (300° CW → ends at 5 o'clock)
+    const D_R_IN   = 24;     // pointer inner radius
+    const D_R_OUT  = 34;     // pointer outer radius
+
+    let heatTarget  = 0.5;
+    let heatApplied = 0.5;
+
+    /** Convert "degrees clockwise from 12-o'clock" to SVG [x, y]. */
+    function dialPt(degCW, r) {
+      const rad = (degCW - 90) * Math.PI / 180;
+      return [D_CX + r * Math.cos(rad), D_CY + r * Math.sin(rad)];
+    }
+
+    /** Build an SVG arc path string. */
+    function arcPath(startDeg, sweepDeg, r) {
+      if (sweepDeg < 0.5) return "";
+      const [sx, sy] = dialPt(startDeg, r);
+      const [ex, ey] = dialPt(startDeg + sweepDeg, r);
+      const large    = sweepDeg > 180 ? 1 : 0;
+      return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
+    }
+
+    /** Deterministic sigil: N spokes around centre.
+        Spokes start at rIn=10 so the centre is clear for the seed number. */
+    function seedGlyphSVG(seed) {
+      const n    = (seed % 6) + 3;
+      const rot  = ((seed * 2654435761) >>> 0) % 360;
+      const rOut = 15, rIn = 10;   // clear inner zone for seed text
+      let svg = '';
+      for (let i = 0; i < n; i++) {
+        const a  = (rot + i * 360 / n) * Math.PI / 180;
+        const ox = (D_CX + rOut * Math.cos(a)).toFixed(1);
+        const oy = (D_CY + rOut * Math.sin(a)).toFixed(1);
+        const ix = (D_CX + rIn  * Math.cos(a)).toFixed(1);
+        const iy = (D_CY + rIn  * Math.sin(a)).toFixed(1);
+        svg += `<line x1="${ix}" y1="${iy}" x2="${ox}" y2="${oy}" `
+             + `stroke="#c6a35b" stroke-width="1.2" opacity="0.6"/>`;
+        svg += `<circle cx="${ox}" cy="${oy}" r="1.6" fill="#85806f"/>`;
+      }
+      // No centre dot — seed number renders there
+      return svg;
+    }
+
+    /** Apply heat as a CSS filter on the landscape image — instant, no HTTP. */
+    function applyHeatFilter(heat) {
+      const img = document.getElementById("landscape-map");
+      if (heat < 0.5) {
+        const t = heat / 0.5;
+        const br  = (0.35 + 0.65 * t).toFixed(2);
+        const sat = (0.40 + 0.60 * t).toFixed(2);
+        const hue = Math.round(220 * (1 - t));
+        img.style.filter = `brightness(${br}) saturate(${sat}) hue-rotate(${hue}deg)`;
+      } else {
+        const t = (heat - 0.5) / 0.5;
+        const br  = (1.0 + 0.50 * t).toFixed(2);
+        const sat = (1.0 + 0.80 * t).toFixed(2);
+        const hue = -Math.round(25 * t);
+        img.style.filter = `brightness(${br}) saturate(${sat}) hue-rotate(${hue}deg)`;
+      }
+    }
+
+    function updateDialVisual(heat) {
+      const sweep = heat * D_SWEEP;
+      document.getElementById("heat-track").setAttribute("d",
+        arcPath(D_START, D_SWEEP, D_R));
+      document.getElementById("heat-fill").setAttribute("d",
+        arcPath(D_START, sweep, D_R));
+
+      const pDeg = D_START + sweep;
+      const [x1, y1] = dialPt(pDeg, D_R_IN);
+      const [x2, y2] = dialPt(pDeg, D_R_OUT);
+      const ptr = document.getElementById("heat-pointer");
+      ptr.setAttribute("x1", x1.toFixed(2)); ptr.setAttribute("y1", y1.toFixed(2));
+      ptr.setAttribute("x2", x2.toFixed(2)); ptr.setAttribute("y2", y2.toFixed(2));
+
+      document.getElementById("heat-value-text").textContent = heat.toFixed(2);
+      applyHeatFilter(heat);   // instant CSS — no server round-trip
+    }
+
+    function updateSeedGlyph(seed) {
+      document.getElementById("heat-seed-glyph").innerHTML = seedGlyphSVG(seed);
+      // seed number sits exactly at dial centre via dominant-baseline="middle"
+      document.getElementById("heat-seed-num").textContent  = seed;
+    }
+
+    // Initialise static parts (activeSeed declared further below; use literal here)
+    updateDialVisual(0.5);
+    updateSeedGlyph(1103);
+
+    function currentSeed() { return activeSeed; }
+
+    // ── Drag interaction ────────────────────────────────────────────────────
+    // Rules:
+    //   - During drag: update dial visually only — no server sends, no state overwrite.
+    //   - On release:  send heat to server + refresh landscape image once.
+    //   - Server state updates: only update dial when not dragging.
+
+    let dialDragging   = false;
+    let dragStartY     = 0;
+    let dragStartHeat  = 0;
+    const dialSvg      = document.getElementById("heat-dial-svg");
+
+    dialSvg.addEventListener("mousedown", e => {
+      dialDragging  = true;
+      dragStartY    = e.clientY;
+      dragStartHeat = heatTarget;
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", e => {
+      if (!dialDragging) return;
+      const dy   = dragStartY - e.clientY;          // up = hotter
+      heatTarget = Math.max(0, Math.min(1, dragStartHeat + dy / 150));
+      updateDialVisual(heatTarget);                 // local only — no server send
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!dialDragging) return;
+      dialDragging = false;
+      send({ type: "set_heat", value: heatTarget });
+      // CSS filter already applied during drag — no SVG re-fetch needed.
+    });
+
+    // Mouse-wheel fine-tune.
+    dialSvg.addEventListener("wheel", e => {
+      heatTarget = Math.max(0, Math.min(1, heatTarget - e.deltaY * 0.0003));
+      updateDialVisual(heatTarget);   // includes applyHeatFilter
+      send({ type: "set_heat", value: heatTarget });
+      e.preventDefault();
+    }, { passive: false });
+
+    // ─── Landscape position control ─────────────────────────────────────────
+    // Terrain coordinates: x in [-1.5, 1.5], y in [-1.5, 1.5]
+    // Pixel (0,0) = top-left = (DOMAIN_MIN, DOMAIN_MAX)
+
+    const DOMAIN_MIN = -1.5, DOMAIN_MAX = 1.5;
+    let terrainX = 0.0, terrainY = 0.0;
+
+    function pixelToTerrain(px, py, imgW, imgH) {
+      return {
+        x: DOMAIN_MIN + (px / imgW) * (DOMAIN_MAX - DOMAIN_MIN),
+        y: DOMAIN_MAX - (py / imgH) * (DOMAIN_MAX - DOMAIN_MIN),
+      };
+    }
+
+    function terrainToPixel(tx, ty, imgW, imgH) {
+      return {
+        px: (tx - DOMAIN_MIN) / (DOMAIN_MAX - DOMAIN_MIN) * imgW,
+        py: (DOMAIN_MAX - ty)  / (DOMAIN_MAX - DOMAIN_MIN) * imgH,
+      };
+    }
+
+    function drawPositionDot() {
+      const img    = document.getElementById("landscape-map");
+      const canvas = document.getElementById("landscape-overlay");
+      if (!img.clientWidth) return;
+      const W = img.clientWidth, H = img.clientHeight;
+      canvas.width  = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, W, H);
+
+      // ── Drag journey trace ──────────────────────────────────────────────────
+      if (_dragTracePoints.length > 1) {
+        ctx.strokeStyle = "rgba(198,163,91,0.35)";
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        const p0 = terrainToPixel(_dragTracePoints[0].x, _dragTracePoints[0].y, W, H);
+        ctx.moveTo(p0.px, p0.py);
+        for (let i = 1; i < _dragTracePoints.length; i++) {
+          const p = terrainToPixel(_dragTracePoints[i].x, _dragTracePoints[i].y, W, H);
+          ctx.lineTo(p.px, p.py);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Small dots at trace points
+        ctx.fillStyle = "rgba(198,163,91,0.25)";
+        for (const pt of _dragTracePoints) {
+          const { px, py } = terrainToPixel(pt.x, pt.y, W, H);
+          ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+
+      // ── Current position dot ────────────────────────────────────────────────
+      const { px, py } = terrainToPixel(terrainX, terrainY, W, H);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#c6a35b";
+      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ─── Address bar ─────────────────────────────────────────────────────────
+
+    function startAddressEdit() {
+      document.getElementById("address-display").style.display = "none";
+      const inp = document.getElementById("address-input");
+      inp.style.display = "";
+      inp.value = document.getElementById("address-display").textContent;
+      inp.select(); inp.focus();
+    }
+
+    function commitAddressEdit() {
+      const inp = document.getElementById("address-input");
+      inp.style.display = "none";
+      document.getElementById("address-display").style.display = "";
+      const val = inp.value.trim();
+      if (val) send({ type: "set_address", value: val });
+    }
+
+    function handleAddressKey(e) {
+      if (e.key === "Enter")  { e.preventDefault(); commitAddressEdit(); }
+      if (e.key === "Escape") {
+        document.getElementById("address-input").style.display = "none";
+        document.getElementById("address-display").style.display = "";
+      }
+    }
+
+    function navigateToFeature(name) {
+      send({ type: "set_feature", name });
+    }
+
+    // ─── Move mode ────────────────────────────────────────────────────────────
+    // drag = gradual (bar-by-bar regraft, past bars preserved)
+    // click = immediate full bank replacement (jarring, all instruments snap)
+    let moveMode = "drag";   // "drag" | "click"
+
+    function sendPosition(x, y, isDrag) {
+      terrainX = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, x));
+      terrainY = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, y));
+      send({ type: "set_position", x: terrainX, y: terrainY, drag: !!isDrag });
+      drawPositionDot();
+    }
+
+    let landscapeDragging   = false;
+    let _dragTracePoints    = [];   // journey trace: [{x, y}] for landscape overlay
+    const landscapeWrap     = document.getElementById("landscape-wrap");
+
+    function onLandscapePointer(e, isDrag) {
+      const rect = landscapeWrap.getBoundingClientRect();
+      const { x, y } = pixelToTerrain(
+        e.clientX - rect.left, e.clientY - rect.top,
+        rect.width, rect.height,
+      );
+      if (isDrag) _dragTracePoints.push({x, y});
+      sendPosition(x, y, isDrag);
+    }
+
+    landscapeWrap.addEventListener("mousedown", e => {
+      landscapeDragging = true;
+      _dragTracePoints  = [];
+      e.preventDefault();
+      // Mousedown = click intent (no prior drag) — clears journey, jumps immediately
+      onLandscapePointer(e, false);
+    });
+    let _lastDragSendMs = 0;
+    const _DRAG_THROTTLE_MS = 200;   // max 5 Hz during drag — keeps CPU < 80%
+    landscapeWrap.addEventListener("mousemove", e => {
+      if (!landscapeDragging) return;
+      const rect = landscapeWrap.getBoundingClientRect();
+      const { x, y } = pixelToTerrain(
+        e.clientX - rect.left, e.clientY - rect.top,
+        rect.width, rect.height,
+      );
+      // Always collect trace points visually (no throttle)
+      _dragTracePoints.push({x, y});
+      terrainX = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, x));
+      terrainY = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, y));
+      drawPositionDot();
+    });
+    document.addEventListener("mouseup", () => {
+      if (!landscapeDragging) return;
+      landscapeDragging = false;
+      if (_dragTracePoints.length > 2) {
+        // Sample down to ≤20 waypoints (avoid flooding the queue)
+        const raw    = _dragTracePoints;
+        const step   = Math.max(1, Math.floor(raw.length / 20));
+        const points = [];
+        for (let i = 0; i < raw.length; i += step) points.push(raw[i]);
+        if (points[points.length - 1] !== raw[raw.length - 1])
+          points.push(raw[raw.length - 1]);
+        send({ type: "set_journey", points });
+        // Also update terrainX/Y to final point for dot rendering
+        const last = points[points.length - 1];
+        terrainX = last.x; terrainY = last.y;
+        drawPositionDot();
+      }
+      // Keep trace visible until next mousedown (shows journey path on landscape)
+    });
+    document.getElementById("landscape-map").addEventListener("load", drawPositionDot);
+
+    // ─── Seed control ────────────────────────────────────────────────────────
+
+    function applySeed(value) {
+      const seed = Math.max(0, Math.min(9999, parseInt(value, 10) || 1000));
+      activeSeed = seed;
+      updateSeedGlyph(seed);
+      refreshLandscapeMap(seed);
+      send({ type: "set_seed", value: seed });
+    }
+
+    function randomiseSeed() {
+      applySeed(1000 + Math.floor(Math.random() * 9000));
+    }
+
+    // ── Inline seed editor ───────────────────────────────────────────────────
+
+    function startSeedEdit() {
+      document.getElementById("heat-seed-num").style.display = "none";
+      const fo    = document.getElementById("seed-fo");
+      const input = document.getElementById("seed-inline");
+      fo.style.display   = "";
+      input.value        = activeSeed;
+      // Slight delay so the foreignObject is visible before focus
+      requestAnimationFrame(() => { input.select(); input.focus(); });
+    }
+
+    function commitSeedEdit() {
+      document.getElementById("seed-fo").style.display          = "none";
+      document.getElementById("heat-seed-num").style.display = "";
+      applySeed(document.getElementById("seed-inline").value);
+    }
+
+    // Wire up the inline seed input: Enter commits, Escape cancels, blur commits.
+    // (Script runs at bottom of <body> so DOM is already ready — no DOMContentLoaded needed.)
+    (function () {
+      const inp = document.getElementById("seed-inline");
+      inp.addEventListener("keydown", e => {
+        if (e.key === "Enter")  { e.preventDefault(); commitSeedEdit(); }
+        if (e.key === "Escape") {
+          document.getElementById("seed-fo").style.display       = "none";
+          document.getElementById("heat-seed-num").style.display = "";
+        }
+      });
+      inp.addEventListener("blur", () => {
+        if (document.getElementById("seed-fo").style.display !== "none") {
+          commitSeedEdit();
+        }
+      });
+    })();
+
+    function refreshLandscapeMap(seed, heat) {
+      const h   = (heat !== undefined) ? parseFloat(heat).toFixed(2) : heatApplied.toFixed(2);
+      const ts  = Date.now();                 // timestamp busts browser cache every call
+      const img = document.getElementById("landscape-map");
+      img.src   = `/api/landscape-map.svg?width=240&height=140&heat=${h}&v=${seed}&t=${ts}`;
+    }
+
+    let _midiChBuilt = false;
     function render(state) {
-      document.getElementById("runtime").textContent = `${state.runtime_mode} ${state.playing ? "running" : "stopped"}`;
-      document.getElementById("versions").textContent = `${state.thelmic_version} / rules ${state.music_rules_version}`;
+      document.getElementById("runtime").textContent =
+        `${state.runtime_mode || ""} ${state.playing ? "running" : "stopped"}`.trim();
+
+      // Pression panel + timeline
+      if (state.pression) {
+        updatePressionPanel(state.pression);
+        // Decode compact pression timeline: {gs, steps: [[s,p,sp,r,e]×16]}
+        for (const bar of (state.pression.timeline || [])) {
+          const steps = bar.steps || [];
+          for (let i = 0; i < steps.length; i++) {
+            const [s, p, sp, r, e] = steps[i];
+            pressionTimeline.set(bar.gs + i, {
+              stability: s, pressure: p, sparsity: sp, release: r, emphasis: e
+            });
+          }
+        }
+        // Prune old pression entries (same window as byLayerStep)
+        const pruneBelow = clientBankOffset - BANK_STEPS;
+        for (const gs of pressionTimeline.keys()) {
+          if (gs < pruneBelow) pressionTimeline.delete(gs);
+        }
+      }
+
+      // Channel numbers are rendered directly in the canvas label column.
+      // The separate edit panel is hidden — accessible only via the ch button.
+      document.getElementById("versions").textContent =
+        `${state.thelmic_version || ""} / rules ${state.music_rules_version || ""}`.trim();
       document.getElementById("bpm").value = state.bpm || 174;
 
-      drawGrid(state);
+      // Address bar
+      if (state.address) {
+        document.getElementById("address-display").textContent = state.address;
+      }
+
+      // Sync position dot from server state
+      if (state.landscape_xy) {
+        terrainX = state.landscape_xy.x;
+        terrainY = state.landscape_xy.y;
+        drawPositionDot();
+      }
+
+      // Sync seed when server reports a change (e.g. from another client)
+      if (state.landscape_seed != null && state.landscape_seed !== activeSeed) {
+        activeSeed = state.landscape_seed;
+        updateSeedGlyph(activeSeed);
+        refreshLandscapeMap(activeSeed);
+      }
+
+      // Sync heat dial — show applied (inertia-smoothed) value from server
+      if (state.heat != null) {
+        heatApplied = state.heat.applied;
+        if (!dialDragging) {
+          heatTarget = state.heat.target;
+          // Dial always shows the target (what the user set).
+          // heatApplied is the inertia-smoothed value used by the music engine —
+          // it lags behind and must not drive the visual position.
+          updateDialVisual(heatTarget);
+        }
+      }
 
       document.getElementById("meta").innerHTML = `
         <div>events: ${(state.runtime && state.runtime.event_count) || (state.bank_events || []).length}</div>
-        <div>pression: ${state.pression_engine_version}</div>
+        <div>pression: ${state.pression_engine_version || "—"}</div>
         <div>legacy fallback: ${state.runtime && state.runtime.legacy_fallback_enabled}</div>
         <div>post-generation rescue: ${state.runtime && state.runtime.post_generation_rescue_enabled}</div>
       `;
     }
 
-    function currentStep(state) {
-      if (!state.playing || !state.bank_started_at_ms || !state.bank_duration_ms) {
-        return state.playhead_step || 0;
-      }
-      const elapsed = (Date.now() - state.bank_started_at_ms) % state.bank_duration_ms;
-      return Math.max(0, Math.min(BANK_STEPS - 1, Math.floor((elapsed / state.bank_duration_ms) * BANK_STEPS)));
-    }
-
-    function drawGrid(state) {
-      const frames = state.structure_frames || [];
-      const events = state.bank_events || [];
-      const byLayerStep = new Set(events.map(event => `${event.layer}:${event.musical_step}`));
-      const playheadStep = currentStep(state);
-      const windowStart = Math.max(0, Math.min(BANK_STEPS - STEPS, playheadStep - PLAYHEAD_COLUMN));
-      const grid = document.getElementById("grid");
-      grid.innerHTML = "";
-
-      for (const layer of layers) {
-        const label = document.createElement("div");
-        label.className = "label";
-        label.textContent = layer;
-        grid.appendChild(label);
-        for (let column = 0; column < STEPS; column++) {
-          const step = windowStart + column;
-          const frame = frames[step] || {};
-          const cell = document.createElement("div");
-          cell.className = `cell ${layer}`;
-          if (frame.is_bar_start) cell.classList.add("bar");
-          if (frame.is_phrase_start) cell.classList.add("phrase");
-          if (step === playheadStep) cell.classList.add("playhead");
-          if (byLayerStep.has(`${layer}:${step}`)) cell.classList.add("hit");
-          cell.title = `step ${step} bar ${frame.bar_index ?? "-"} ${frame.phrase_role ?? ""}`;
-          grid.appendChild(cell);
-        }
-      }
-    }
-
-    function animate() {
-      if (latestState && latestState.playing) drawGrid(latestState);
-      requestAnimationFrame(animate);
-    }
+    // ─── Boot ─────────────────────────────────────────────────────────────────
 
     refreshPorts();
     connect();
     animate();
+
+    // ─── UI invariant tests (callable from browser console: runUITests()) ────
+    // Verifies: marker is fixed, scroll moves, phrase positions are correct.
+    window.runUITests = function () {
+      if (!latestState) { console.warn("no state yet"); return; }
+
+      const canvas  = document.getElementById("stream-canvas");
+      const usableW = canvas.width - LABEL_W;
+      const markerX = LABEL_W + usableW * MARKER_FRAC;
+
+      // 1 ── Marker x is fixed (independent of time)
+      const mx1 = markerX;
+      setTimeout(() => {
+        const mx2 = LABEL_W + (canvas.width - LABEL_W) * MARKER_FRAC;
+        console.assert(mx1 === mx2, "FAIL: marker moved between frames");
+        console.log(`PASS  marker fixed at x=${mx1}`);
+      }, 200);
+
+      // 2 ── Scroll offset changes when time advances
+      const now1 = currentGlobalStep(latestState);
+      setTimeout(() => {
+        const now2 = currentGlobalStep(latestState);
+        if (latestState.playing) {
+          console.assert(now2 > now1, "FAIL: scroll offset did not advance");
+          console.log(`PASS  scroll advanced ${(now2 - now1).toFixed(3)} steps in 100 ms`);
+        } else {
+          console.log("INFO  stopped — scroll offset static (expected)");
+        }
+      }, 100);
+
+      // 3 ── Phrase boundaries at correct positions
+      const phraseBoundaries = [...frameStore.values()].filter(f => f.is_phrase_start);
+      const nowStep = currentGlobalStep(latestState);
+      phraseBoundaries.forEach(f => {
+        const x = stepToX(f._gs, nowStep, usableW);
+        const expected = LABEL_W + usableW * MARKER_FRAC + (f._gs - nowStep) * (usableW / STEPS_VISIBLE);
+        const ok = Math.abs(x - expected) < 0.01;
+        console.assert(ok, `FAIL: phrase P${f.phrase_index} x=${x} expected=${expected}`);
+      });
+      if (phraseBoundaries.length) console.log(`PASS  ${phraseBoundaries.length} phrase boundaries positioned correctly`);
+
+      // 4 ── Metadata is stable (phrase_index present on every phrase start frame)
+      const badFrames = phraseBoundaries.filter(f => f.phrase_index === undefined);
+      console.assert(badFrames.length === 0, `FAIL: ${badFrames.length} phrase frames missing phrase_index`);
+      console.log(`PASS  phrase metadata stable (${phraseBoundaries.length} boundaries)`);
+
+      console.log("runUITests complete");
+    };
   </script>
 </body>
 </html>

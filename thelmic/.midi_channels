@@ -1,0 +1,14 @@
+{
+  "kick": 0,
+  "snare": 1,
+  "hat": 2,
+  "open_hat": 15,
+  "bass": 3,
+  "sub": 8,
+  "hook": 6,
+  "call": 4,
+  "response": 5,
+  "drone_spacey": 11,
+  "drone_rumble": 12,
+  "drone_tension": 13
+}
