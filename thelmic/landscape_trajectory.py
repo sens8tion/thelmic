@@ -82,9 +82,6 @@ class LandscapeTrajectory:
         2+ = groove state (stationary or early movement)
         """
         speed = self.speed
-        if speed < 0.08:
-            # Stationary — always groove, no automatic drop countdown
-            return 2
         if speed > 0.4:
             interval = 1
         elif speed > 0.1:
