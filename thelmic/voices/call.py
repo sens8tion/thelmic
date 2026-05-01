@@ -24,11 +24,12 @@ from thelmic.voices import make_intent
 # Call and hook are mutually exclusive — call takes the interior of hold.
 _CALL_BARS = frozenset({4, 5, 6, 7})   # first 4 bars of the hold sub-phrase
 
-# Natural minor intervals above root+12 (call sits above hook range)
-_MINOR_INTERVALS = (10, 12, 14, 15, 17)   # b7, octave, b9, b10, b11
+# Call intervals above root+12. Rules: no voice > root+24 (max additional +12).
+# Call sits just above hook's range — slightly higher within the same octave.
+_MINOR_INTERVALS  = (3, 5, 7, 9, 10)    # b3, 4th, 5th, b6, b7 → root+15 to root+22
 
-# Tension intervals for Chaos positions (stability < 0.35)
-_TENSION_INTERVALS = (10, 11, 12, 15, 16)  # b7, maj7(tension), oct, b10, b2+oct
+# Tension intervals for Chaos (stability < 0.35): adds b2 passing note
+_TENSION_INTERVALS = (3, 5, 7, 9, 11)   # as above but maj7 tension ceiling
 
 
 class CallIntentStream:

@@ -41,7 +41,7 @@ from thelmic.bank_generator import Bank
 from thelmic.motif_engine import Motif, classify_motif_change
 
 
-VERSION = "v1.0"
+VERSION = "v1.1"   # add_subdivision still deferred; velocity+simplify now live
 
 # ---------------------------------------------------------------------------
 # Static execution tables (mirror musical_rules.md; no markdown parsed at runtime)
@@ -192,9 +192,81 @@ def _handle_action(
 
     # ── add_subdivision ─────────────────────────────────────────────────────
     if action == "add_subdivision":
-        # Generating syntactically-correct new events requires voice stream context.
-        # Deferred: implementing here would duplicate voice logic.
+        # Generating new events requires voice stream context — deferred.
         return None, None, "add_requires_voice_context", None
+
+    # ── increase_velocity ───────────────────────────────────────────────────
+    if action == "increase_velocity":
+        if motif is None:
+            return None, None, "no_motif_for_target", None
+        import dataclasses
+        events = _window_events(bank, target, subphrase_start_step, subphrase_end_step)
+        if not events:
+            return None, None, "no_events_in_window", None
+
+        def apply_increase():
+            for phrase in bank.phrases:
+                new_events = []
+                for e in phrase.events:
+                    if e in events and e.layer == target:
+                        new_vel = min(127, int(e.velocity * 1.15))
+                        new_events.append(dataclasses.replace(e, velocity=new_vel))
+                    else:
+                        new_events.append(e)
+                phrase.events = new_events
+
+        # Velocity changes don't alter event refs — always legal
+        return motif, list(motif.event_references), "increase_velocity", apply_increase
+
+    # ── reduce_velocity ─────────────────────────────────────────────────────
+    if action == "reduce_velocity":
+        if motif is None:
+            return None, None, "no_motif_for_target", None
+        import dataclasses
+        events = _window_events(bank, target, subphrase_start_step, subphrase_end_step)
+        if not events:
+            return None, None, "no_events_in_window", None
+
+        def apply_reduce():
+            for phrase in bank.phrases:
+                new_events = []
+                for e in phrase.events:
+                    if e in events and e.layer == target:
+                        new_vel = max(15, int(e.velocity * 0.75))
+                        new_events.append(dataclasses.replace(e, velocity=new_vel))
+                    else:
+                        new_events.append(e)
+                phrase.events = new_events
+
+        return motif, list(motif.event_references), "reduce_velocity", apply_reduce
+
+    # ── simplify_pattern ───────────────────────────────────────────────────
+    if action == "simplify_pattern":
+        if motif is None:
+            return None, None, "no_motif_for_target", None
+        events   = _window_events(bank, target, subphrase_start_step, subphrase_end_step)
+        anchors  = [e for e in events if getattr(e, "structural_authority", False)]
+        non_anch = [e for e in events if not getattr(e, "structural_authority", False)]
+        if not non_anch:
+            return None, None, "already_simplified", None
+        # Remove one non-anchor per call (legal mutation: single event)
+        to_remove = non_anch[0]
+        ref       = _event_ref(to_remove)
+        proposed  = [r for r in motif.event_references if r != ref]
+
+        def apply_simplify():
+            for phrase in bank.phrases:
+                phrase.events = [e for e in phrase.events if e is not to_remove]
+
+        return motif, proposed, "simplify_pattern", apply_simplify
+
+    # ── restore_pattern ────────────────────────────────────────────────────
+    if action == "restore_pattern":
+        # Restoration requires knowing what was removed — not tracked.
+        # Use maintain_pattern as fallback (no-op).
+        if motif is None:
+            return None, None, "no_motif_for_target", None
+        return motif, list(motif.event_references), "restore_maintained", None
 
     return None, None, "unknown_action", None
 

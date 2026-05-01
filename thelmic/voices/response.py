@@ -24,9 +24,10 @@ from thelmic.voices import make_intent
 # No gap needed — response enters immediately after the 4-bar call window.
 _RESPONSE_BARS = frozenset({8, 9, 10, 11})
 
-# Resolving intervals — descend from call toward tonic
-# natural minor descending: b10, b9, octave, b7, 5th
-_RESOLVE_INTERVALS = (15, 14, 12, 10, 7)
+# Response descends from call range toward tonic — resolving.
+# Rules: response never more chromatic than call; stays < root+24.
+# Descending natural minor: b7, 5th, b3, root, then 5th below
+_RESOLVE_INTERVALS = (10, 9, 7, 5, 3)   # root+22 → root+15, settling toward root+12
 
 
 class ResponseIntentStream:

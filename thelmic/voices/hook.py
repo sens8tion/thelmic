@@ -82,13 +82,14 @@ def _hook_note(sr, step: int, motif: tuple[int, ...], stability: float = 0.5) ->
     At high heat (low stability): allow harmonic minor peak (raised 7th = maj7).
     Never major — the target genres are minor/Phrygian/Dorian.
     """
+    # Rules: no voice may exceed root+24 (two octaves above bass).
+    # Hook at root+12 base; max additional offset = 12 → ceiling at root+24.
     if stability < 0.35:
-        # Low stability (Chaos / high heat): harmonic minor peak colour
-        # root, b3, 5th, maj7 (tension leading tone), octave, b10
-        intervals = (0, 3, 7, 11, 12, 15)
+        # Low stability: harmonic minor peak (maj7 tension note at root+23)
+        intervals = (0, 3, 7, 11, 12)
     else:
-        # Default: natural minor — root, b3, 5th, b7, octave, b10
-        intervals = (0, 3, 7, 10, 12, 15)
+        # Default: natural minor — root, b3, 5th, b7, octave
+        intervals = (0, 3, 7, 10, 12)
     idx = motif.index(step) % len(intervals)
     return sr.root_note + 12 + intervals[idx]   # +12 = one octave above bass root
 
