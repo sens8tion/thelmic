@@ -72,51 +72,64 @@ def _compression(
     musical_step: int, step_in_bar: int,
     phrases_until_drop: int, heat: float,
 ) -> AnticipationState:
-    """Subdivision doubles as drop approaches."""
-    # Heat shifts when compression starts
-    early_onset = heat > 0.6   # hot = compression starts earlier
+    """Compression builds late and maintains kick as survivor energy lane.
+
+    Design principles:
+    - Groove is preserved until the LAST few bars — thinning starts late
+    - Kick NEVER thins; it becomes the dominant voice as others drop away
+    - The energy doesn't disappear — it concentrates into the kick
+    - Strip order: call/response → hat → snare (kick last to go, never fully gone)
+
+    ptd=1 (1 phrase before drop): groove through bars 1-12, first hint in 13-16
+    ptd=0 (final phrase):         groove bars 1-8, strip bars 9-16
+    """
+    early_onset = heat > 0.6   # hot = compression starts one block earlier
 
     if phrases_until_drop == 1:
-        # One phrase away: light compression in second half (or whole phrase if hot)
-        compress_from = 0 if early_onset else 128
+        # One phrase away: nearly full groove; only final 4 bars show the approach.
+        # Hot: start from bar 9 (step 128) instead of 13.
+        compress_from = 128 if early_onset else 192
         if musical_step < compress_from:
             return _GROOVE
-        # 8th notes: hat fires every 2 steps
+        # Bars 13–16 (or 9–16 if hot): 8th hats, call/response silenced
+        # Kick and snare unchanged — only hats thin slightly
         hat_ok = step_in_bar % 2 == 0
         return AnticipationState(
             hat_interval=2, hat_allowed=hat_ok,
-            call_allowed=True, response_allowed=True,
+            call_allowed=False, response_allowed=False,
             snare_allowed=True,
             mode="compression",
         )
 
     # phrases_until_drop == 0 — final phrase
-    if musical_step < 64:
-        # Bars 1–4: quarter notes — very sparse, everything stripped back
-        hat_ok = step_in_bar % 4 == 0
-        return AnticipationState(hat_interval=4, hat_allowed=hat_ok,
-                                  call_allowed=False, response_allowed=False,
-                                  snare_allowed=True,   # snare still present early
-                                  mode="compression")
+    # Bars 1–8 (steps 0–127): full groove — no change yet.
+    # Energy stays high; kick, snare, hat all present.
+    if musical_step < 128:
+        return _GROOVE
+
+    # Bars 9–12 (steps 128–191): hat thins to 8ths; call/response gone.
+    # Kick + snare still full — the rhythm remains locked and driving.
     if musical_step < 192:
-        # Bars 5–12: 8th notes — building tension; snare still anchors
         hat_ok = step_in_bar % 2 == 0
         return AnticipationState(hat_interval=2, hat_allowed=hat_ok,
                                   call_allowed=False, response_allowed=False,
                                   snare_allowed=True,
                                   mode="compression")
+
+    # Bars 13–14 (steps 192–223): hat drops to quarter notes; snare anchor only.
+    # Kick is now the primary driver — all energy concentrates there.
     if musical_step < 224:
-        # Bars 13–14: 8th notes tightening; snare begins to thin
-        # (rules: snare removed 2–4 bars before drop)
-        hat_ok = step_in_bar % 2 == 0
-        return AnticipationState(hat_interval=2, hat_allowed=hat_ok,
+        hat_ok = step_in_bar % 4 == 0
+        return AnticipationState(hat_interval=4, hat_allowed=hat_ok,
                                   call_allowed=False, response_allowed=False,
-                                  snare_allowed=(step_in_bar in {4, 12}),  # anchors only
+                                  snare_allowed=(step_in_bar in {4, 12}),
                                   mode="compression")
-    # Bars 15–16: 16th notes — maximum grid reminder; snare removed
+
+    # Bars 15–16 (steps 224+): 16th hat rush — reintroduces hat at maximum density.
+    # Snare removed — kick + 16th hats charging into the drop.
     return AnticipationState(hat_interval=1, hat_allowed=True,
                               call_allowed=False, response_allowed=False,
-                              snare_allowed=False,   # rules: snare cut 2 bars before drop
+                              snare_allowed=False,
                               mode="compression")
 
 
