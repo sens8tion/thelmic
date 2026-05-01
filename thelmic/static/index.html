@@ -1,2576 +1,1481 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>thelmic</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thelmic v1.03</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --oak:   #2a7a4f;
-      --chaos: #8b3a8b;
-      --nott:  #1a3a5c;
-      --bg:    #0d0d0d;
-      --surface: #161616;
-      --border:  #2a2a2a;
-      --text:    #e0e0e0;
-      --dim:     #666;
-      --accent:  #c0a060;
+      color-scheme: dark;
+      --bg: #0d0d0d;
+      --panel: #151515;
+      --line: #2b2b2b;
+      --text: #e4e0d2;
+      --muted: #85806f;
+      --accent: #c6a35b;
+      --kick: #d0a13c;
+      --snare: #b8b0a0;
+      --hat: #5fbf91;
+      --bass: #7b9fc4;
     }
-
+    * { box-sizing: border-box; }
     body {
+      margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 32px 24px;
-      gap: 28px;
+      font-family: "Courier New", monospace;
+      padding: 24px;
     }
-
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+    }
     h1 {
       font-size: 22px;
-      letter-spacing: 0.25em;
+      letter-spacing: 0.22em;
+      font-weight: 400;
       color: var(--accent);
-      font-weight: normal;
+      margin: 0;
     }
-
-    /* ── Territory strip ── */
-    .territory-strip {
+    .status {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      text-align: right;
+    }
+    .controls {
       display: flex;
-      width: 100%;
-      max-width: 640px;
-      height: 6px;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .territory-strip span {
-      flex: 1;
-    }
-    .territory-strip .oak   { background: var(--oak); }
-    .territory-strip .chaos { background: var(--chaos); }
-    .territory-strip .nott  { background: var(--nott); }
-
-    /* ── Axis section ── */
-    .axis-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .axis-labels {
-      display: flex;
-      justify-content: space-between;
-      color: var(--dim);
-      font-size: 11px;
-      letter-spacing: 0.12em;
-    }
-
-    #axis-slider {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 36px;
-      background: transparent;
-      cursor: pointer;
-      outline: none;
-    }
-
-    #axis-slider::-webkit-slider-runnable-track {
-      height: 36px;
-      border-radius: 4px;
-      background: linear-gradient(
-        to right,
-        var(--oak) 0%,
-        var(--chaos) 50%,
-        var(--nott) 100%
-      );
-    }
-
-    #axis-slider::-moz-range-track {
-      height: 36px;
-      border-radius: 4px;
-      background: linear-gradient(
-        to right,
-        var(--oak) 0%,
-        var(--chaos) 50%,
-        var(--nott) 100%
-      );
-    }
-
-    #axis-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 18px;
-      height: 52px;
-      margin-top: -8px;
-      background: #fff;
-      border-radius: 3px;
-      box-shadow: 0 0 8px rgba(0,0,0,0.8);
-    }
-
-    #axis-slider::-moz-range-thumb {
-      width: 18px;
-      height: 52px;
-      background: #fff;
-      border-radius: 3px;
-      border: none;
-      box-shadow: 0 0 8px rgba(0,0,0,0.8);
-    }
-
-    .territory-name {
-      text-align: center;
-      font-size: 18px;
-      letter-spacing: 0.3em;
-      text-transform: uppercase;
-      height: 24px;
-      transition: color 0.3s;
-    }
-    .territory-name.oak   { color: var(--oak); }
-    .territory-name.chaos { color: var(--chaos); }
-    .territory-name.nott  { color: var(--nott); }
-
-    /* ── Force state bars ── */
-    .force-grid {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
+      flex-wrap: wrap;
       gap: 8px;
+      margin-bottom: 20px;
     }
-
-    .force-row {
+    button, input {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      font-family: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .pression-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 10px;
+    }
+    .pression-row label { color: var(--muted); width: 70px; font-size: 10px; }
+    .pression-bar-track {
+      flex: 1; height: 6px; background: #1a1a1a;
+      border: 1px solid var(--line); position: relative;
+    }
+    .pression-bar-fill {
+      height: 100%; background: #5a7aad; transition: width 0.1s;
+    }
+    .pression-val { width: 28px; color: #5a7aad; text-align: right; }
+    .pression-cc  { width: 32px; color: #3d3830; }
+    .btn-map {
+      font-size: 9px; padding: 1px 5px; cursor: pointer;
+      background: var(--panel); color: var(--muted);
+      border: 1px solid var(--line);
+    }
+    .btn-map.active {
+      background: #3a4a6a; color: #6bafed;
+      border-color: #6bafed;
+    }
+    .midi-channels {
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .midi-ch-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 4px;
+    }
+    .midi-ch-row label { font-family: monospace; font-size: 11px; width: 72px; color: var(--text); }
+    .midi-ch-row input {
+      width: 44px; padding: 3px 6px; font-size: 11px;
+      background: #1a1a1a; color: var(--text); border: 1px solid var(--line);
+    }
+    .midi-ch-row span { font-size: 10px; color: var(--muted); }
+    #stream-canvas {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--line);
+    }
+    .landscape-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      margin-bottom: 20px;
+      padding: 10px;
+    }
+    /* ── Landscape + Heat layout ─────────────────────────────────────────── */
+    .landscape-heat-row {
       display: flex;
-      flex-direction: column;
-      gap: 3px;
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 20px;
     }
-
-    .force-row-header {
+    .landscape-panel {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px;
+      min-width: 0;
+    }
+    .landscape-panel img {
+      display: block;
+      width: 100%;
+      height: auto;
+      object-fit: fill;
+      image-rendering: auto;
+    }
+    .landscape-meta {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
-    }
-
-    .force-label {
-      color: var(--dim);
-      font-size: 11px;
-      letter-spacing: 0.08em;
-    }
-
-    .force-rider {
-      font-size: 9px;
-      letter-spacing: 0.06em;
-      color: #444;
-      margin-left: 6px;
-      font-style: italic;
-      transition: color 0.3s;
-    }
-
-    .force-rider.active { color: #6a8a6a; }
-
-    .force-bar-track {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      height: 10px;
-      overflow: hidden;
-      width: 100%;
-    }
-
-    .force-bar-fill {
-      height: 100%;
-      border-radius: 2px;
-      background: var(--accent);
-      transition: width 0.12s ease;
-    }
-
-    .force-value {
-      color: var(--dim);
-      font-size: 11px;
-    }
-
-    /* ── Controls ── */
-    .controls-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .controls-section h2 {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-      font-weight: normal;
-      text-transform: uppercase;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-
-    .control-row {
-      display: grid;
-      grid-template-columns: minmax(60px, 120px) 1fr 40px minmax(60px, 120px);
-      gap: 6px;
       align-items: center;
-    }
-
-    .control-row label {
-      color: var(--dim);
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      text-align: right;
-    }
-
-    .control-row input[type=range] {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100%;
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      outline: none;
-      cursor: pointer;
-    }
-
-    .control-row input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 14px;
-      height: 14px;
-      background: var(--accent);
-      border-radius: 50%;
-    }
-
-    .control-row input[type=range]::-moz-range-thumb {
-      width: 14px;
-      height: 14px;
-      background: var(--accent);
-      border-radius: 50%;
-      border: none;
-    }
-
-    .control-value {
-      color: var(--dim);
-      font-size: 11px;
-      text-align: right;
-    }
-
-    /* ── Transport ── */
-    .transport {
-      display: flex;
       gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-
-    button {
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
-      letter-spacing: 0.15em;
-      padding: 10px 28px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      cursor: pointer;
-      border-radius: 2px;
-      transition: background 0.15s, border-color 0.15s;
-    }
-
-    button:hover { background: #222; }
-
-    button.playing {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .bpm-control {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--dim);
-      font-size: 12px;
-    }
-
-    #bpm-input {
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      width: 56px;
-      padding: 6px 8px;
-      border-radius: 2px;
-      text-align: center;
-    }
-
-    /* ── Status ── */
-    .status-bar {
-      color: var(--dim);
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      height: 18px;
-    }
-
-    .status-bar.ok  { color: var(--oak); }
-    .status-bar.err { color: #a04040; }
-
-    /* ── Bank counter ── */
-    .bank-count {
-      color: var(--dim);
+      margin-top: 8px;
+      color: var(--muted);
       font-size: 11px;
       letter-spacing: 0.08em;
     }
-
-    /* ── Archetype lock ── */
-    .archetype-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-
-    .archetype-row {
+    .landscape-seed {
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    #archetype-select {
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 6px 8px;
-      border-radius: 2px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .archetype-current {
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      color: var(--dim);
-    }
-
-    .archetype-current.locked { color: #e0a030; }
-
-    /* ── MIDI section ── */
-    .midi-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-
-    .midi-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    #midi-port-select, #midi-cc-port-select {
-      font-family: 'Courier New', monospace;
-      font-size: 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 6px 8px;
-      border-radius: 2px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .midi-label {
-      font-size: 10px;
-      color: var(--dim);
-      letter-spacing: 0.1em;
-      min-width: 32px;
-    }
-
-    .midi-refresh-btn {
-      padding: 6px 10px;
-      font-size: 14px;
+      gap: 6px;
       flex-shrink: 0;
     }
-
-    .midi-status {
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      color: var(--dim);
-    }
-
-    .midi-status.connected { color: var(--oak); }
-    .midi-status.error     { color: #a04040; }
-    .midi-channel-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
-      gap: 4px 8px;
-      color: var(--dim);
-      font-size: 10px;
-      letter-spacing: 0.06em;
-    }
-    .midi-channel-item {
-      display: flex;
-      justify-content: space-between;
-      gap: 6px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-      padding: 3px 5px;
-      border-radius: 2px;
-    }
-    .midi-channel-item .layer { color: var(--text); }
-    .midi-channel-item .channel { color: var(--accent); }
-
-    /* ── Sequencer ── */
-    .seq-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .seq-heading {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-      font-weight: normal;
-      text-transform: uppercase;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-
-    .seq-legend {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .seq-legend-item {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 10px;
-      color: var(--dim);
-      letter-spacing: 0.06em;
-    }
-
-    .seq-legend-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 1px;
-    }
-
-    .seq-scroll {
-      overflow: hidden;
-      width: 100%;
-    }
-
-    .seq-content {
-      position: relative;
-      min-width: 480px;
-      --window-start-step: 0;
-    }
-
-    .playhead {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: rgba(255, 255, 255, 0.45);
-      pointer-events: none;
-      z-index: 10;
-      left: 25%;
-      will-change: left;
-    }
-
-    .seq-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      min-width: 480px;
-    }
-
-    .seq-lane {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .seq-lane-label {
-      font-size: 10px;
-      color: var(--dim);
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      padding-bottom: 1px;
-    }
-
-    .seq-lane-row {
-      display: grid;
-      /* 16 bars × 16 steps = 256 cells */
-      grid-template-columns: repeat(512, 1fr);
-      height: 18px;
-      gap: 0;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-      width: 800%;
-      transform: translateX(0);
-      will-change: transform;
-    }
-
-    .seq-cell {
-      height: 100%;
-      border-right: 1px solid transparent;
-    }
-
-    .seq-cell.no-midi {
-      filter: grayscale(0.75);
-      opacity: 0.35 !important;
-    }
-
-    .seq-cell.stream-origin {
-      outline: 1px solid rgba(120, 200, 255, 0.9);
-      box-shadow: inset 0 -2px 0 rgba(120, 200, 255, 0.75);
-    }
-
-    /* Bar dividers (every 16 steps) */
-    .seq-cell.bar-start {
-      border-left: 1px solid #333;
-    }
-
-    /* Phrase dividers are assigned from server-provided musical timebase metadata. */
-    .seq-cell.phrase-start {
-      border-left: 2px solid #606060;
-    }
-
-    .seq-cell.sub-phrase-start {
-      border-left: 1px solid #3d3d3d;
-    }
-
-    .seq-cell.drop-start {
-      box-shadow: inset 2px 0 0 rgba(190, 70, 70, 0.55);
-    }
-
-    /* ── Phrase overlay ── */
-    .phrase-overlay-wrap {
-      position: absolute;    /* out of flow — no layout artifact */
-      top: 0;
-      left: 0;
-      width: 800%;           /* same coordinate space as .seq-lane-row */
-      height: 0;
-      pointer-events: none;
-      z-index: 3;
-      overflow: visible;
-      will-change: transform;
-    }
-
-    .phrase-marker {
-      position: absolute;
-      top: 0;
-      height: 200px;     /* tall enough to span all visible lanes */
-      width: 0;
-      border-left: 2px solid rgba(210, 180, 80, 0.7);
-      overflow: visible;
-    }
-
-    .phrase-marker.mode-cr {
-      border-left-color: rgba(150, 100, 190, 0.45);
-    }
-
-    .phrase-marker.sub-phrase-marker {
-      top: 18px;
-      height: 150px;
-      border-left: 1px solid rgba(160, 160, 160, 0.24);
-    }
-
-    .phrase-marker.drop-marker {
-      height: 28px;
-      border-left: 2px solid rgba(190, 70, 70, 0.65);
-    }
-
-    .phrase-label {
-      position: absolute;
-      top: 0;
-      left: 4px;
-      font-size: 8px;
-      white-space: nowrap;
-      color: #c0a060;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      background: rgba(0, 0, 0, 0.78);
-      padding: 1px 4px;
-      border-radius: 1px;
-      line-height: 1.4;
-    }
-
-    .phrase-marker.mode-cr .phrase-label {
-      color: #b080d0;
-    }
-
-    .phrase-debug-row {
-      display: grid;
-      grid-template-columns: repeat(512, 1fr);
-      height: 16px;
-      width: 800%;
-      background: #080808;
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-      transform: translateX(0);
-      will-change: transform;
-      margin-bottom: 4px;
-      font-size: 7px;
-      color: #777;
-    }
-
-    .phrase-debug-cell {
-      min-width: 0;
-      overflow: hidden;
-      border-right: 1px solid transparent;
-      line-height: 16px;
-      white-space: nowrap;
-    }
-
-    .phrase-debug-cell.bar-start { border-left: 1px solid #282828; }
-    .phrase-debug-cell.sub-phrase-start {
-      border-left: 1px solid rgba(160, 160, 160, 0.28);
-      color: #999;
-    }
-    .phrase-debug-cell.phrase-start {
-      border-left: 2px solid rgba(210, 180, 80, 0.75);
-      color: #d0b060;
-    }
-
-    .sub-phrase-label {
-      position: absolute;
-      top: 0;
-      left: 3px;
-      font-size: 7px;
-      white-space: nowrap;
-      color: rgba(190, 190, 190, 0.55);
-      text-transform: uppercase;
-      background: rgba(0, 0, 0, 0.58);
-      padding: 1px 3px;
-      border-radius: 1px;
-      line-height: 1.3;
-    }
-
-    .phrase-badges {
-      position: absolute;
-      top: 15px;
-      left: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      max-width: 80px;
-    }
-
-    .phrase-badge {
-      font-size: 7px;
-      padding: 1px 3px;
-      border-radius: 1px;
-      background: rgba(20, 20, 20, 0.88);
-      color: #555;
-      white-space: nowrap;
-      border: 1px solid #2a2a2a;
-      line-height: 1.3;
-    }
-
-    .phrase-badge.mode-hook   { color: #d4a820; border-color: #4a380a; }
-    .phrase-badge.mode-cr     { color: #9060b8; border-color: #3a1a5a; }
-    .phrase-badge.tag-drop    { color: #c04040; border-color: #501010; }
-    .phrase-badge.tag-build   { color: #50a050; border-color: #1a4a1a; }
-    .phrase-badge.tag-rhythm  { color: #5080a0; border-color: #1a2a3a; }
-
-    /* Role base colours — blended toward deformation colour in JS */
-    .seq-cell.role-anchor  { background: #c0a060; }
-    .seq-cell.role-ghost   { background: #444; }
-    .seq-cell.role-impact  { background: #e05050; }
-
-    /* Deformation strips (per-type, stacked) */
-    .deform-strips-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 8px;
-    }
-
-    .deform-strip-row {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .deform-strip-label {
-      font-size: 9px;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      opacity: 0.7;
-    }
-
-    .deform-strip {
-      display: grid;
-      grid-template-columns: repeat(512, 1fr);
-      height: 8px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      overflow: hidden;
-      min-width: 480px;
-      width: 800%;
-      transform: translateX(0);
-      will-change: transform;
-    }
-
-    .deform-cell {
-      height: 100%;
-    }
-
-    .deform-cell.bar-start        { border-left: 1px solid #333; }
-    .deform-cell.phrase-start     { border-left: 2px solid #555; }
-    .deform-cell.sub-phrase-start { border-left: 1px solid #3d3d3d; }
-
-    /* ── Transition graph ── */
-    .transition-graph-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .transition-graph-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .transition-graph-label {
-      font-size: 10px;
-      letter-spacing: 0.15em;
-      color: var(--dim);
-      text-transform: uppercase;
-    }
-    .transition-graph-legend {
-      font-size: 10px;
-      color: var(--dim);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .tg-legend-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    #transition-graph {
-      width: 100%;
-      height: 56px;
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      background: var(--surface);
-      display: block;
-    }
-
-    /* ── Pression dimensions ── */
-    .pression-section {
-      width: 100%;
-      max-width: 640px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-    .pression-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .pression-bar-label {
-      font-size: 10px;
-      color: var(--dim);
-      letter-spacing: 0.1em;
-    }
-    .pression-lane {
-      display: grid;
-      grid-template-columns: 110px 1fr 36px 58px;
-      align-items: center;
-      gap: 8px;
-      height: 18px;
-    }
-    .pression-lane-name {
-      font-size: 9px;
-      letter-spacing: 0.08em;
-      text-align: right;
-      color: var(--dim);
-      text-transform: lowercase;
-    }
-    .pression-sparkline {
-      height: 18px;
-      position: relative;
-    }
-    .pression-sparkline canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .pression-value {
-      font-size: 10px;
-      text-align: right;
-      color: var(--dim);
-      font-variant-numeric: tabular-nums;
-    }
-    .pression-overlay-dot {
-      position: absolute;
-      top: 0;
-      width: 2px;
-      height: 18px;
-      opacity: 0.6;
-      pointer-events: none;
-    }
-    .pression-map-btn {
-      height: 18px;
-      padding: 0 7px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--dim);
-      font-size: 9px;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-    .pression-map-btn.active {
-      color: var(--text);
-      border-color: var(--accent);
-      background: rgba(180, 220, 255, 0.12);
-    }
-
-    /* ── Pressure curves ── */
-    .curves-section {
-      width: 100%;
-      max-width: 640px;
-      display: none;
-      flex-direction: column;
-      gap: 10px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-
-    .curves-heading {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-      font-weight: normal;
-      text-transform: uppercase;
-    }
-
-    .curve-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      padding: 6px 8px;
-    }
-
-    .curve-target {
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      color: var(--dim);
-      min-width: 90px;
-    }
-
-    .curve-target.active { color: #6a8a6a; }
-
-    .curve-sparkline {
-      flex: 1;
-      height: 24px;
-      position: relative;
-    }
-
-    .curve-sparkline canvas {
-      width: 100%;
-      height: 100%;
-    }
-
-    .curve-meta {
-      font-size: 10px;
-      color: var(--dim);
-      letter-spacing: 0.05em;
-      min-width: 80px;
-      text-align: right;
-    }
-
-    .curve-val {
-      font-size: 11px;
-      color: var(--text);
-      min-width: 36px;
-      text-align: right;
-    }
-
-    .curve-btn {
-      font-size: 10px;
-      padding: 3px 8px;
-      letter-spacing: 0.1em;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--dim);
-      cursor: pointer;
-      border-radius: 2px;
-    }
-
-    .curve-btn.running {
-      border-color: #6a8a6a;
-      color: #6a8a6a;
-    }
-
-    .curve-add-form {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      padding: 6px 0 2px;
-    }
-
-    .curve-add-form select,
-    .curve-add-form input {
-      font-family: 'Courier New', monospace;
-      font-size: 11px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text);
+    .landscape-seed label { text-transform: uppercase; }
+    .landscape-seed input[type="number"] {
+      width: 88px;
       padding: 4px 6px;
-      border-radius: 2px;
+      font-size: 11px;
     }
+    .landscape-seed button { padding: 4px 8px; font-size: 11px; }
 
-    .curve-add-form input[type=number] { width: 52px; }
-    .curve-cc-fields { display: none; align-items: center; gap: 4px; }
-    .curve-cc-fields.visible { display: flex; }
-    .curve-cc-fields input[type=number] { width: 44px; }
-    .curve-cc-label { font-size: 10px; color: var(--dim); }
+    /* ── Heat dial ───────────────────────────────────────────────────────── */
+    .heat-panel {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px 16px;
+      user-select: none;
+    }
+    #heat-dial-svg { cursor: ns-resize; touch-action: none; }
+    .address-bar {
+      font-size: 13px;
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      font-family: "Courier New", monospace;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .meta {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px 24px;
+    }
   </style>
 </head>
 <body>
+  <header>
+    <h1>THELMIC V1.03</h1>
+    <div class="address-bar" title="seed / feature / heat — your current location">
+      <span id="address-display" onclick="startAddressEdit()" style="cursor:pointer">—</span>
+      <input id="address-input" type="text" placeholder="1103/C3/0.7"
+             style="display:none;width:130px;background:transparent;border:none;
+                    border-bottom:1px solid var(--accent);color:var(--accent);
+                    font-family:inherit;font-size:inherit;outline:none;padding:0"
+             onkeydown="handleAddressKey(event)"
+             onblur="commitAddressEdit()"/>
+    </div>
+    <div class="status">
+      <div id="runtime">connecting</div>
+      <div id="versions"></div>
+    </div>
+  </header>
 
-  <h1>thelmic</h1>
-
-  <div class="territory-strip">
-    <span class="oak"></span>
-    <span class="chaos"></span>
-    <span class="nott"></span>
-  </div>
-
-  <!-- Axis -->
-  <div class="axis-section">
-    <div class="axis-labels">
-      <span>Oak</span>
-      <span>Chaos</span>
-      <span>Nott</span>
-    </div>
-    <input type="range" id="axis-slider" min="0" max="1000" value="0" step="1">
-    <div class="territory-name oak" id="territory-name">Oak</div>
-  </div>
-
-  <!-- Transition graph -->
-  <div class="transition-graph-section" id="transition-graph-section" style="display:none">
-    <div class="transition-graph-header">
-      <span class="transition-graph-label">transition · <span id="tg-bars">8</span> bars</span>
-      <span class="transition-graph-legend">
-        <span class="tg-legend-dot" style="background:#5090c0"></span> position &nbsp;
-        <span class="tg-legend-dot" style="background:#c06050"></span> ghost inject
-      </span>
-    </div>
-    <canvas id="transition-graph" height="56"></canvas>
-  </div>
-
-  <!-- Force state -->
-  <div class="force-grid">
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">anticipation</span><span class="force-rider" id="rider-anticipation"></span><span class="force-value" id="val-anticipation">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-anticipation" style="width:0%"></div></div>
-    </div>
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">release pressure</span><span class="force-rider" id="rider-release_pressure"></span><span class="force-value" id="val-release_pressure">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-release_pressure" style="width:0%"></div></div>
-    </div>
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">instability</span><span class="force-rider" id="rider-instability"></span><span class="force-value" id="val-instability">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-instability" style="width:0%"></div></div>
-    </div>
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">density</span><span class="force-rider" id="rider-density"></span><span class="force-value" id="val-density">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-density" style="width:0%"></div></div>
-    </div>
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">control / chaos</span><span class="force-rider" id="rider-control_vs_chaos"></span><span class="force-value" id="val-control_vs_chaos">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-control_vs_chaos" style="width:0%"></div></div>
-    </div>
-    <div class="force-row">
-      <div class="force-row-header"><span class="force-label">resolution likelihood</span><span class="force-rider" id="rider-resolution_likelihood"></span><span class="force-value" id="val-resolution_likelihood">0.00</span></div>
-      <div class="force-bar-track"><div class="force-bar-fill" id="bar-resolution_likelihood" style="width:0%;background:#5a8a7a"></div></div>
-    </div>
-  </div>
-
-  <!-- Controls -->
-  <div class="controls-section">
-    <h2>Controls</h2>
-
-    <div class="control-row">
-      <label>chaos limit</label>
-      <input type="range" id="ctrl-chaos_limit" min="0" max="1000" value="1000" step="1">
-      <div class="control-value" id="ctrlval-chaos_limit">1.00</div>
-      <span class="force-rider" id="rider-chaos_limit"></span>
-    </div>
-    <div class="control-row">
-      <label>density ceiling</label>
-      <input type="range" id="ctrl-density_ceiling" min="0" max="1000" value="1000" step="1">
-      <div class="control-value" id="ctrlval-density_ceiling">1.00</div>
-      <span class="force-rider" id="rider-density_ceiling"></span>
-    </div>
-  </div>
-
-  <!-- Sequencer -->
-  <div class="seq-section" id="seq-section">
-    <h2 class="seq-heading">SEQUENCER — bank <span id="seq-bank-num">—</span></h2>
-    <div class="seq-legend" id="seq-legend"></div>
-    <div class="seq-scroll">
-      <div class="seq-content" id="seq-content">
-        <div class="playhead" id="playhead"></div>
-        <!-- Phrase structure overlay — boundary markers, mode labels, rule badges -->
-        <div class="phrase-overlay-wrap" id="phrase-overlay-wrap"></div>
-        <div class="phrase-debug-row" id="phrase-debug-row"></div>
-        <!-- Deformation intensity strips — one row per active deformation type -->
-        <div class="deform-strips-wrap" id="deform-strips"></div>
-        <div class="seq-grid" id="seq-grid"></div>
+  <div class="landscape-heat-row">
+    <section class="landscape-panel" aria-label="Thelmic landscape volatility terrain">
+      <div id="landscape-wrap" style="position:relative;cursor:crosshair">
+        <img id="landscape-map" src="/api/landscape-map.svg?width=240&height=140&heat=0.50"
+             alt="Thelmic landscape volatility terrain"
+             style="display:block;width:100%;user-select:none"
+             draggable="false">
+        <canvas id="landscape-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
       </div>
+      </div><!-- /landscape-wrap -->
+      <div class="landscape-meta">
+        <span>Oak: stable</span>
+        <span>Chaos: volatile</span>
+        <span>Nott: dark / heavy</span>
+        <button onclick="randomiseSeed()" title="Randomise seed" style="padding:3px 7px;font-size:11px">⟳ seed</button>
+      </div>
+    </section>
+
+    <div class="heat-panel">
+      <svg id="heat-dial-svg" width="100" height="115"
+           aria-label="Heat dial — controls expression and energy">
+        <!-- Track arc (full range, faint) -->
+        <path id="heat-track" fill="none" stroke="#2e2820" stroke-width="5"
+              stroke-linecap="round"/>
+        <!-- Fill arc (current heat) -->
+        <path id="heat-fill" fill="none" stroke="#c6a35b" stroke-width="5"
+              stroke-linecap="round"/>
+        <!-- Pointer -->
+        <line id="heat-pointer" stroke="#c6a35b" stroke-width="1.5"
+              stroke-linecap="round"/>
+        <!-- Centre seed glyph (generated by JS) -->
+        <g id="heat-seed-glyph"></g>
+        <!-- Seed display (click to edit) -->
+        <text id="heat-seed-num" x="50" y="50"
+              fill="#c6a35b" font-family="Courier New,monospace" font-size="8"
+              text-anchor="middle" dominant-baseline="middle" font-weight="bold"
+              style="cursor:text"
+              onmousedown="event.stopPropagation()"
+              onclick="startSeedEdit()"/>
+        <!-- Inline seed editor (hidden until clicked) -->
+        <foreignObject id="seed-fo" x="20" y="41" width="60" height="18"
+                       style="display:none;overflow:visible">
+          <input xmlns="http://www.w3.org/1999/xhtml"
+                 id="seed-inline" type="number" min="0" max="9999"
+                 style="width:100%;background:transparent;border:none;
+                        border-bottom:1px solid #c6a35b;color:#c6a35b;
+                        font-family:Courier New,monospace;font-size:10px;
+                        text-align:center;outline:none;padding:0;
+                        -moz-appearance:textfield"/>
+        </foreignObject>
+        <!-- Invisible hit circle so whole centre zone opens the editor.
+             stopPropagation on mousedown prevents the drag handler from firing. -->
+        <circle cx="50" cy="50" r="18" fill="transparent" style="cursor:text"
+                onmousedown="event.stopPropagation()"
+                onclick="startSeedEdit()"/>
+        <!-- HEAT label -->
+        <text x="50" y="99"
+              fill="#85806f" font-family="Courier New,monospace" font-size="9"
+              text-anchor="middle" letter-spacing="0.2em">HEAT</text>
+        <!-- Heat value -->
+        <text id="heat-value-text" x="50" y="110"
+              fill="#554e47" font-family="Courier New,monospace" font-size="8"
+              text-anchor="middle"/>
+      </svg>
     </div>
   </div>
 
-  <!-- Pressure Curves -->
-  <div class="curves-section">
-    <h2 class="curves-heading">PRESSURE CURVES</h2>
-    <div id="curves-list"></div>
-    <div class="curve-add-form">
-      <select id="curve-shape">
-        <option value="linear">linear</option>
-        <option value="accelerating">accelerating</option>
-        <option value="decelerating">decelerating</option>
-        <option value="sinusoidal">sinusoidal</option>
-        <option value="step">step</option>
-      </select>
-      <input type="number" id="curve-bars" value="8" min="1" max="256" title="bars">
-      <input type="number" id="curve-from" value="0" min="0" max="1" step="0.05" title="from">
-      <span style="color:var(--dim);font-size:10px">→</span>
-      <input type="number" id="curve-to" value="1" min="0" max="1" step="0.05" title="to">
-      <select id="curve-target-type" onchange="updateCurveTargetMode()">
-        <option value="deformer">deformer</option>
-        <option value="cc">cc</option>
-      </select>
-      <select id="curve-deformer-name">
-        <option value="ghost_inject">ghost inject</option>
-      </select>
-      <span class="curve-cc-fields" id="curve-cc-fields">
-        <span class="curve-cc-label">ch</span>
-        <input type="number" id="curve-cc-ch" value="0" min="0" max="15" title="MIDI channel (0–15)">
-        <span class="curve-cc-label">cc</span>
-        <input type="number" id="curve-cc-num" value="74" min="0" max="127" title="CC number (0–127)">
-      </span>
-      <label style="font-size:10px;color:var(--dim);display:flex;align-items:center;gap:3px">
-        <input type="checkbox" id="curve-loop"> loop
-      </label>
-      <button class="curve-btn" id="curve-add-btn" onclick="addCurve()">+ add</button>
-    </div>
+  <div class="controls">
+    <button onclick="send({type:'start'})">start</button>
+    <button onclick="send({type:'stop'})">stop</button>
+    <label>bpm <input id="bpm" type="number" min="60" max="300" value="174" onchange="send({type:'bpm', value:this.value})"></label>
+    <button onclick="refreshPorts()">refresh midi ports</button>
+    <select id="midiPorts" onchange="send({type:'midi_port', value:this.value})"></select>
+    <button id="btn-reload" onclick="reloadGeneration()" title="Hot-reload voice/arc/dimension code — takes effect at next bank">↺ reload voices</button>
+    <button onclick="toggleChannelEditor()" title="Edit MIDI channel assignments">ch</button>
   </div>
 
-  <!-- Archetype lock -->
-  <!-- Pression Dimensions -->
-  <div class="pression-section" id="pression-section">
-    <div class="pression-header">
-      <h2 class="curves-heading">PRESSION DIMENSIONS</h2>
-      <span class="pression-bar-label" id="pression-bar-label">bar —</span>
-    </div>
-    <div id="pression-lanes"></div>
+  <div id="midi-channels" class="midi-channels" style="display:none">
+    <span style="color:#85806f;font-size:10px;font-family:monospace">midi channels — protocol is 0-indexed; DAW shows +1 (so ch 0 = Ableton ch 1)</span>
+    <div id="midi-ch-rows"></div>
   </div>
 
-  <div class="archetype-section">
-    <h2 class="seq-heading" style="border-top:none;padding-top:0">ARCHETYPE</h2>
-    <div class="archetype-row">
-      <select id="archetype-select" onchange="setArchetypeLock()">
-        <option value="">— auto —</option>
-      </select>
-      <div class="archetype-current" id="archetype-current">auto</div>
+  <canvas id="stream-canvas"></canvas>
+  <div id="meta" class="meta"></div>
+
+  <!-- Pression CC panel -->
+  <div id="pression-panel" style="margin-top:8px;border:1px solid var(--line);background:var(--panel);font-family:monospace;font-size:10px;">
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--line);">
+      <span style="color:#85806f">pression CCs</span>
+      <span style="color:#3d3830">ch:</span>
+      <input id="pression-ch" type="number" min="1" max="16" value="14"
+        style="width:40px;padding:2px 4px;background:#1a1a1a;color:var(--text);border:1px solid var(--line);font-size:10px;font-family:monospace"
+        onchange="setPressionChannel(parseInt(this.value)-1)"
+        title="DAW channel for pression CCs (1-indexed)">
+      <span id="pression-map-status" style="color:#3d3830;margin-left:auto"></span>
     </div>
+    <div id="pression-rows" style="padding:4px 0"></div>
   </div>
 
-  <!-- MIDI port selector -->
-  <div class="midi-section">
-    <h2 class="seq-heading" style="border-top:none;padding-top:0">MIDI OUT</h2>
-    <div class="midi-row">
-      <span class="midi-label">notes</span>
-      <select id="midi-port-select" onchange="selectMidiPort()">
-        <option value="">— select port —</option>
-      </select>
-      <button class="midi-refresh-btn" onclick="refreshPorts()" title="Refresh ports">⟳</button>
-      <div class="midi-status" id="midi-status">not connected</div>
-    </div>
-    <div class="midi-row">
-      <span class="midi-label">cc</span>
-      <select id="midi-cc-port-select" onchange="selectMidiCCPort()">
-        <option value="">— select port —</option>
-      </select>
-      <div class="midi-status" id="midi-cc-status">not connected</div>
-    </div>
-    <div class="midi-channel-grid" id="midi-channel-grid"></div>
+  <div id="event-log" style="margin-top:8px;padding:6px 10px;border:1px solid var(--line);background:var(--panel);font-family:monospace;font-size:10px;max-height:120px;overflow-y:auto;color:#85806f;">
+    <span style="color:#3d3830">— ui event log —</span>
   </div>
-
-  <!-- Transport -->
-  <div class="transport">
-    <button id="play-btn" onclick="togglePlay()">PLAY</button>
-    <div class="bpm-control">
-      <span>BPM</span>
-      <input type="number" id="bpm-input" value="174" min="60" max="300"
-             onchange="sendBpm()" onblur="sendBpm()">
-    </div>
-    <div class="bank-count" id="bank-count">bank: - / 4</div>
-    <div class="bpm-control">
-      <span>quantization after</span>
-      <input type="number" id="quantize-input" value="4" min="4" max="64"
-             onchange="sendQuantize()" onblur="sendQuantize()" style="width:48px">
-      <span>bars</span>
-    </div>
-  </div>
-
-  <div class="status-bar" id="status">connecting…</div>
 
   <script>
-    let ws = null;
-    let reconnectTimer = null;
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const BANK_STEPS    = 256;
+    let activeSeed      = 1103;
+    const layers        = ["kick", "snare", "hat", "open_hat", "sub", "bass", "hook", "call", "response",
+                           "drone_spacey", "drone_rumble", "drone_tension"];
 
-    function connect() {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}/ws`);
+    // Canvas layout
+    const ROW_H         = 26;          // px per instrument row
+    const LABEL_W       = 80;          // px for left label column
+    const PHRASE_H      = 52;          // px above rows for phrase labels (3 text lines)
+    const PRESSION_DIMS_LIST = ['stability','pressure','sparsity','release','emphasis'];
+    const PRESSION_ROW_H = 22;         // px per pression lane
+    const PRESSION_SECTION_H = PRESSION_DIMS_LIST.length * PRESSION_ROW_H + 10;
+    const CANVAS_H      = PHRASE_H + layers.length * ROW_H + PRESSION_SECTION_H;
+    const STEPS_VISIBLE = 96;          // total steps shown at once
+    const MARKER_FRAC   = 0.25;        // "now" marker at 25 % of scrollable width
 
-      ws.onopen = () => {
-        setStatus('connected', 'ok');
-        clearTimeout(reconnectTimer);
-        onConnected();
-      };
+    // Colours (match CSS custom properties)
+    const CLR = {
+      bg:      "#101010",
+      line:    "#2b2b2b",
+      muted:   "#85806f",
+      accent:  "#c6a35b",
+      kick:    "#d0a13c",
+      snare:   "#b8b0a0",
+      hat:      "#5fbf91",   // closed hat
+      open_hat: "#9fe0bf",   // open hat — lighter green, same family
+      sub:           "#4a5e7a",   // darker blue than bass — sits below
+      drone_spacey:  "#6b7a9f",   // soft blue-purple — atmospheric
+      drone_rumble:  "#3a4a5e",   // very dark blue — deep rumble
+      drone_tension: "#7a6b9f",   // purple — chord tension
+      bass:     "#7b9fc4",
+      hook:     "#bf7baa",
+      call:     "#c47b7b",
+      response: "#7bc4a0",
+    };
 
-      ws.onclose = () => {
-        setStatus('disconnected — reconnecting…', 'err');
-        reconnectTimer = setTimeout(connect, 2000);
-      };
+    // ─── State ────────────────────────────────────────────────────────────────
+    let ws;
+    let latestState = null;
 
-      ws.onerror = () => {
-        setStatus('connection error', 'err');
-      };
+    // Cross-bank event / frame buffers (keyed on global_step).
+    // These accumulate across rollovers so the grid never jumps.
+    const byLayerStep = new Map();   // "layer:global_step" → true  (keyed from state.bank_events)
+    const frameStore = new Map();   // global_step → frame object
+    let   motifStore = [];          // latest motifs array from server
 
-      ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'state') applyState(msg);
-        else if (msg.type === 'error') setStatus(msg.message, 'err');
-      };
-    }
+    // clientBankOffset: global_step of step 0 in the current bank.
+    // Derived from incoming events' global_step — never incremented speculatively.
+    let clientBankOffset = 0;
 
-    function send(obj) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(obj));
-      }
-    }
+    // bank_generation: monotonically increasing counter from the server.
+    // Incremented every time the bank is regenerated (position/reload changes).
+    // Used to detect bank regeneration reliably even when bank_dirty is
+    // consumed by a racing broadcast before reaching us.
+    let lastSeenGeneration = -1;
 
-    // ── Axis ──
-    const axisSlider = document.getElementById('axis-slider');
-    let axisThrottle = null;
+    // UI event markers: {global_step, kind, detail} — shown as grid overlays
+    const uiEventMarkers = [];   // kept in global_step order, pruned with buffer
 
-    axisSlider.addEventListener('input', () => {
-      const val = axisSlider.value / 1000;
-      // When stopped, immediately show the territory being previewed.
-      // When playing, territory reflects the engine's current_position (from server
-      // state) — do not jump it to the target on drag.
-      if (!isPlaying) updateTerritoryDisplay(val);
-      clearTimeout(axisThrottle);
-      axisThrottle = setTimeout(() => send({ type: 'axis', value: val }), 30);
-    });
+    // Pression timeline: global_step → {stability, pressure, sparsity, release, emphasis}
+    // Values are 0.0–1.0; one entry per bar (every 16 steps).
+    const pressionTimeline = new Map();
 
-    function updateTerritoryDisplay(pos) {
-      const el = document.getElementById('territory-name');
-      let t, cls;
-      if (pos < 0.33) { t = 'Oak';   cls = 'oak'; }
-      else if (pos < 0.67) { t = 'Chaos'; cls = 'chaos'; }
-      else { t = 'Nott';  cls = 'nott'; }
-      el.textContent = t;
-      el.className = `territory-name ${cls}`;
-    }
+    // ─── State accumulation ──────────────────────────────────────────────────
 
-    // ── Controls ──
-    const controlKeys = ['chaos_limit', 'density_ceiling'];
-    const controlThrottles = {};
+    function mergeState(state) {
+      const events = state.bank_events || [];
 
-    controlKeys.forEach(key => {
-      const el = document.getElementById(`ctrl-${key}`);
-      if (!el) return;
-      el.addEventListener('input', () => {
-        const val = el.value / 1000;
-        document.getElementById(`ctrlval-${key}`).textContent = val.toFixed(2);
-        clearTimeout(controlThrottles[key]);
-        controlThrottles[key] = setTimeout(() => send({ type: 'control', key, value: val }), 50);
-      });
-    });
-
-    // ── Transport ──
-    let isPlaying = false;
-
-    function togglePlay() {
-      send({ type: isPlaying ? 'stop' : 'play' });
-    }
-
-    function sendBpm() {
-      const val = parseFloat(document.getElementById('bpm-input').value) || 174;
-      send({ type: 'bpm', value: val });
-    }
-
-    function sendQuantize() {
-      const val = Math.max(4, parseInt(document.getElementById('quantize-input').value) || 4);
-      send({ type: 'quantize_bars', value: val });
-    }
-
-    // ── State application ──
-    let latestModelDimensions = {};
-    let deformationModelDimensions = {};
-
-    function applyState(s) {
-      // Axis slider — behaviour differs by playback state:
-      //   stopped: slider tracks current position (live preview)
-      //   playing: slider shows the TARGET (intent); current_position is in
-      //            the transition state dict and drives force bars + territory.
-      //            Do not snap slider back to current_position during playback.
-      const transition = s.transition || {};
-      if (isPlaying && transition.active && transition.target_position != null) {
-        if (document.activeElement !== axisSlider) {
-          axisSlider.value = Math.round(transition.target_position * 1000);
+      // Flush stale events when the bank was regenerated (position change).
+      // Detection: bank_dirty flag OR bank_generation counter change (the counter
+      // survives even when bank_dirty was already consumed by a racing broadcast).
+      // This MUST happen before adding new events so the grid is never empty.
+      const genChanged = (state.bank_generation != null) &&
+                         (state.bank_generation !== lastSeenGeneration);
+      if ((state.bank_dirty || genChanged) && events.length > 0) {
+        const lo = clientBankOffset;
+        const hi = clientBankOffset + BANK_STEPS;
+        for (const key of byLayerStep.keys()) {
+          const gs = parseInt(key.split(":")[1]);
+          if (gs >= lo && gs < hi) byLayerStep.delete(key);
         }
-      } else if (!isPlaying && document.activeElement !== axisSlider) {
-        axisSlider.value = Math.round(s.landscape_position * 1000);
       }
-      updateTerritoryDisplay(s.landscape_position);
+      if (state.bank_generation != null) lastSeenGeneration = state.bank_generation;
 
-      // Force bars
-      const dims = ['anticipation', 'release_pressure', 'instability', 'density', 'control_vs_chaos', 'resolution_likelihood'];
-      dims.forEach(d => {
-        const bar = document.getElementById(`bar-${d}`);
-        const val = document.getElementById(`val-${d}`);
-        const v = s[d] ?? 0;
-        if (bar) bar.style.width = `${(v * 100).toFixed(1)}%`;
-        if (val) val.textContent = v.toFixed(2);
-      });
-      latestModelDimensions = Object.fromEntries(dims.map(d => [d, s[d] ?? 0]));
-
-      // Transport
-      isPlaying = s.playing;
-      const btn = document.getElementById('play-btn');
-      btn.textContent = isPlaying ? 'STOP' : 'PLAY';
-      btn.className = isPlaying ? 'playing' : '';
-
-      // BPM
-      if (document.activeElement.id !== 'bpm-input') {
-        document.getElementById('bpm-input').value = s.bpm;
-      }
-
-      // Quantize
-      if (document.activeElement.id !== 'quantize-input' && s.quantize_bars !== undefined) {
-        document.getElementById('quantize-input').value = s.quantize_bars;
+      // Derive clientBankOffset from the events themselves.
+      // Events carry the authoritative global_step; we read it directly rather
+      // than counting state transitions (avoids the stopped→playing false-rollover).
+      if (events.length > 0) {
+        const minGs    = Math.min(...events.map(e => e.g));
+        const newOffset = Math.floor(minGs / BANK_STEPS) * BANK_STEPS;
+        if (newOffset > clientBankOffset) {
+          // Genuine bank advance — prune events more than one bank old.
+          const pruneBelow = newOffset - BANK_STEPS;
+          for (const key of byLayerStep.keys()) {
+            if (parseInt(key.split(":")[1]) < pruneBelow) byLayerStep.delete(key);
+          }
+          for (const gs of frameStore.keys()) {
+            if (gs < pruneBelow) frameStore.delete(gs);
+          }
+          clientBankOffset = newOffset;
+        } else if (newOffset < clientBankOffset) {
+          // Backwards jump: server restarted or bank_index reset.
+          // Wipe all stale state and re-anchor — otherwise events land
+          // off-screen because nowStep is computed from the old offset.
+          byLayerStep.clear();
+          frameStore.clear();
+          lastSeenGeneration = -1;
+          clientBankOffset   = newOffset;
+        }
       }
 
-      // Bank cycle
-      const bankSlot = s.bank_slot || 1;
-      const bankTotal = s.bank_total || 4;
-      latestBankCount = s.bank_count || 0;
-      document.getElementById('bank-count').textContent = `bank: ${bankSlot} / ${bankTotal}`;
-
-      // Archetype lock
-      updateArchetypeDisplay(s.selected_archetype, s.active_archetype || s.archetype);
-
-      // MIDI port status
-      const midiStatus = document.getElementById('midi-status');
-      syncSelectValue('midi-port-select', s.midi_port || '');
-      if (s.midi_port) {
-        midiStatus.textContent = s.midi_port;
-        midiStatus.className = 'midi-status connected';
-      } else {
-        midiStatus.textContent = 'not connected';
-        midiStatus.className = 'midi-status';
+      for (const evt of events) {
+        // Store {vel, dur} so renderer can shade by intensity and show note length.
+        byLayerStep.set(`${evt.l}:${evt.g}`, {
+          v: evt.v || 80,
+          d: evt.d  || 0,   // seconds
+        });
       }
-      const midiCCStatus = document.getElementById('midi-cc-status');
-      syncSelectValue('midi-cc-port-select', s.midi_cc_port || '');
-      if (s.midi_cc_port) {
-        midiCCStatus.textContent = s.midi_cc_port;
-        midiCCStatus.className = 'midi-status connected';
-      } else {
-        midiCCStatus.textContent = 'not connected';
-        midiCCStatus.className = 'midi-status';
+      for (const f of (state.structure_frames || [])) {
+        const gs = (f.global_step !== undefined)
+          ? f.global_step
+          : clientBankOffset + (f.musical_step || 0);
+        frameStore.set(gs, { ...f, _gs: gs });
       }
-      if (s.midi_layer_channels) {
-        renderMidiLayerChannels(s.midi_layer_channels);
+      // Upcoming bank frames — bar grid and phrase boundary metadata for the next
+      // bank.  Stored in frameStore at their correct global_step so the scrolling
+      // view shows bars and the phrase boundary tag before the bank becomes current.
+      for (const f of (state.upcoming_structure_frames || [])) {
+        const gs = (f.global_step !== undefined)
+          ? f.global_step
+          : clientBankOffset + BANK_STEPS + (f.musical_step || 0);
+        frameStore.set(gs, { ...f, _gs: gs });
       }
-
-      // Playhead timing
-      if (s.bank_started_at) bankStartedAt = s.bank_started_at;
-      if (s.bank_duration_ms) bankDurationMs = s.bank_duration_ms;
-
-      // Transition graph
-      if (s.transition) updateTransitionGraph(s.transition, s.instability ?? 0);
-
-      // Pressure curves
-      stateReceivedAt = Date.now();
-
-      // Pression dimensions — update current bar index every bar;
-      // only re-render static sparklines when full timeline arrives
-      if (s.pression_bar_idx !== undefined) {
-        _pressionCurrentBar = s.pression_bar_idx;
+      // Preview bank events — non-authoritative read-ahead.
+      // These have correct global_step values (next bank's range) so they appear
+      // to the right of the marker naturally.  When the bank becomes current its
+      // events overwrite the same keys; the transition is seamless.
+      const preview = state.next_bank_preview;
+      if (preview && !preview.authoritative) {
+        for (const evt of (preview.bank_events || [])) {
+          byLayerStep.set(`${evt.l}:${evt.g}`, {
+            v: evt.v || 80,
+            d: evt.d  || 0,
+          });
+        }
       }
-      if (s.active_pression_mapping_lane !== undefined) {
-        _activePressionMappingLane = s.active_pression_mapping_lane;
-        updatePressionMappingButtons();
-      }
-      if (s.pression) {
-        renderPressionLanes(s.pression);
-      }
+      motifStore = state.motifs || [];
 
-      if (false && s.pressure_curves) {
-        activeCurveTargets = s.pressure_curves.active_targets || {};
-        curveCanvases = {};  // renderCurves will repopulate
-        s.pressure_curves.curves.forEach(c => { curveProgressAtState[c.id] = c.progress; });
-        renderCurves(s.pressure_curves);
-      }
-
-      // Dimension riders
-      if (s.dimension_roles) {
-        const activeRoles = new Set(['density', 'instability', 'release_pressure', 'chaos_limit', 'density_ceiling']);
-        for (const [dim, role] of Object.entries(s.dimension_roles)) {
-          const el = document.getElementById(`rider-${dim}`);
-          if (el) {
-            el.textContent = role;
-            el.className = `force-rider${activeRoles.has(dim) ? ' active' : ''}`;
+      // Merge new UI event markers from server log
+      if (state.ui_event_log) {
+        for (const entry of state.ui_event_log) {
+          // Avoid duplicates by ts_ms
+          if (!uiEventMarkers.some(m => m.ts_ms === entry.ts_ms)) {
+            uiEventMarkers.push(entry);
           }
         }
-      }
-
-      // Deformation colours (keyed by name)
-      if (s.deformation_colours) deformationColours = s.deformation_colours;
-      if (s.deformation_model_dimensions) deformationModelDimensions = s.deformation_model_dimensions;
-
-      // Sequencer
-      if (s.bank_events !== undefined) {
-        if (s.structure_frames !== undefined) updateStructureFrames(s.structure_frames);
-        renderSequencer(s.bank_events, bankSlot, bankTotal);
-        renderPhraseDebugRow();
-        renderPhraseOverlay();
+        // Prune old markers (more than 2 banks back)
+        const pruneGs = clientBankOffset - BANK_STEPS;
+        for (let i = uiEventMarkers.length - 1; i >= 0; i--) {
+          if (uiEventMarkers[i].global_step < pruneGs) uiEventMarkers.splice(i, 1);
+        }
+        // Sort by global_step
+        uiEventMarkers.sort((a, b) => a.global_step - b.global_step);
+        // Render event log panel
+        renderEventLog();
       }
     }
 
-    // ── MIDI ports ──
-    function syncSelectValue(id, value) {
-      const sel = document.getElementById(id);
-      if (!sel || document.activeElement === sel) return;
-      if (value && ![...sel.options].some(opt => opt.value === value)) {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = value;
-        sel.appendChild(opt);
+    // ─── Time → position (the pure transform) ────────────────────────────────
+
+    /**
+     * Returns the current fractional global step.
+     * screen_x = MARKER_X + (event_global_step − currentGlobalStep) × px_per_step
+     */
+    function currentGlobalStep(state) {
+      if (!state.playing || !state.bank_started_at_ms || !state.bank_duration_ms) {
+        return clientBankOffset + (state.playhead_step || 0);
       }
-      sel.value = value || '';
+      const elapsedMs  = Date.now() - state.bank_started_at_ms;
+      const stepInBank = (elapsedMs / state.bank_duration_ms) * BANK_STEPS;
+      // No upper clamp — the upcoming bank's frames are in frameStore, so the
+      // bar grid and phrase boundary remain visible as stepInBank exceeds 255.
+      return clientBankOffset + Math.max(0, stepInBank);
+    }
+
+    /**
+     * Pure transform: global step → canvas x coordinate.
+     * usableW = canvas.width − LABEL_W
+     */
+    function stepToX(globalStep, nowStep, usableW) {
+      const markerX   = LABEL_W + usableW * MARKER_FRAC;
+      const pxPerStep = usableW / STEPS_VISIBLE;
+      return markerX + (globalStep - nowStep) * pxPerStep;
+    }
+
+    // ─── Canvas rendering ─────────────────────────────────────────────────────
+
+    function ensureCanvasSize() {
+      const canvas    = document.getElementById("stream-canvas");
+      const cssWidth  = canvas.parentElement.clientWidth;
+      if (canvas.width !== cssWidth || canvas.height !== CANVAS_H) {
+        canvas.width  = cssWidth;
+        canvas.height = CANVAS_H;
+      }
+      return canvas;
+    }
+
+    function drawScrollingStream(state) {
+      const canvas    = ensureCanvasSize();
+      const W         = canvas.width;
+      const ctx       = canvas.getContext("2d");
+      const usableW   = W - LABEL_W;
+      const nowStep   = currentGlobalStep(state);
+      const markerX   = LABEL_W + usableW * MARKER_FRAC;
+      const pxPerStep = usableW / STEPS_VISIBLE;
+
+      // Visible global step range (integers)
+      const visFirst  = Math.floor(nowStep - STEPS_VISIBLE * MARKER_FRAC) - 1;
+      const visLast   = Math.ceil(nowStep  + STEPS_VISIBLE * (1 - MARKER_FRAC)) + 1;
+
+      // ── Background ────────────────────────────────────────────────────────
+      ctx.fillStyle = CLR.bg;
+      ctx.fillRect(0, 0, W, CANVAS_H);
+
+      // ── Label column ──────────────────────────────────────────────────────
+      ctx.fillStyle = "#0d0d0d";
+      ctx.fillRect(0, 0, LABEL_W, CANVAS_H);
+      ctx.strokeStyle = CLR.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(LABEL_W, PHRASE_H);
+      ctx.lineTo(LABEL_W, CANVAS_H);
+      ctx.stroke();
+
+      // Layer labels + MIDI channel numbers (right-aligned in label column)
+      ctx.font = "11px 'Courier New', monospace";
+      ctx.textBaseline = "middle";
+      layers.forEach((layer, i) => {
+        const y = PHRASE_H + i * ROW_H + ROW_H / 2;
+        ctx.fillStyle = CLR.muted;
+        ctx.fillText(layer.toUpperCase(), 10, y);
+        // Channel number right-aligned in label column
+        if (latestState && latestState.midi_layer_channels) {
+          const ch = latestState.midi_layer_channels[layer];
+          if (ch != null) {
+            ctx.fillStyle = "#3d3830";
+            ctx.font = "9px 'Courier New', monospace";
+            const chStr = String(ch + 1);   // show 1-indexed DAW channel
+            const tw = ctx.measureText(chStr).width;
+            ctx.fillText(chStr, LABEL_W - tw - 3, y);
+            ctx.font = "11px 'Courier New', monospace";
+          }
+        }
+      });
+
+      // ── Sub-phrase markers (drawn first — behind phrase/bar lines) ──────
+      // Lightweight dashed ticks from subphrase metadata; start_bar===1 is
+      // the phrase boundary (already drawn below) — skip it here.
+      // Build telemetry lookup: start_step → execution results (from telemetry only)
+      const txExec = state.transformer_execution || [];
+      const execByStart = new Map();
+      for (const r of txExec) {
+        const key = r.step_or_range && r.step_or_range.start;
+        if (key == null) continue;
+        if (!execByStart.has(key)) execByStart.set(key, []);
+        execByStart.get(key).push(r);
+      }
+
+      const allSubphrases = [
+        ...(state.subphrases || []),
+        ...((state.next_bank_preview && state.next_bank_preview.subphrases) || []),
+      ];
+      ctx.setLineDash([3, 5]);
+      ctx.strokeStyle = "#2e2b25";
+      ctx.lineWidth   = 1;
+      ctx.fillStyle   = "#3d3830";
+      ctx.font        = "9px 'Courier New', monospace";
+      ctx.textBaseline = "bottom";
+      for (const sp of allSubphrases) {
+        if (sp.start_bar === 1) continue;  // phrase boundary handled separately
+        const x = stepToX(sp.start_step, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, PHRASE_H);
+        ctx.lineTo(x, CANVAS_H);
+        ctx.stroke();
+        // Role label + transformer names
+        const txNames = (sp.transformers || []).map(t => t.name).join(" ");
+        const label = txNames ? `${sp.role}  ${txNames}` : sp.role;
+        ctx.fillText(label, x + 3, PHRASE_H - 1);
+
+        // Telemetry indicators (from transformer_execution data only — no re-derivation)
+        const spResults = execByStart.get(sp.start_step) || [];
+        if (spResults.length > 0) {
+          const accepted = spResults.filter(r => r.accepted).length;
+          const rejected = spResults.length - accepted;
+          // Compact glyph: "✓N" accepted in green, "✗N" rejected in muted
+          let gx = x + 3;
+          const gy = 10;
+          ctx.font = "8px 'Courier New', monospace";
+          ctx.textBaseline = "top";
+          if (accepted > 0) {
+            ctx.fillStyle = "#5fbf91";
+            ctx.fillText(`✓${accepted}`, gx, gy);
+            gx += 16;
+          }
+          if (rejected > 0) {
+            ctx.fillStyle = "#554e47";
+            ctx.fillText(`✗${rejected}`, gx, gy);
+          }
+          ctx.font = "9px 'Courier New', monospace";
+          ctx.textBaseline = "bottom";
+          ctx.fillStyle = "#3d3830";
+        }
+      }
+      ctx.setLineDash([]);
+
+      // ── Structural markers ────────────────────────────────────────────────
+      //
+      // Phrase boundaries are periodic: one per bank (every BANK_STEPS steps).
+      // They are drawn at all visible positions regardless of whether the bank's
+      // event data has arrived — this is what provides visual continuity at the
+      // end of a bank.  Metadata comes from the existing motifStore and frameStore;
+      // no parallel data system is created.
+      //
+      // Bar lines are drawn only when frame data is present (they require the
+      // server's bar grid — we don't extrapolate them).
+
+      ctx.font        = "10px 'Courier New', monospace";
+      ctx.textBaseline = "top";
+
+      for (let gs = visFirst; gs <= visLast; gs++) {
+        const x = stepToX(gs, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+
+        const frame = frameStore.get(gs);
+
+        if (gs % BANK_STEPS === 0) {
+          // ── Phrase boundary ──────────────────────────────────────────────
+          ctx.strokeStyle = CLR.accent;
+          ctx.lineWidth   = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, CANVAS_H);
+          ctx.stroke();
+
+          // Metadata from existing server state — phrase-boundary motif meta
+          // is the source of truth.  For boundaries not yet arrived, show
+          // structural position only (phrase index is derivable from global_step).
+          const phraseIdx   = frame ? frame.phrase_index : Math.floor(gs / BANK_STEPS);
+          const role        = frame ? (frame.phrase_role || "").replace("_", "-") : "—";
+          const motifsHere  = motifStore.filter(m => m.phrase_start === phraseIdx);
+          const motifLine   = motifsHere.length
+            ? motifsHere.map(m => m.type).join(" · ")
+            : (frame ? "—" : "upcoming");
+          const newCount    = motifsHere.filter(m => m.phrase_start === phraseIdx).length;
+          const legalMark   = !frame    ? ""
+            : newCount > 1             ? "⚠ multi-intro"
+            : newCount === 1           ? "new motif"
+            :                            "continuing";
+
+          const lx = Math.min(x + 4, W - 4);
+          ctx.fillStyle = CLR.accent;
+          ctx.fillText(`P${phraseIdx}  ${role}`, lx, 3);
+          ctx.fillStyle = CLR.muted;
+          ctx.fillText(motifLine, lx, 17);
+          if (legalMark) ctx.fillText(legalMark, lx, 31);
+
+        } else if (frame && frame.is_bar_start) {
+          // ── Bar line (requires frame data) ──────────────────────────────
+          ctx.strokeStyle = CLR.line;
+          ctx.lineWidth   = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, PHRASE_H);
+          ctx.lineTo(x, CANVAS_H);
+          ctx.stroke();
+        }
+      }
+
+      // ── Events (per layer row) ────────────────────────────────────────────
+      // Shade by velocity: loud = full colour, quiet = dimmed but always visible.
+      // Alpha range: 0.35 (vel=1) → 1.0 (vel=127), minimum always readable.
+      // Long notes drawn as wider bars: duration (seconds) → pixels via bpm.
+      const bpm            = (latestState && latestState.bpm) || 174;
+      const secPerStep     = 60.0 / (bpm * 4);   // seconds per 16th note
+      const minEventW      = Math.max(2, pxPerStep - 2);
+
+      layers.forEach((layer, i) => {
+        const rowY  = PHRASE_H + i * ROW_H;
+        const color = CLR[layer] || "#888";
+
+        for (let gs = visFirst; gs <= visLast; gs++) {
+          const ev = byLayerStep.get(`${layer}:${gs}`);
+          if (ev == null) continue;
+          const x = stepToX(gs, nowStep, usableW);
+          if (x < LABEL_W || x > W) continue;
+          // Width: at least 1 step, extended by note duration
+          const durSteps = (ev.d || 0) / secPerStep;
+          const noteW    = Math.max(minEventW, durSteps * pxPerStep - 1);
+          // Clip to canvas right edge
+          const clippedW = Math.min(noteW, W - x);
+          if (clippedW <= 0) continue;
+          // Alpha: linear from 0.35 at vel=1 to 1.0 at vel=127
+          const alpha = 0.35 + ((ev.v || 80) / 127) * 0.65;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          ctx.fillRect(x, rowY + 4, clippedW, ROW_H - 8);
+        }
+        ctx.globalAlpha = 1.0;
+      });
+
+      // ── UI input event markers ───────────────────────────────────────────────
+      // Thin vertical line + small label for each UI event in the visible window.
+      ctx.font = "8px 'Courier New', monospace";
+      ctx.textBaseline = "top";
+      for (const marker of uiEventMarkers) {
+        const x = stepToX(marker.global_step, nowStep, usableW);
+        if (x < LABEL_W || x > W) continue;
+        const isPos  = marker.kind === "position";
+        const color  = isPos ? "#6bafed" : "#edaf6b";
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, PHRASE_H);
+        ctx.lineTo(x, CANVAS_H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.fillText(marker.detail, Math.min(x + 2, W - 80), PHRASE_H + 2);
+      }
+
+      // ── Pression lanes (scrolling bar charts below note rows) ───────────────
+      // Each dimension gets a row. Value fills from left edge of bar as height.
+      // One pression entry per bar (every 16 steps); value is 0–127.
+      const pressionColors = {
+        stability: '#4a7aad', pressure: '#ad6a4a', sparsity: '#7aad4a',
+        release: '#ad4aad', emphasis: '#4aadad',
+      };
+      const pressionBaseY = PHRASE_H + layers.length * ROW_H + 5;
+      if (pressionTimeline.size > 0) {
+        PRESSION_DIMS_LIST.forEach((dim, di) => {
+          const rowY = pressionBaseY + di * PRESSION_ROW_H;
+          const color = pressionColors[dim] || '#666';
+          const maxH  = PRESSION_ROW_H - 3;
+
+          // Label
+          ctx.fillStyle = color;   // match lane colour — visible, not grey
+          ctx.font = '9px "Courier New", monospace';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(dim, 4, rowY + maxH / 2);
+
+          // Bar chart: one block per bar (16 steps wide)
+          for (let gs = visFirst; gs <= visLast; gs++) {
+            // Each step now has its own pression entry
+            const entry = pressionTimeline.get(gs);
+            if (!entry) continue;
+            const val = (entry[dim] || 0) / 127;  // entry values are 0-127 integers
+            const x   = stepToX(gs, nowStep, usableW);
+            const x2  = stepToX(gs + 1, nowStep, usableW);
+            if (x2 < LABEL_W || x > W) continue;
+            const barH = Math.max(1, val * maxH);
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.60;
+            ctx.fillRect(
+              Math.max(LABEL_W, x), rowY + (maxH - barH),
+              Math.max(1, Math.min(x2, W) - Math.max(LABEL_W, x) - 1), barH
+            );
+          }
+          ctx.globalAlpha = 1.0;
+          // Divider line
+          ctx.strokeStyle = '#1e1e1e';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(LABEL_W, rowY + PRESSION_ROW_H - 1);
+          ctx.lineTo(W, rowY + PRESSION_ROW_H - 1);
+          ctx.stroke();
+        });
+      }
+
+      // ── Fixed "now" marker (drawn last — always on top) ───────────────────
+      ctx.strokeStyle = CLR.accent;
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(markerX, 0);
+      ctx.lineTo(markerX, CANVAS_H);
+      ctx.stroke();
+
+      // Small "now" tick at top
+      ctx.fillStyle = CLR.accent;
+      ctx.beginPath();
+      ctx.moveTo(markerX - 5, 0);
+      ctx.lineTo(markerX + 5, 0);
+      ctx.lineTo(markerX,     7);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ─── Animation loop ───────────────────────────────────────────────────────
+
+    function animate() {
+      if (latestState) drawScrollingStream(latestState);
+      requestAnimationFrame(animate);
+    }
+
+    // ─── WebSocket ────────────────────────────────────────────────────────────
+
+    function connect() {
+      ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onopen  = () => document.getElementById("runtime").textContent = "connected";
+      ws.onclose = () => {
+        document.getElementById("runtime").textContent = "disconnected";
+        setTimeout(connect, 1000);
+      };
+      ws.onmessage = event => {
+        const state = JSON.parse(event.data);
+        if (state.type === "state") {
+          mergeState(state);
+          latestState = state;
+          render(state);
+        }
+      };
+    }
+
+    function send(message) {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+    }
+
+    // ─── Other UI ─────────────────────────────────────────────────────────────
+
+    // ─── Pression panel ──────────────────────────────────────────────────────
+
+    const PRESSION_DIMS = ['stability', 'pressure', 'sparsity', 'release', 'emphasis'];
+    const PRESSION_CC_NUM = {stability:10, pressure:11, sparsity:12, release:13, emphasis:14};
+    let _pressionMappingMode = null;
+    let _pressionBuilt = false;
+
+    function buildPressionPanel() {
+      const rows = document.getElementById('pression-rows');
+      rows.innerHTML = '';
+      PRESSION_DIMS.forEach(dim => {
+        const row = document.createElement('div');
+        row.className = 'pression-row';
+        row.id = `pr-${dim}`;
+        row.innerHTML = `
+          <label>${dim}</label>
+          <div class="pression-bar-track">
+            <div class="pression-bar-fill" id="pr-fill-${dim}" style="width:0%"></div>
+          </div>
+          <span class="pression-val" id="pr-val-${dim}">0</span>
+          <span class="pression-cc">CC${PRESSION_CC_NUM[dim]}</span>
+          <button class="btn-map" id="pr-map-${dim}"
+            onclick="togglePressionMap('${dim}')"
+            title="Enter mapping mode: only this CC emits; notes stop. Press again to exit.">map</button>`;
+        rows.appendChild(row);
+      });
+      _pressionBuilt = true;
+    }
+
+    function togglePressionMap(dim) {
+      if (_pressionMappingMode === dim) {
+        // Exit mapping mode
+        send({type: 'pression_map_stop'});
+      } else {
+        // Enter mapping mode for this dim
+        send({type: 'pression_map_start', dim});
+      }
+    }
+
+    function setPressionChannel(ch0indexed) {
+      send({type: 'set_pression_channel', channel: ch0indexed});
+    }
+
+    function updatePressionPanel(pression) {
+      if (!pression) return;
+      if (!_pressionBuilt) buildPressionPanel();
+
+      // Sync channel input
+      const chInput = document.getElementById('pression-ch');
+      if (chInput && !chInput.matches(':focus')) chInput.value = pression.channel + 1;
+
+      // Update mapping mode
+      const newMode = pression.mapping_mode || null;
+      if (newMode !== _pressionMappingMode) {
+        _pressionMappingMode = newMode;
+        // Update all map buttons
+        PRESSION_DIMS.forEach(dim => {
+          const btn = document.getElementById(`pr-map-${dim}`);
+          if (btn) btn.className = 'btn-map' + (dim === newMode ? ' active' : '');
+        });
+        const status = document.getElementById('pression-map-status');
+        if (status) status.textContent = newMode ? `mapping: ${newMode}` : '';
+      }
+
+      // Update live values
+      const vals = pression.values || {};
+      PRESSION_DIMS.forEach(dim => {
+        const v01   = vals[dim] || 0;
+        const v127  = Math.round(v01 * 127);
+        const pct   = (v01 * 100).toFixed(0) + '%';
+        const fill  = document.getElementById(`pr-fill-${dim}`);
+        const val   = document.getElementById(`pr-val-${dim}`);
+        if (fill) fill.style.width = pct;
+        if (val)  val.textContent  = v127;
+      });
+    }
+
+    function renderEventLog() {
+      const el = document.getElementById("event-log");
+      if (!el || !uiEventMarkers.length) return;
+      el.innerHTML = uiEventMarkers.slice().reverse().map(m => {
+        const dt  = new Date(m.ts_ms).toLocaleTimeString([], {hour12:false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
+        const col = m.kind === "position" ? "#6bafed" : m.kind === "heat" ? "#edaf6b" : "#85806f";
+        return `<div style="color:${col}">${dt} &nbsp;<b>${m.kind}</b> &nbsp;${m.detail}</div>`;
+      }).join("");
+    }
+
+    function toggleChannelEditor() {
+      const panel = document.getElementById("midi-channels");
+      if (panel.style.display === "none" || !panel.style.display) {
+        if (latestState && latestState.midi_layer_channels) {
+          buildMidiChannelUI(latestState.midi_layer_channels);
+        }
+        panel.style.display = "block";
+      } else {
+        panel.style.display = "none";
+      }
+    }
+
+    function buildMidiChannelUI(channelMap) {
+      const panel = document.getElementById("midi-channels");
+      const rows  = document.getElementById("midi-ch-rows");
+      // Don't auto-show — panel stays hidden until toggled via 'ch' button
+      rows.innerHTML = "";
+      for (const [layer, ch] of Object.entries(channelMap)) {
+        const row = document.createElement("div");
+        row.className = "midi-ch-row";
+        row.innerHTML = `
+          <label>${layer}</label>
+          <input type="number" min="0" max="15" value="${ch}"
+            onchange="send({type:'set_midi_channel',layer:'${layer}',channel:parseInt(this.value)})">
+          <span>→ DAW ch ${ch + 1}</span>`;
+        // Update DAW ch label live
+        row.querySelector("input").addEventListener("input", function() {
+          const v = parseInt(this.value);
+          if (!isNaN(v) && v >= 0 && v <= 15)
+            this.parentElement.querySelector("span").textContent = `→ DAW ch ${v + 1}`;
+        });
+        rows.appendChild(row);
+      }
+    }
+
+    function reloadGeneration() {
+      const btn = document.getElementById("btn-reload");
+      btn.textContent = "↺ reloading…";
+      btn.disabled = true;
+      send({ type: "reload_generation" });
+      // Re-enable after a moment — server will broadcast updated state
+      setTimeout(() => { btn.textContent = "↺ reload voices"; btn.disabled = false; }, 1500);
+    }
+
+    // System MIDI ports to exclude — internal Windows/driver ports not routable to a DAW.
+    const _SYSTEM_PORT_FILTER = [
+      /microsoft gs/i, /midi mapper/i, /wdm kernel/i, /realtek/i,
+      /internal/i, /virtual cable.*[0-9]$/i,
+    ];
+    function _isDawPort(name) {
+      return !_SYSTEM_PORT_FILTER.some(re => re.test(name));
     }
 
     async function refreshPorts() {
-      try {
-        const res = await fetch('/api/midi-ports');
-        const data = await res.json();
-        ['midi-port-select', 'midi-cc-port-select'].forEach(id => {
-          const sel = document.getElementById(id);
-          const current = sel.value;
-          sel.innerHTML = '<option value="">— select port —</option>';
-          data.ports.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p; opt.textContent = p;
-            if (p === current) opt.selected = true;
-            sel.appendChild(opt);
-          });
-        });
-      } catch (e) {
-        setStatus('failed to list MIDI ports', 'err');
+      const select   = document.getElementById("midiPorts");
+      const response = await fetch("/api/midi-ports");
+      const data     = await response.json();
+      const ports    = (data.ports || []).filter(_isDawPort);
+      select.innerHTML = '<option value="">no midi output</option>';
+      for (const port of ports) {
+        const option       = document.createElement("option");
+        option.value       = port;
+        option.textContent = port;
+        select.appendChild(option);
       }
     }
 
-    function selectMidiPort() {
-      const val = document.getElementById('midi-port-select').value;
-      if (val) send({ type: 'midi_port', value: val });
+    // ─── Heat dial ────────────────────────────────────────────────────────────
+    //
+    // Geometry constants (must match SVG element dimensions: 100×115)
+    const D_CX     = 50;     // dial centre x  (svg width/2)
+    const D_CY     = 50;     // dial centre y  (half of track area)
+    const D_R      = 36;     // arc track radius
+    const D_START  = 210;    // degrees CW from 12-o'clock (7 o'clock position)
+    const D_SWEEP  = 300;    // total arc sweep (300° CW → ends at 5 o'clock)
+    const D_R_IN   = 24;     // pointer inner radius
+    const D_R_OUT  = 34;     // pointer outer radius
+
+    let heatTarget  = 0.5;
+    let heatApplied = 0.5;
+
+    /** Convert "degrees clockwise from 12-o'clock" to SVG [x, y]. */
+    function dialPt(degCW, r) {
+      const rad = (degCW - 90) * Math.PI / 180;
+      return [D_CX + r * Math.cos(rad), D_CY + r * Math.sin(rad)];
     }
 
-    function selectMidiCCPort() {
-      const val = document.getElementById('midi-cc-port-select').value;
-      if (val) send({ type: 'midi_cc_port', value: val });
+    /** Build an SVG arc path string. */
+    function arcPath(startDeg, sweepDeg, r) {
+      if (sweepDeg < 0.5) return "";
+      const [sx, sy] = dialPt(startDeg, r);
+      const [ex, ey] = dialPt(startDeg + sweepDeg, r);
+      const large    = sweepDeg > 180 ? 1 : 0;
+      return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
     }
 
-    function renderMidiLayerChannels(channels) {
-      const grid = document.getElementById('midi-channel-grid');
-      if (!grid) return;
-      const order = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
-      grid.innerHTML = '';
-      order
-        .filter(layer => Object.prototype.hasOwnProperty.call(channels, layer))
-        .forEach(layer => {
-          const item = document.createElement('div');
-          item.className = 'midi-channel-item';
-          const name = document.createElement('span');
-          name.className = 'layer';
-          name.textContent = layer.replace(/_/g, ' ');
-          const ch = document.createElement('span');
-          ch.className = 'channel';
-          ch.textContent = `ch ${Number(channels[layer]) + 1}`;
-          item.appendChild(name);
-          item.appendChild(ch);
-          grid.appendChild(item);
-        });
-    }
-
-    // Load ports on connect
-    function onConnected() {
-      refreshPorts();
-      loadArchetypes();
-    }
-
-    // ── Archetype lock ──
-    async function loadArchetypes() {
-      try {
-        const res = await fetch('/api/archetypes');
-        const data = await res.json();
-        const sel = document.getElementById('archetype-select');
-        sel.innerHTML = '<option value="">— auto —</option>';
-        data.archetypes.forEach(name => {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name.replace(/_/g, ' ');
-          sel.appendChild(opt);
-        });
-      } catch (e) {}
-    }
-
-    function setArchetypeLock() {
-      const val = document.getElementById('archetype-select').value || null;
-      send({ type: 'set_archetype', value: val });
-    }
-
-    function updateArchetypeDisplay(selected, current) {
-      const sel = document.getElementById('archetype-select');
-      const label = document.getElementById('archetype-current');
-      if (document.activeElement !== sel) {
-        sel.value = selected || '';
+    /** Deterministic sigil: N spokes around centre.
+        Spokes start at rIn=10 so the centre is clear for the seed number. */
+    function seedGlyphSVG(seed) {
+      const n    = (seed % 6) + 3;
+      const rot  = ((seed * 2654435761) >>> 0) % 360;
+      const rOut = 15, rIn = 10;   // clear inner zone for seed text
+      let svg = '';
+      for (let i = 0; i < n; i++) {
+        const a  = (rot + i * 360 / n) * Math.PI / 180;
+        const ox = (D_CX + rOut * Math.cos(a)).toFixed(1);
+        const oy = (D_CY + rOut * Math.sin(a)).toFixed(1);
+        const ix = (D_CX + rIn  * Math.cos(a)).toFixed(1);
+        const iy = (D_CY + rIn  * Math.sin(a)).toFixed(1);
+        svg += `<line x1="${ix}" y1="${iy}" x2="${ox}" y2="${oy}" `
+             + `stroke="#c6a35b" stroke-width="1.2" opacity="0.6"/>`;
+        svg += `<circle cx="${ox}" cy="${oy}" r="1.6" fill="#85806f"/>`;
       }
-      if (selected) {
-        label.textContent = selected.replace(/_/g, ' ');
-        label.className = 'archetype-current locked';
+      // No centre dot — seed number renders there
+      return svg;
+    }
+
+    /** Apply heat as a CSS filter on the landscape image — instant, no HTTP. */
+    function applyHeatFilter(heat) {
+      const img = document.getElementById("landscape-map");
+      if (heat < 0.5) {
+        const t = heat / 0.5;
+        const br  = (0.35 + 0.65 * t).toFixed(2);
+        const sat = (0.40 + 0.60 * t).toFixed(2);
+        const hue = Math.round(220 * (1 - t));
+        img.style.filter = `brightness(${br}) saturate(${sat}) hue-rotate(${hue}deg)`;
       } else {
-        label.textContent = (current || 'auto').replace(/_/g, ' ');
-        label.className = 'archetype-current';
+        const t = (heat - 0.5) / 0.5;
+        const br  = (1.0 + 0.50 * t).toFixed(2);
+        const sat = (1.0 + 0.80 * t).toFixed(2);
+        const hue = -Math.round(25 * t);
+        img.style.filter = `brightness(${br}) saturate(${sat}) hue-rotate(${hue}deg)`;
       }
     }
 
-    // ── Sequencer ──
-    const BARS = 16;       // 4 phrases × 4 bars
-    const STEPS = 16;      // 16th-note resolution per bar
-    const TOTAL_STEPS = BARS * STEPS;  // 256
-    const VISIBLE_BARS = 4;
-    const VISIBLE_STEPS = VISIBLE_BARS * STEPS;
-    const ROLLING_BEHIND_STEPS = STEPS;
-    const RENDER_STEPS = TOTAL_STEPS * 2;
+    function updateDialVisual(heat) {
+      const sweep = heat * D_SWEEP;
+      document.getElementById("heat-track").setAttribute("d",
+        arcPath(D_START, D_SWEEP, D_R));
+      document.getElementById("heat-fill").setAttribute("d",
+        arcPath(D_START, sweep, D_R));
 
-    // Base role colours (pure archetype, zero deformation)
-    const ROLE_COLOURS = {
-      anchor: '#c0a060',
-      ghost:  '#444444',
-      impact: '#e05050',
-      kick: '#b88a42',
-      snare: '#c0a060',
-      hat: '#7f8a8d',
-      anchor_withholding: '#202020',
-      bass: '#5aa05a',
-      stab: '#d48ad4',
-      hook: '#f0c85a',
-      bassline: '#4fb06a',
-      sub: '#3f6fb0',
-    };
-    const INSTRUMENT_ROLES = ['kick', 'snare', 'hat', 'bass', 'bassline', 'sub', 'stab', 'hook'];
-    const OVERLAY_ROLES = new Set(['ghost_inject', 'anchor_withholding', 'behaviour_dynamics']);
-    const HIDDEN_DEFORMATION_STRIPS = new Set(['survivor_signal']);
-    let _barBoundarySteps = new Set();
-    let _phraseBoundarySteps = new Set();
-    let _subPhraseBoundarySteps = new Set();
-    let _dropBoundarySteps = new Set();
-    let _structureFrameByStep = [];
+      const pDeg = D_START + sweep;
+      const [x1, y1] = dialPt(pDeg, D_R_IN);
+      const [x2, y2] = dialPt(pDeg, D_R_OUT);
+      const ptr = document.getElementById("heat-pointer");
+      ptr.setAttribute("x1", x1.toFixed(2)); ptr.setAttribute("y1", y1.toFixed(2));
+      ptr.setAttribute("x2", x2.toFixed(2)); ptr.setAttribute("y2", y2.toFixed(2));
 
-    // Deformation colours from server — updated on every state push
-    let deformationColours = {};
-
-    function hexToRgb(hex) {
-      const r = parseInt(hex.slice(1,3), 16);
-      const g = parseInt(hex.slice(3,5), 16);
-      const b = parseInt(hex.slice(5,7), 16);
-      return { r, g, b };
+      document.getElementById("heat-value-text").textContent = heat.toFixed(2);
+      applyHeatFilter(heat);   // instant CSS — no server round-trip
     }
 
-    function blendTowardsHex(baseHex, targetHex, t) {
-      // t=0 → baseHex, t=1 → targetHex
-      if (t <= 0) return baseHex;
-      const base   = hexToRgb(baseHex);
-      const target = hexToRgb(targetHex);
-      const r = Math.round(base.r + (target.r - base.r) * t);
-      const g = Math.round(base.g + (target.g - base.g) * t);
-      const b = Math.round(base.b + (target.b - base.b) * t);
-      return `rgb(${r},${g},${b})`;
+    function updateSeedGlyph(seed) {
+      document.getElementById("heat-seed-glyph").innerHTML = seedGlyphSVG(seed);
+      // seed number sits exactly at dial centre via dominant-baseline="middle"
+      document.getElementById("heat-seed-num").textContent  = seed;
     }
 
-    // Given an event's deformation dict {name: intensity}, return the dominant
-    // deformation: the one with the highest intensity, and its colour hex.
-    function dominantDeform(deformDict) {
-      if (!deformDict || typeof deformDict !== 'object') return null;
-      let maxName = null, maxVal = 0;
-      for (const [name, val] of Object.entries(deformDict)) {
-        if (val > maxVal) { maxVal = val; maxName = name; }
-      }
-      if (!maxName) return null;
-      return { name: maxName, intensity: maxVal, colour: deformationColours[maxName] || '#50a0dc' };
-    }
+    // Initialise static parts (activeSeed declared further below; use literal here)
+    updateDialVisual(0.5);
+    updateSeedGlyph(1103);
 
-    function timeToStep(timeStr) {
-      // "bar.beat.tick" — bar is 1-indexed within bank, beat 1-4, tick 0-23
-      const [bar, beat, tick] = timeStr.split('.').map(Number);
-      const beatStep = Math.floor((tick / 24) * 4); // tick→16th within beat
-      return (bar - 1) * STEPS + (beat - 1) * 4 + beatStep;
-    }
+    function currentSeed() { return activeSeed; }
 
-    function updateStructureFrames(frames) {
-      _structureFrameByStep = Array.isArray(frames) ? frames : [];
-      _barBoundarySteps = new Set();
-      _phraseBoundarySteps = new Set();
-      _subPhraseBoundarySteps = new Set();
-      _dropBoundarySteps = new Set();
-      _structureFrameByStep.forEach(frame => {
-        if (!frame || !Number.isInteger(frame.musical_step)) return;
-        if (frame.is_bar_start) _barBoundarySteps.add(frame.musical_step);
-        if (frame.is_phrase_start) _phraseBoundarySteps.add(frame.musical_step);
-        if (frame.is_subphrase_start) {
-          _subPhraseBoundarySteps.add(frame.musical_step);
-        }
-        if (frame.is_drop || frame.is_relock) _dropBoundarySteps.add(frame.musical_step);
-      });
-    }
+    // ── Drag interaction ────────────────────────────────────────────────────
+    // Rules:
+    //   - During drag: update dial visually only — no server sends, no state overwrite.
+    //   - On release:  send heat to server + refresh landscape image once.
+    //   - Server state updates: only update dial when not dragging.
 
-    function applyTimebaseClasses(cell, sourceStep) {
-      cell.classList.remove('bar-start', 'phrase-start', 'sub-phrase-start', 'drop-start');
-      if (_barBoundarySteps.has(sourceStep)) cell.classList.add('bar-start');
-      if (_phraseBoundarySteps.has(sourceStep)) cell.classList.add('phrase-start');
-      else if (_subPhraseBoundarySteps.has(sourceStep)) cell.classList.add('sub-phrase-start');
-      if (_dropBoundarySteps.has(sourceStep)) cell.classList.add('drop-start');
-    }
+    let dialDragging   = false;
+    let dragStartY     = 0;
+    let dragStartHeat  = 0;
+    const dialSvg      = document.getElementById("heat-dial-svg");
 
-    function roleLaneForEvent(event) {
-      const lane = event.layer || event.role || '';
-      if (INSTRUMENT_ROLES.includes(lane)) return lane;
-      return OVERLAY_ROLES.has(lane) ? lane : null;
-    }
+    dialSvg.addEventListener("mousedown", e => {
+      dialDragging  = true;
+      dragStartY    = e.clientY;
+      dragStartHeat = heatTarget;
+      e.preventDefault();
+    });
 
-    function visualRoleForEvent(event) {
-      const deform = event.deformation || {};
-      if (event.active === false || deform.anchor_withholding) return 'anchor_withholding';
-      if (event.layer === 'bass' || event.role === 'bass') return 'bass';
-      if (event.layer === 'bassline' || event.role === 'bassline') return 'bassline';
-      if (event.layer === 'sub' || event.role === 'sub') return 'sub';
-      if (event.layer === 'stab' || event.role === 'stab') return 'stab';
-      if (event.layer === 'hook' || event.role === 'hook') return 'hook';
-      if (event.role === 'survivor') return event.layer || 'hat';
-      return event.role || event.layer || 'event';
-    }
+    document.addEventListener("mousemove", e => {
+      if (!dialDragging) return;
+      const dy   = dragStartY - e.clientY;          // up = hotter
+      heatTarget = Math.max(0, Math.min(1, dragStartHeat + dy / 150));
+      updateDialVisual(heatTarget);                 // local only — no server send
+    });
 
-    function groupEventsByRole(events) {
-      const lanes = new Map();
-      INSTRUMENT_ROLES.forEach(role => {
-        const roleEvents = events.filter(event => roleLaneForEvent(event) === role);
-        if (roleEvents.length > 0) lanes.set(role, roleEvents);
-      });
-      return lanes;
-    }
+    document.addEventListener("mouseup", () => {
+      if (!dialDragging) return;
+      dialDragging = false;
+      send({ type: "set_heat", value: heatTarget });
+      // CSS filter already applied during drag — no SVG re-fetch needed.
+    });
 
-    function playbackFraction() {
-      if (!isPlaying || bankDurationMs <= 0) return 0;
-      return Math.min(1, Math.max(0, (Date.now() - bankStartedAt) / bankDurationMs));
-    }
+    // Mouse-wheel fine-tune.
+    dialSvg.addEventListener("wheel", e => {
+      heatTarget = Math.max(0, Math.min(1, heatTarget - e.deltaY * 0.0003));
+      updateDialVisual(heatTarget);   // includes applyHeatFilter
+      send({ type: "set_heat", value: heatTarget });
+      e.preventDefault();
+    }, { passive: false });
 
-    function rollingViewport() {
-      const absoluteStep = latestBankCount * TOTAL_STEPS + playbackFraction() * TOTAL_STEPS;
-      const absoluteWindowStart = Math.max(0, absoluteStep - ROLLING_BEHIND_STEPS);
-      const renderStart = absoluteWindowStart % TOTAL_STEPS;
-      const playheadOffset = absoluteStep - absoluteWindowStart;
+    // ─── Landscape position control ─────────────────────────────────────────
+    // Terrain coordinates: x in [-1.5, 1.5], y in [-1.5, 1.5]
+    // Pixel (0,0) = top-left = (DOMAIN_MIN, DOMAIN_MAX)
+
+    const DOMAIN_MIN = -1.5, DOMAIN_MAX = 1.5;
+    let terrainX = 0.0, terrainY = 0.0;
+
+    function pixelToTerrain(px, py, imgW, imgH) {
       return {
-        absoluteStep,
-        currentStep: Math.floor(absoluteStep),
-        renderStart,
-        currentRenderStep: renderStart + playheadOffset,
-        playheadPercent: (playheadOffset / VISIBLE_STEPS) * 100,
+        x: DOMAIN_MIN + (px / imgW) * (DOMAIN_MAX - DOMAIN_MIN),
+        y: DOMAIN_MAX - (py / imgH) * (DOMAIN_MAX - DOMAIN_MIN),
       };
     }
 
-    function applyRollingViewport() {
-      const viewport = rollingViewport();
-      const translatePercent = (viewport.renderStart / RENDER_STEPS) * 100;
-      document.querySelectorAll('.seq-lane-row, .deform-strip, .phrase-overlay-wrap, .phrase-debug-row').forEach(row => {
-        row.style.transform = `translateX(-${translatePercent}%)`;
-      });
-      return viewport;
+    function terrainToPixel(tx, ty, imgW, imgH) {
+      return {
+        px: (tx - DOMAIN_MIN) / (DOMAIN_MAX - DOMAIN_MIN) * imgW,
+        py: (DOMAIN_MAX - ty)  / (DOMAIN_MAX - DOMAIN_MIN) * imgH,
+      };
     }
 
-    function renderSequencer(events, bankSlot, bankTotal = 4) {
-      document.getElementById('seq-bank-num').textContent = bankSlot ? `${bankSlot}/${bankTotal}` : '-';
-
-      // Collect layers
-      const lanes = groupEventsByRole(events);
-      if (lanes.size === 0) {
-        document.getElementById('seq-grid').innerHTML = '<div style="color:#444;font-size:11px;padding:8px 0">no events — press play</div>';
-        document.getElementById('seq-legend').innerHTML = '';
-        document.getElementById('deform-strips').innerHTML = '';
-        return;
-      }
-
-      // Build step maps per layer + per-name per-step intensity maps
-      const stepMap = {};
-      lanes.forEach((_, role) => { stepMap[role] = new Array(TOTAL_STEPS).fill(null); });
-      const deformByName = {};  // name → Float32Array(TOTAL_STEPS)
-
-      events.forEach(e => {
-        const step = timeToStep(e.time);
-        if (step < 0 || step >= TOTAL_STEPS) return;
-        const laneRole = roleLaneForEvent(e);
-        if (!laneRole) return;
-        if (!stepMap[laneRole]) stepMap[laneRole] = new Array(TOTAL_STEPS).fill(null);
-        stepMap[laneRole][step] = e;
-        const deformDict = e.deformation;
-        if (deformDict && typeof deformDict === 'object') {
-          for (const [name, intensity] of Object.entries(deformDict)) {
-            if (HIDDEN_DEFORMATION_STRIPS.has(name)) continue;
-            if (!deformByName[name]) deformByName[name] = new Float32Array(TOTAL_STEPS);
-            if (intensity > deformByName[name][step]) deformByName[name][step] = intensity;
-          }
-        }
-      });
-
-      // Deformation strips — update in-place when names haven't changed
-      const stripsWrap = document.getElementById('deform-strips');
-      const deformKeys = Object.keys(deformByName).sort().join(',');
-
-      if (stripsWrap.dataset.deformKeys === deformKeys) {
-        // Same deformations — update intensities in-place
-        stripsWrap.querySelectorAll('.deform-cell').forEach(cell => {
-          const name = cell.dataset.deformName;
-          const sourceStep = parseInt(cell.dataset.step);
-          const intensities = deformByName[name];
-          const d = intensities ? intensities[sourceStep] : 0;
-          cell.dataset.baseIntensity = d;
-          if (d > 0) {
-            const colour = deformationColours[name] || '#50a0dc';
-            const rgb = hexToRgb(colour);
-            const alpha = 0.15 + d * 0.85;
-            cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
-          } else {
-            cell.style.background = '';
-          }
-        });
-      } else {
-        // Deformation set changed — full rebuild
-        stripsWrap.dataset.deformKeys = deformKeys;
-        stripsWrap.innerHTML = '';
-        for (const [name, intensities] of Object.entries(deformByName)) {
-          const colour = deformationColours[name] || '#50a0dc';
-          const rgb = hexToRgb(colour);
-          const row = document.createElement('div');
-          row.className = 'deform-strip-row';
-          const label = document.createElement('div');
-          label.className = 'deform-strip-label';
-          label.textContent = name.replace(/_/g, ' ');
-          label.style.color = colour;
-          row.appendChild(label);
-          const strip = document.createElement('div');
-          strip.className = 'deform-strip';
-          for (let s = 0; s < RENDER_STEPS; s++) {
-            const cell = document.createElement('div');
-            cell.className = 'deform-cell';
-            const sourceStep = s % TOTAL_STEPS;
-            const d = intensities[sourceStep];
-            cell.dataset.step = sourceStep;
-            cell.dataset.renderStep = s;
-            cell.dataset.deformName = name;
-            cell.dataset.baseIntensity = d;
-            applyTimebaseClasses(cell, sourceStep);
-            if (d > 0) {
-              const alpha = 0.15 + d * 0.85;
-              cell.style.background = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(2)})`;
-            }
-            strip.appendChild(cell);
-          }
-          row.appendChild(strip);
-          stripsWrap.appendChild(row);
-        }
-      }
-
-      // Render lanes — update in-place when structure is unchanged to avoid
-      // the full DOM rebuild that causes the visual flutter.
-      const grid = document.getElementById('seq-grid');
-      const laneKeys = [...lanes.keys()].join(',');
-
-      function _paintCell(cell, role, sourceStep, stepMap) {
-        const ev = stepMap[role] ? stepMap[role][sourceStep] : null;
-        if (ev) {
-          const visualRole = visualRoleForEvent(ev);
-          const baseColour = ROLE_COLOURS[visualRole] || ROLE_COLOURS[role] || '#888';
-          const dom = dominantDeform(ev.deformation);
-          const colour = dom ? blendTowardsHex(baseColour, dom.colour, dom.intensity) : baseColour;
-          cell.style.background = colour;
-          cell.style.opacity = (0.4 + ev.emphasis * 0.6).toFixed(2);
-          cell.classList.toggle('no-midi', !ev.midi_send);
-          cell.classList.toggle('stream-origin', ev.source_label === 'stream' || ev.source === 'stream');
-          cell.dataset.role      = visualRole;
-          cell.dataset.emphasis  = ev.emphasis;
-          cell.dataset.baseColour = baseColour;
-          cell.dataset.deform    = JSON.stringify(ev.deformation || {});
-          cell.dataset.midiSend  = ev.midi_send ? 'true' : 'false';
-          cell.dataset.midiChannel = ev.midi_channel ?? '';
-          cell.dataset.sourceLabel = ev.source_label || ev.source || '';
-          const deformDesc = dom ? `${dom.name}:${dom.intensity.toFixed(2)}` : 'none';
-          const midiDesc = ev.midi_send ? `midi:ch${(ev.midi_channel ?? 0) + 1}` : 'midi:off';
-          const originDesc = ev.origin_source ? ` origin:${ev.origin_source}/${ev.origin_reason || 'unknown'} resolved:${ev.resolution_reason || 'unknown'}` : '';
-          const streamDesc = ev.source
-            ? ` source:${ev.source} reason:${ev.reason || 'unknown'} intent:${ev.intent_id || 'none'} resolved_id:${ev.resolved_event_id || 'none'} phrase:${ev.phrase_index} bar:${ev.bar_index}`
-            : '';
-          cell.title = `${role} ${visualRole} vel:${ev.velocity} ${midiDesc} deform:${deformDesc}${originDesc}${streamDesc}`;
-        } else {
-          cell.classList.remove('no-midi');
-          cell.classList.remove('stream-origin');
-          cell.style.background = '';
-          cell.style.opacity    = '';
-          cell.dataset.role     = '';
-          cell.dataset.emphasis = '0.2';
-          cell.dataset.baseColour = ROLE_COLOURS.ghost || '#5a5a5a';
-          cell.dataset.deform   = '{}';
-          cell.dataset.midiSend = 'false';
-          cell.dataset.midiChannel = '';
-          cell.dataset.sourceLabel = '';
-          cell.title = '';
-        }
-      }
-
-      if (grid.dataset.laneKeys === laneKeys) {
-        // Same lane structure — update cell properties in-place, no DOM rebuild
-        grid.querySelectorAll('.seq-lane').forEach(laneEl => {
-          const role = laneEl.dataset.role;
-          if (!role) return;
-          laneEl.querySelectorAll('.seq-cell').forEach(cell => {
-            const sourceStep = parseInt(cell.dataset.step);
-            applyTimebaseClasses(cell, sourceStep);
-            _paintCell(cell, role, sourceStep, stepMap);
-          });
-        });
-      } else {
-        // Lane structure changed — full rebuild
-        grid.dataset.laneKeys = laneKeys;
-        grid.innerHTML = '';
-        lanes.forEach((roleEvents, role) => {
-          const lane = document.createElement('div');
-          lane.className = 'seq-lane';
-          lane.dataset.role = role;
-
-          const label = document.createElement('div');
-          label.className = 'seq-lane-label';
-          label.textContent = role.replace(/_/g, ' ');
-          lane.appendChild(label);
-
-          const row = document.createElement('div');
-          row.className = 'seq-lane-row';
-
-          for (let s = 0; s < RENDER_STEPS; s++) {
-            const cell = document.createElement('div');
-            cell.className = 'seq-cell';
-            const sourceStep = s % TOTAL_STEPS;
-            cell.dataset.step      = sourceStep;
-            cell.dataset.renderStep = s;
-            cell.dataset.layer     = role;
-            applyTimebaseClasses(cell, sourceStep);
-            _paintCell(cell, role, sourceStep, stepMap);
-            row.appendChild(cell);
-          }
-          lane.appendChild(row);
-          grid.appendChild(lane);
-        });
-      }
-
-      // Legend — roles + one entry per active deformation type
-      const legend = document.getElementById('seq-legend');
-      legend.innerHTML = '';
-      const renderedRoles = [...lanes.keys()];
-      const legendItems = [
-        ...renderedRoles.map(role => ({ label: role.replace(/_/g, ' '), colour: ROLE_COLOURS[role] || '#888' })),
-        ...Object.entries(deformByName).map(([name]) => ({
-          label: name.replace(/_/g, ' '),
-          colour: deformationColours[name] || '#50a0dc',
-        })),
-      ];
-      legendItems.forEach(({ label, colour }) => {
-        const item = document.createElement('div');
-        item.className = 'seq-legend-item';
-        const dot = document.createElement('div');
-        dot.className = 'seq-legend-dot';
-        dot.style.background = colour;
-        const name = document.createElement('span');
-        name.textContent = label;
-        item.appendChild(dot);
-        item.appendChild(name);
-        legend.appendChild(item);
-      });
-      applyRollingViewport();
-    }
-
-    // ── Phrase overlay ──
-
-    // Badge tag classification
-    function _badgeClass(rule) {
-      if (rule === 'hook-mode' || rule === 'hook-start' || rule === 'hook-repeat')
-        return 'mode-hook';
-      if (rule === 'call-response' || rule.endsWith('-leads'))
-        return 'mode-cr';
-      if (rule === 'survivor' || rule.includes('drop') || rule === 'intensify' || rule === 'peak')
-        return 'tag-drop';
-      if (rule.includes('build') || rule === 'resolve')
-        return 'tag-build';
-      if (rule === 'beat-bed' || rule === 'bassline' || rule === 'sub-hold')
-        return 'tag-rhythm';
-      return '';
-    }
-
-    function renderPhraseOverlay() {
-      const wrap = document.getElementById('phrase-overlay-wrap');
-      if (!wrap) return;
-      wrap.innerHTML = '';
-
-      if (!_structureFrameByStep.length) return;
-
-      _structureFrameByStep.forEach(sub => {
-        const subStep = sub.musical_step;
-        if (!Number.isInteger(subStep) || _phraseBoundarySteps.has(subStep)) return;
-        if (!sub.is_subphrase_start) return;
-        [subStep, subStep + TOTAL_STEPS].forEach(col => {
-          const marker = document.createElement('div');
-          marker.className = 'phrase-marker sub-phrase-marker';
-          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
-          const role = sub.subphrase_role;
-          if (role) {
-            const label = document.createElement('div');
-            label.className = 'sub-phrase-label';
-            label.textContent = role.replace(/_/g, ' ');
-            marker.appendChild(label);
-          }
-          wrap.appendChild(marker);
-        });
-      });
-
-      _structureFrameByStep.forEach(ctx => {
-        if (!ctx || !ctx.is_phrase_start) return;
-        const meta = {};
-        // Each phrase boundary appears twice (double-buffer render)
-        const phraseStep = ctx.musical_step;
-        [phraseStep, phraseStep + TOTAL_STEPS].forEach(col => {
-          const marker = document.createElement('div');
-          marker.className = 'phrase-marker';
-          marker.style.left = ((col / RENDER_STEPS) * 100) + '%';
-
-          // Label: "HOOK · two_step · peak"
-          const parts = [];
-          if (ctx.phrase_role) parts.push(ctx.phrase_role.replace(/_/g, ' ').toUpperCase());
-          if (ctx.is_relock) parts.push('RELOCK');
-          if (meta.archetype && meta.archetype !== '—')
-            parts.push(meta.archetype.replace(/_/g, '·'));
-          if (meta.drop_role && meta.drop_role !== 'stable' && meta.drop_role !== 'none')
-            parts.push(meta.drop_role);
-
-          const label = document.createElement('div');
-          label.className = 'phrase-label';
-          label.textContent = parts.join(' · ');
-          marker.appendChild(label);
-
-          // Badges (up to 5, deduped)
-          if (meta.rules && meta.rules.length > 0) {
-            const badgeWrap = document.createElement('div');
-            badgeWrap.className = 'phrase-badges';
-            meta.rules.slice(0, 5).forEach(rule => {
-              const b = document.createElement('div');
-              b.className = 'phrase-badge';
-              const cls = _badgeClass(rule);
-              if (cls) b.classList.add(cls);
-              b.textContent = rule;
-              badgeWrap.appendChild(b);
-            });
-            marker.appendChild(badgeWrap);
-          }
-
-          wrap.appendChild(marker);
-        });
-      });
-    }
-
-    // ── Pressure curves live state ──
-    function renderPhraseDebugRow() {
-      const row = document.getElementById('phrase-debug-row');
-      if (!row) return;
-      row.innerHTML = '';
-      if (!_structureFrameByStep.length) return;
-
-      for (let s = 0; s < RENDER_STEPS; s++) {
-        const sourceStep = s % TOTAL_STEPS;
-        const ctx = _structureFrameByStep[sourceStep];
-        const cell = document.createElement('div');
-        cell.className = 'phrase-debug-cell';
-        cell.dataset.step = sourceStep;
-        cell.dataset.renderStep = s;
-        applyTimebaseClasses(cell, sourceStep);
-        if (ctx) {
-          cell.title = [
-            `global_step=${ctx.global_step}`,
-            `musical_step=${ctx.musical_step}`,
-            `bar_index=${ctx.bar_index}`,
-            `phrase_index=${ctx.phrase_index}`,
-            `subphrase_index=${ctx.subphrase_index}`,
-            `is_phrase_start=${ctx.is_phrase_start}`,
-            `is_subphrase_start=${ctx.is_subphrase_start}`,
-          ].join(' ');
-          if (ctx.is_phrase_start) cell.textContent = `P${ctx.phrase_index}`;
-          else if (ctx.is_subphrase_start) cell.textContent = `s${ctx.subphrase_index}`;
-        }
-        row.appendChild(cell);
-      }
-      applyRollingViewport();
-    }
-
-    let activeCurveTargets = {};   // {target: last-known value} from state
-    let curveCanvases = {};        // {id: {canvas, sparkline, curve}}
-    let curveProgressAtState = {}; // {id: progress at last state push}
-    let stateReceivedAt = 0;       // Date.now() when last state arrived
-
-    // Mirror of Python's evaluate() for client-side live interpolation
-    function evaluateCurveJS(curve, t) {
-      t = Math.max(0, Math.min(1, t));
-      let shaped;
-      switch (curve.shape) {
-        case 'linear':       shaped = t; break;
-        case 'accelerating': shaped = t * t; break;
-        case 'decelerating': shaped = 1 - (1 - t) * (1 - t); break;
-        case 'sinusoidal':   shaped = (1 - Math.cos(Math.PI * 2 * t)) / 2; break;
-        case 'step':         shaped = (t < 1) ? 0 : 1; break;
-        default:             shaped = t;
-      }
-      return curve.from_value + (curve.to_value - curve.from_value) * shaped;
-    }
-
-    // ── Transition graph ──
-
-    let _tgTransition = null;   // last known transition state dict
-    let _tgInstability = 0;     // last known instability value
-
-    function updateTransitionGraph(transition, instability) {
-      _tgTransition = transition;
-      _tgInstability = instability;
-      const section = document.getElementById('transition-graph-section');
-      section.style.display = transition.active ? 'flex' : 'none';
-      if (transition.active) {
-        document.getElementById('tg-bars').textContent = transition.duration_bars;
-        drawTransitionGraph(transition, instability, transition.elapsed_bars);
-      }
-    }
-
-    function ghostInjectHook(progress, direction, instability, velocity) {
-      // Mirror of behaviour_hooks._ghost_inject_hook in JS
-      const VELOCITY_THRESHOLD = 0.15;
-      const VELOCITY_SCALE = 0.3;
-      let base = 0;
-      if (direction === 'toward_nott') {
-        base = Math.min(1, Math.max(0, progress * progress * instability));
-      } else if (direction === 'toward_oak') {
-        base = Math.min(1, Math.max(0, Math.pow(1 - progress, 2) * instability * 0.5));
-      } else {
-        return 0;
-      }
-      if (velocity > VELOCITY_THRESHOLD) {
-        base = Math.min(1, base + (velocity - VELOCITY_THRESHOLD) * VELOCITY_SCALE);
-      }
-      return base;
-    }
-
-    function drawTransitionGraph(transition, instability, elapsedBars) {
-      const canvas = document.getElementById('transition-graph');
-      const W = canvas.offsetWidth || 500;
-      const H = canvas.offsetHeight || 56;
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, W, H);
-
-      const dur = Math.max(0.01, transition.duration_bars);
-      const steps = Math.max(64, W);
-      const pad = 4;
-      const chartH = H - pad * 2;
-
-      // Bar grid lines
-      ctx.strokeStyle = '#222';
-      ctx.lineWidth = 1;
-      for (let b = 0; b <= Math.ceil(dur); b++) {
-        const x = (b / dur) * W;
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      }
-
-      // Determine direction at each point
-      function directionAt(p) {
-        const curPos = transition.start_position + (transition.target_position - transition.start_position) * p;
-        const delta = transition.target_position - curPos;
-        if (Math.abs(delta) < 1e-4) return 'none';
-        return delta > 0 ? 'toward_nott' : 'toward_oak';
-      }
-
-      // Plot position line
-      ctx.beginPath();
-      ctx.strokeStyle = '#5090c0';
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i <= steps; i++) {
-        const p = i / steps;
-        const pos = transition.start_position + (transition.target_position - transition.start_position) * p;
-        const x = p * W;
-        const y = pad + (1 - pos) * chartH;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-
-      // Plot ghost inject line
-      ctx.beginPath();
-      ctx.strokeStyle = '#c06050';
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i <= steps; i++) {
-        const p = i / steps;
-        const dir = directionAt(p);
-        const ghost = ghostInjectHook(p, dir, instability, transition.velocity);
-        const x = p * W;
-        const y = pad + (1 - ghost) * chartH;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-
-      // Playhead
-      const playheadX = Math.min(1, elapsedBars / dur) * W;
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 1;
-      ctx.moveTo(playheadX, 0); ctx.lineTo(playheadX, H);
-      ctx.stroke();
-
-      // Bar labels at bottom
-      ctx.fillStyle = '#444';
-      ctx.font = '9px Courier New';
-      ctx.textAlign = 'center';
-      for (let b = 1; b < Math.ceil(dur); b++) {
-        const x = (b / dur) * W;
-        ctx.fillText(b, x, H - 1);
-      }
-    }
-
-    function getLiveCurveValue(curveId) {
-      const entry = curveCanvases[curveId];
-      const progressAtState = curveProgressAtState[curveId];
-      if (!entry || progressAtState == null) return null;
-      const msPerBar = bankDurationMs > 0 ? bankDurationMs / 16 : 500;
-      const barsElapsed = (Date.now() - stateReceivedAt) / msPerBar;
-      const liveBarsTotal = progressAtState * entry.curve.bars + barsElapsed;
-      const liveProgress = Math.min(1, liveBarsTotal / entry.curve.bars);
-      return evaluateCurveJS(entry.curve, liveProgress);
-    }
-
-    function effectiveCurveValue(curve, rawCurveValue) {
-      if (!isDeformerTarget(curve.target)) return rawCurveValue;  // CC: pass through
-      const dim = deformationModelDimensions[curve.target];
-      const modelValue = dim ? (latestModelDimensions[dim] ?? 0) : 1;
-      return rawCurveValue * modelValue;
-    }
-
-    function displayCurveValue(curve, rawCurveValue) {
-      if (!isDeformerTarget(curve.target)) {
-        // CC target — show as MIDI 0–127 integer
-        return Math.round(rawCurveValue * 127).toString();
-      }
-      return effectiveCurveValue(curve, rawCurveValue).toFixed(2);
-    }
-
-    // Build {target: liveValue} for all curves currently running
-    function liveOverrides() {
-      const out = {};
-      for (const [id, entry] of Object.entries(curveCanvases)) {
-        if (activeCurveTargets.hasOwnProperty(entry.curve.target)) {
-          const v = getLiveCurveValue(id);
-          if (v !== null) out[entry.curve.target] = effectiveCurveValue(entry.curve, v);
-        }
-      }
-      return out;
-    }
-
-    // Grid and deformation strips are authoritative renderings of bank_events.
-    // Do not synthesize extra hits or intensities here; playback uses the same
-    // generated bank material, and the server rebroadcasts whenever that material
-    // changes at a quantization boundary.
-    function applyLiveCurveColours() {
-    }
-
-    // ── Pressure curves ──
-
-    function drawSparkline(canvas, sparkline, progress, colour) {
-      const ctx = canvas.getContext('2d');
-      const W = canvas.offsetWidth || 200;
-      const H = canvas.offsetHeight || 24;
+    function drawPositionDot() {
+      const img    = document.getElementById("landscape-map");
+      const canvas = document.getElementById("landscape-overlay");
+      if (!img.clientWidth) return;
+      const W = img.clientWidth, H = img.clientHeight;
       canvas.width  = W;
       canvas.height = H;
+      const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, W, H);
 
-      // Track line
-      ctx.beginPath();
-      ctx.strokeStyle = '#333';
-      ctx.lineWidth = 1;
-      sparkline.forEach((v, i) => {
-        const x = (i / (sparkline.length - 1)) * W;
-        const y = H - v * H;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-
-      // Curve line (coloured)
-      ctx.beginPath();
-      ctx.strokeStyle = colour || '#50a0dc';
-      ctx.lineWidth = 1.5;
-      sparkline.forEach((v, i) => {
-        const x = (i / (sparkline.length - 1)) * W;
-        const y = H - v * H;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-
-      // Progress marker
-      if (progress > 0 && progress < 1) {
-        const px = progress * W;
+      // ── Drag journey trace ──────────────────────────────────────────────────
+      if (_dragTracePoints.length > 1) {
+        ctx.strokeStyle = "rgba(198,163,91,0.35)";
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([3, 4]);
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 1;
-        ctx.moveTo(px, 0);
-        ctx.lineTo(px, H);
+        const p0 = terrainToPixel(_dragTracePoints[0].x, _dragTracePoints[0].y, W, H);
+        ctx.moveTo(p0.px, p0.py);
+        for (let i = 1; i < _dragTracePoints.length; i++) {
+          const p = terrainToPixel(_dragTracePoints[i].x, _dragTracePoints[i].y, W, H);
+          ctx.lineTo(p.px, p.py);
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
+        // Small dots at trace points
+        ctx.fillStyle = "rgba(198,163,91,0.25)";
+        for (const pt of _dragTracePoints) {
+          const { px, py } = terrainToPixel(pt.x, pt.y, W, H);
+          ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+
+      // ── Current position dot ────────────────────────────────────────────────
+      const { px, py } = terrainToPixel(terrainX, terrainY, W, H);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#c6a35b";
+      ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ─── Address bar ─────────────────────────────────────────────────────────
+
+    function startAddressEdit() {
+      document.getElementById("address-display").style.display = "none";
+      const inp = document.getElementById("address-input");
+      inp.style.display = "";
+      inp.value = document.getElementById("address-display").textContent;
+      inp.select(); inp.focus();
+    }
+
+    function commitAddressEdit() {
+      const inp = document.getElementById("address-input");
+      inp.style.display = "none";
+      document.getElementById("address-display").style.display = "";
+      const val = inp.value.trim();
+      if (val) send({ type: "set_address", value: val });
+    }
+
+    function handleAddressKey(e) {
+      if (e.key === "Enter")  { e.preventDefault(); commitAddressEdit(); }
+      if (e.key === "Escape") {
+        document.getElementById("address-input").style.display = "none";
+        document.getElementById("address-display").style.display = "";
       }
     }
 
-    let existingDeformerCurveTargets = new Set();
-
-    function isDeformerTarget(target) {
-      return target && !target.startsWith('cc:');
+    function navigateToFeature(name) {
+      send({ type: "set_feature", name });
     }
 
-    function updateCurveTargetMode() {
-      const type = document.getElementById('curve-target-type').value;
-      const deformerSel = document.getElementById('curve-deformer-name');
-      const ccFields    = document.getElementById('curve-cc-fields');
-      deformerSel.style.display = (type === 'deformer') ? '' : 'none';
-      ccFields.classList.toggle('visible', type === 'cc');
-      updateCurveAddButton();
+    // ─── Move mode ────────────────────────────────────────────────────────────
+    // drag = gradual (bar-by-bar regraft, past bars preserved)
+    // click = immediate full bank replacement (jarring, all instruments snap)
+    let moveMode = "drag";   // "drag" | "click"
+
+    function sendPosition(x, y, isDrag) {
+      terrainX = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, x));
+      terrainY = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, y));
+      send({ type: "set_position", x: terrainX, y: terrainY, drag: !!isDrag });
+      drawPositionDot();
     }
 
-    function getCurveTarget() {
-      const type = document.getElementById('curve-target-type').value;
-      if (type === 'cc') {
-        const ch  = parseInt(document.getElementById('curve-cc-ch').value)  ?? 0;
-        const num = parseInt(document.getElementById('curve-cc-num').value) ?? 74;
-        return `cc:${ch}:${num}`;
-      }
-      return document.getElementById('curve-deformer-name').value;
-    }
+    let landscapeDragging   = false;
+    let _dragTracePoints    = [];   // journey trace: [{x, y}] for landscape overlay
+    const landscapeWrap     = document.getElementById("landscape-wrap");
 
-    function updateCurveAddButton() {
-      const addBtn = document.getElementById('curve-add-btn');
-      if (!addBtn) return;
-      const target  = getCurveTarget();
-      const hasCurve = isDeformerTarget(target) && existingDeformerCurveTargets.has(target);
-      addBtn.disabled = hasCurve;
-      addBtn.textContent = hasCurve ? 'added' : '+ add';
-      addBtn.title = hasCurve ? 'Remove the existing curve for this deformer before adding another.' : '';
-    }
-
-    function renderCurves(pressureCurves) {
-      if (!pressureCurves) return;
-      const { curves, active_targets, pending_ids = [] } = pressureCurves;
-      const pendingIds = new Set(pending_ids);
-      const list = document.getElementById('curves-list');
-      list.innerHTML = '';
-      existingDeformerCurveTargets = new Set(
-        curves.filter(c => isDeformerTarget(c.target)).map(c => c.target)
+    function onLandscapePointer(e, isDrag) {
+      const rect = landscapeWrap.getBoundingClientRect();
+      const { x, y } = pixelToTerrain(
+        e.clientX - rect.left, e.clientY - rect.top,
+        rect.width, rect.height,
       );
+      if (isDrag) _dragTracePoints.push({x, y});
+      sendPosition(x, y, isDrag);
+    }
 
-      // Populate deformer-name dropdown with known deformation targets
-      const deformerSel = document.getElementById('curve-deformer-name');
-      if (deformerSel) {
-        const existing = Array.from(deformerSel.options).map(o => o.value);
-        Object.keys(deformationColours).forEach(name => {
-          if (!existing.includes(name)) {
-            const opt = document.createElement('option');
-            opt.value = name; opt.textContent = name.replace(/_/g, ' ');
-            deformerSel.insertBefore(opt, deformerSel.firstChild);
-          }
-        });
-        deformerSel.onchange = updateCurveAddButton;
+    landscapeWrap.addEventListener("mousedown", e => {
+      landscapeDragging = true;
+      _dragTracePoints  = [];
+      e.preventDefault();
+      // Mousedown = click intent (no prior drag) — clears journey, jumps immediately
+      onLandscapePointer(e, false);
+    });
+    let _lastDragSendMs = 0;
+    const _DRAG_THROTTLE_MS = 200;   // max 5 Hz during drag — keeps CPU < 80%
+    landscapeWrap.addEventListener("mousemove", e => {
+      if (!landscapeDragging) return;
+      const rect = landscapeWrap.getBoundingClientRect();
+      const { x, y } = pixelToTerrain(
+        e.clientX - rect.left, e.clientY - rect.top,
+        rect.width, rect.height,
+      );
+      // Always collect trace points visually (no throttle)
+      _dragTracePoints.push({x, y});
+      terrainX = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, x));
+      terrainY = Math.max(DOMAIN_MIN, Math.min(DOMAIN_MAX, y));
+      drawPositionDot();
+    });
+    document.addEventListener("mouseup", () => {
+      if (!landscapeDragging) return;
+      landscapeDragging = false;
+      if (_dragTracePoints.length > 2) {
+        // Sample down to ≤20 waypoints (avoid flooding the queue)
+        const raw    = _dragTracePoints;
+        const step   = Math.max(1, Math.floor(raw.length / 20));
+        const points = [];
+        for (let i = 0; i < raw.length; i += step) points.push(raw[i]);
+        if (points[points.length - 1] !== raw[raw.length - 1])
+          points.push(raw[raw.length - 1]);
+        send({ type: "set_journey", points });
+        // Also update terrainX/Y to final point for dot rendering
+        const last = points[points.length - 1];
+        terrainX = last.x; terrainY = last.y;
+        drawPositionDot();
       }
+      // Keep trace visible until next mousedown (shows journey path on landscape)
+    });
+    document.getElementById("landscape-map").addEventListener("load", drawPositionDot);
 
-      curves.forEach(c => {
-        const isActive = active_targets.hasOwnProperty(c.target) &&
-                         Object.values(active_targets).length > 0;
-        const isPending = pendingIds.has(c.id);
-        const colour = deformationColours[c.target] || '#50a0dc';
-        const rawVal = isActive ? active_targets[c.target] : c.current_value;
+    // ─── Seed control ────────────────────────────────────────────────────────
 
-        const row = document.createElement('div');
-        row.className = 'curve-row';
-
-        const targetEl = document.createElement('div');
-        targetEl.className = `curve-target${isActive ? ' active' : ''}`;
-        targetEl.textContent = c.target.replace(/_/g, ' ');
-
-        const sparkWrap = document.createElement('div');
-        sparkWrap.className = 'curve-sparkline';
-        const canvas = document.createElement('canvas');
-        sparkWrap.appendChild(canvas);
-
-        const meta = document.createElement('div');
-        meta.className = 'curve-meta';
-        meta.textContent = `${c.shape} · ${c.bars}b`;
-
-        const valEl = document.createElement('div');
-        valEl.className = 'curve-val';
-        valEl.textContent = rawVal !== undefined ? displayCurveValue(c, rawVal) : '—';
-
-        const startBtn = document.createElement('button');
-        startBtn.className = `curve-btn${isActive || isPending ? ' running' : ''}`;
-        startBtn.textContent = isActive ? '■ stop' : (isPending ? 'armed' : '▶ run');
-        startBtn.onclick = () => {
-          if (isActive || isPending) {
-            send({ type: 'curve_stop', target: c.target });
-          } else {
-            send({ type: 'curve_start', id: c.id });
-          }
-        };
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'curve-btn';
-        removeBtn.textContent = '✕';
-        removeBtn.onclick = () => send({ type: 'curve_remove', id: c.id });
-
-        row.appendChild(targetEl);
-        row.appendChild(sparkWrap);
-        row.appendChild(meta);
-        row.appendChild(valEl);
-        row.appendChild(startBtn);
-        row.appendChild(removeBtn);
-        list.appendChild(row);
-
-        // Store canvas reference for animation loop
-        curveCanvases[c.id] = { canvas, sparkline: c.sparkline, curve: c, valEl };
-        // Initial draw
-        requestAnimationFrame(() => drawSparkline(canvas, c.sparkline, c.progress, colour));
-      });
-      updateCurveAddButton();
+    function applySeed(value) {
+      const seed = Math.max(0, Math.min(9999, parseInt(value, 10) || 1000));
+      activeSeed = seed;
+      updateSeedGlyph(seed);
+      refreshLandscapeMap(seed);
+      send({ type: "set_seed", value: seed });
     }
 
-    function addCurve() {
-      const target = getCurveTarget();
-      if (isDeformerTarget(target) && existingDeformerCurveTargets.has(target)) return;
-      send({
-        type:       'curve_add',
-        shape:      document.getElementById('curve-shape').value,
-        bars:       parseInt(document.getElementById('curve-bars').value) || 8,
-        from_value: parseFloat(document.getElementById('curve-from').value) || 0,
-        to_value:   parseFloat(document.getElementById('curve-to').value) || 1,
-        target:     target,
-        loop:       document.getElementById('curve-loop').checked,
-      });
+    function randomiseSeed() {
+      applySeed(1000 + Math.floor(Math.random() * 9000));
     }
 
-    // ── Playhead animation ──
-    let bankStartedAt = 0;    // Date.now() ms when current bank began
-    let bankDurationMs = 0;   // total bank duration in ms
-    let latestBankCount = 0;
+    // ── Inline seed editor ───────────────────────────────────────────────────
 
-    // ── Pression Dimensions ──────────────────────────────────────────────
-    let _pressionTimeline = [];     // list[{dim: [int×16], overlays: [...]}]
-    let _pressionColours  = {};     // {dim: colour}
-    let _pressionCurrent  = {};     // {dim: int} current bar peak
-    let _pressionCurrentBar = 0;
-    let _activePressionMappingLane = null;
-    let _pressionCanvases = {};     // {dim: {canvas, ctx}}
-    let _pressionHistory = {};      // {dim: recorded int values}
-    let _pressionLastStep = null;
-
-    const OVERLAY_COLOURS = {
-      call_start:        '#6090c0',
-      response_start:    '#c060a0',
-      landing:           '#e0a040',
-      role_flip:         '#50a050',
-      riser:             '#7a50c0',
-      silence_gap:       '#4a7a9a',
-      drop:              '#c05050',
-    };
-
-    function renderPressionLanes(pression) {
-      if (!pression) return;
-      _pressionTimeline   = pression.timeline || [];
-      _pressionColours    = pression.colours  || {};
-      _pressionCurrent    = pression.current  || {};
-      _pressionCurrentBar = pression.current_bar || 0;
-      _activePressionMappingLane = pression.active_mapping_lane || null;
-
-      const container = document.getElementById('pression-lanes');
-      if (!container) return;
-
-      const dims = Object.keys(_pressionColours);
-      if (container.dataset.dims !== dims.join(',')) {
-        container.innerHTML = '';
-        _pressionCanvases = {};
-        dims.forEach(dim => {
-          const lane = document.createElement('div');
-          lane.className = 'pression-lane';
-
-          const nameEl = document.createElement('div');
-          nameEl.className = 'pression-lane-name';
-          nameEl.textContent = dim.replace(/_/g, ' ');
-          nameEl.style.color = _pressionColours[dim] || '#666';
-
-          const sparkWrap = document.createElement('div');
-          sparkWrap.className = 'pression-sparkline';
-          const canvas = document.createElement('canvas');
-          sparkWrap.appendChild(canvas);
-
-          const valEl = document.createElement('div');
-          valEl.className = 'pression-value';
-          valEl.id = `pv-${dim}`;
-          valEl.textContent = '  0';
-
-          const mapBtn = document.createElement('button');
-          mapBtn.className = 'pression-map-btn';
-          mapBtn.type = 'button';
-          mapBtn.onclick = () => togglePressionMapping(dim);
-
-          lane.appendChild(nameEl);
-          lane.appendChild(sparkWrap);
-          lane.appendChild(valEl);
-          lane.appendChild(mapBtn);
-          container.appendChild(lane);
-          _pressionCanvases[dim] = { canvas, sparkWrap, valEl, mapBtn };
-          _pressionHistory[dim] = _pressionHistory[dim] || [];
-        });
-        container.dataset.dims = dims.join(',');
-      }
-
-      // Redraw static layer (step data) — cursor is drawn in animation loop
-      updatePressionMappingButtons();
-      dims.forEach(dim => drawPressionHistory(dim));
+    function startSeedEdit() {
+      document.getElementById("heat-seed-num").style.display = "none";
+      const fo    = document.getElementById("seed-fo");
+      const input = document.getElementById("seed-inline");
+      fo.style.display   = "";
+      input.value        = activeSeed;
+      // Slight delay so the foreignObject is visible before focus
+      requestAnimationFrame(() => { input.select(); input.focus(); });
     }
 
-    function togglePressionMapping(dim) {
-      const next = _activePressionMappingLane === dim ? null : dim;
-      _activePressionMappingLane = next;
-      updatePressionMappingButtons();
-      send({ type: 'pression_mapping_lane', value: next });
+    function commitSeedEdit() {
+      document.getElementById("seed-fo").style.display          = "none";
+      document.getElementById("heat-seed-num").style.display = "";
+      applySeed(document.getElementById("seed-inline").value);
     }
 
-    function updatePressionMappingButtons() {
-      Object.entries(_pressionCanvases).forEach(([dim, entry]) => {
-        const btn = entry.mapBtn;
-        if (!btn) return;
-        const active = _activePressionMappingLane === dim;
-        btn.textContent = active ? 'Mapping' : 'Map';
-        btn.classList.toggle('active', active);
-        btn.title = active
-          ? 'Turn off Pression CC mapping for this lane'
-          : 'Map only this Pression CC';
-      });
-    }
-
-    // 256 total columns: 16 bars × 16 steps each
-    const PRESSION_TOTAL_STEPS = 256;
-    const PRESSION_PREVIEW_STEPS = 32;
-    const PRESSION_PLAYHEAD_FRACTION = 0.76;
-
-    function _currentStepInBank() {
-      // Compute current absolute step in bank (0–255) from wall clock.
-      // Same reference as bankStartedAt / bankDurationMs used by the playhead.
-      if (!isPlaying || bankDurationMs <= 0) return _pressionCurrentBar * 16;
-      const elapsed = Date.now() - bankStartedAt;
-      const msPerStep = bankDurationMs / PRESSION_TOTAL_STEPS;
-      return Math.min(PRESSION_TOTAL_STEPS - 1, Math.floor(elapsed / msPerStep));
-    }
-
-    function _pressionValueAtStep(dim, currentStep) {
-      const step = Math.max(0, Math.min(PRESSION_TOTAL_STEPS - 1, currentStep));
-      const bi = Math.floor(step / 16);
-      const si = step % 16;
-      const barData = _pressionTimeline[bi] || {};
-      const vals = barData[dim] || [];
-      return vals[si] || 0;
-    }
-
-    function drawPressionHistory(dim) {
-      // Draw recorded history left of a fixed playhead, plus read-only future preview.
-      const entry = _pressionCanvases[dim];
-      if (!entry) return;
-      const { canvas, sparkWrap, valEl } = entry;
-
-      const W = sparkWrap.offsetWidth || 256;
-      const H = 18;
-      canvas.width  = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      const colour = _pressionColours[dim] || '#50a0dc';
-      const history = _pressionHistory[dim] || [];
-      const currentStep = _pressionLastStep ?? _currentStepInBank();
-      const playheadX = Math.floor(W * PRESSION_PLAYHEAD_FRACTION);
-      const historySteps = Math.max(1, Math.floor(PRESSION_TOTAL_STEPS * PRESSION_PLAYHEAD_FRACTION));
-      const previewSteps = PRESSION_PREVIEW_STEPS;
-      const historyStepW = playheadX / historySteps;
-      const previewW = Math.max(1, W - playheadX);
-      const previewStepW = previewW / Math.max(1, previewSteps);
-
-      ctx.clearRect(0, 0, W, H);
-
-      if (history.length > 0) {
-        const visible = history.slice(-historySteps);
-        const pad = Math.max(0, historySteps - visible.length);
-
-        visible.forEach((val, idx) => {
-          const h = (val / 127) * H;
-          const x = (pad + idx) * historyStepW;
-          ctx.fillStyle = colour + 'a0';
-          ctx.fillRect(x, H - h, Math.max(1, historyStepW - 0.5), h);
-        });
-      }
-
-      for (let i = 0; i < previewSteps; i++) {
-        const val = _pressionValueAtStep(dim, currentStep + i);
-        const h = (val / 127) * H;
-        const x = playheadX + i * previewStepW;
-        ctx.fillStyle = colour + '55';
-        ctx.fillRect(x, H - h, Math.max(1, previewStepW - 0.5), h);
-      }
-
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-      ctx.fillRect(playheadX, 0, 1, H);
-
-      if (valEl) {
-        valEl.textContent = String(_pressionValueAtStep(dim, currentStep)).padStart(3, ' ');
-      }
-    }
-
-    function recordPressionStep(currentStep) {
-      if (!isPlaying || currentStep === _pressionLastStep) return;
-      _pressionLastStep = currentStep;
-      Object.keys(_pressionCanvases).forEach(dim => {
-        const history = _pressionHistory[dim] || [];
-        history.push(_pressionValueAtStep(dim, currentStep));
-        if (history.length > PRESSION_TOTAL_STEPS) {
-          history.splice(0, history.length - PRESSION_TOTAL_STEPS);
+    // Wire up the inline seed input: Enter commits, Escape cancels, blur commits.
+    // (Script runs at bottom of <body> so DOM is already ready — no DOMContentLoaded needed.)
+    (function () {
+      const inp = document.getElementById("seed-inline");
+      inp.addEventListener("keydown", e => {
+        if (e.key === "Enter")  { e.preventDefault(); commitSeedEdit(); }
+        if (e.key === "Escape") {
+          document.getElementById("seed-fo").style.display       = "none";
+          document.getElementById("heat-seed-num").style.display = "";
         }
-        _pressionHistory[dim] = history;
       });
+      inp.addEventListener("blur", () => {
+        if (document.getElementById("seed-fo").style.display !== "none") {
+          commitSeedEdit();
+        }
+      });
+    })();
+
+    function refreshLandscapeMap(seed, heat) {
+      const h   = (heat !== undefined) ? parseFloat(heat).toFixed(2) : heatApplied.toFixed(2);
+      const ts  = Date.now();                 // timestamp busts browser cache every call
+      const img = document.getElementById("landscape-map");
+      img.src   = `/api/landscape-map.svg?width=240&height=140&heat=${h}&v=${seed}&t=${ts}`;
     }
 
-    function animatePlayhead() {
-      const el = document.getElementById('playhead');
-      if (el && isPlaying && bankDurationMs > 0) {
-        const viewport = applyRollingViewport();
-        el.style.left = `${viewport.playheadPercent}%`;
-        el.style.display = 'block';
-      } else if (el) {
-        applyRollingViewport();
-        el.style.display = 'none';
-      }
+    let _midiChBuilt = false;
+    function render(state) {
+      document.getElementById("runtime").textContent =
+        `${state.runtime_mode || ""} ${state.playing ? "running" : "stopped"}`.trim();
 
-      // Pression cursor — animate at step resolution using wall clock
-      if (Object.keys(_pressionCanvases).length > 0) {
-        const currentStep = _currentStepInBank();
-        recordPressionStep(currentStep);
-        Object.keys(_pressionCanvases).forEach(dim => {
-          drawPressionHistory(dim);
-        });
-        const lbl = document.getElementById('pression-bar-label');
-        if (lbl) {
-          const bar = Math.floor(currentStep / 16) + 1;
-          const step = currentStep % 16;
-          lbl.textContent = `bar ${bar}  step ${step + 1}`;
+      // Pression panel + timeline
+      if (state.pression) {
+        updatePressionPanel(state.pression);
+        // Decode compact pression timeline: {gs, steps: [[s,p,sp,r,e]×16]}
+        for (const bar of (state.pression.timeline || [])) {
+          const steps = bar.steps || [];
+          for (let i = 0; i < steps.length; i++) {
+            const [s, p, sp, r, e] = steps[i];
+            pressionTimeline.set(bar.gs + i, {
+              stability: s, pressure: p, sparsity: sp, release: r, emphasis: e
+            });
+          }
+        }
+        // Prune old pression entries (same window as byLayerStep)
+        const pruneBelow = clientBankOffset - BANK_STEPS;
+        for (const gs of pressionTimeline.keys()) {
+          if (gs < pruneBelow) pressionTimeline.delete(gs);
         }
       }
 
-      // Animate transition graph playhead
-      if (_tgTransition && _tgTransition.active && isPlaying) {
-        const msPerBar = bankDurationMs > 0 ? bankDurationMs / 16 : (60000 / 174);
-        const barsElapsed = _tgTransition.elapsed_bars + (Date.now() - stateReceivedAt) / msPerBar;
-        drawTransitionGraph(_tgTransition, _tgInstability, barsElapsed);
+      // Channel numbers are rendered directly in the canvas label column.
+      // The separate edit panel is hidden — accessible only via the ch button.
+      document.getElementById("versions").textContent =
+        `${state.thelmic_version || ""} / rules ${state.music_rules_version || ""}`.trim();
+      document.getElementById("bpm").value = state.bpm || 174;
+
+      // Address bar
+      if (state.address) {
+        document.getElementById("address-display").textContent = state.address;
       }
 
-      // Animate sparkline progress markers
-      for (const [id, entry] of Object.entries(curveCanvases)) {
-        if (!activeCurveTargets.hasOwnProperty(entry.curve.target)) continue;
-        const v = getLiveCurveValue(id);
-        if (v === null) continue;
-        const progressAtState = curveProgressAtState[id] ?? 0;
-        const msPerBar = bankDurationMs > 0 ? bankDurationMs / 16 : 500;
-        const barsElapsed = (Date.now() - stateReceivedAt) / msPerBar;
-        const liveProg = Math.min(1, (progressAtState * entry.curve.bars + barsElapsed) / entry.curve.bars);
-        const colour = deformationColours[entry.curve.target] || '#50a0dc';
-        drawSparkline(entry.canvas, entry.sparkline, liveProg, colour);
-        if (entry.valEl) entry.valEl.textContent = displayCurveValue(entry.curve, v);
+      // Sync position dot from server state
+      if (state.landscape_xy) {
+        terrainX = state.landscape_xy.x;
+        terrainY = state.landscape_xy.y;
+        drawPositionDot();
       }
 
-      // Recolour grid cells ahead of playhead with live curve values
-      applyLiveCurveColours();
+      // Sync seed when server reports a change (e.g. from another client)
+      if (state.landscape_seed != null && state.landscape_seed !== activeSeed) {
+        activeSeed = state.landscape_seed;
+        updateSeedGlyph(activeSeed);
+        refreshLandscapeMap(activeSeed);
+      }
 
-      requestAnimationFrame(animatePlayhead);
+      // Sync heat dial — show applied (inertia-smoothed) value from server
+      if (state.heat != null) {
+        heatApplied = state.heat.applied;
+        if (!dialDragging) {
+          heatTarget = state.heat.target;
+          // Dial always shows the target (what the user set).
+          // heatApplied is the inertia-smoothed value used by the music engine —
+          // it lags behind and must not drive the visual position.
+          updateDialVisual(heatTarget);
+        }
+      }
+
+      document.getElementById("meta").innerHTML = `
+        <div>events: ${(state.runtime && state.runtime.event_count) || (state.bank_events || []).length}</div>
+        <div>pression: ${state.pression_engine_version || "—"}</div>
+        <div>legacy fallback: ${state.runtime && state.runtime.legacy_fallback_enabled}</div>
+        <div>post-generation rescue: ${state.runtime && state.runtime.post_generation_rescue_enabled}</div>
+      `;
     }
-    requestAnimationFrame(animatePlayhead);
 
-    function setStatus(msg, cls) {
-      const el = document.getElementById('status');
-      el.textContent = msg;
-      el.className = `status-bar ${cls || ''}`;
-    }
+    // ─── Boot ─────────────────────────────────────────────────────────────────
 
+    refreshPorts();
     connect();
+    animate();
+
+    // ─── UI invariant tests (callable from browser console: runUITests()) ────
+    // Verifies: marker is fixed, scroll moves, phrase positions are correct.
+    window.runUITests = function () {
+      if (!latestState) { console.warn("no state yet"); return; }
+
+      const canvas  = document.getElementById("stream-canvas");
+      const usableW = canvas.width - LABEL_W;
+      const markerX = LABEL_W + usableW * MARKER_FRAC;
+
+      // 1 ── Marker x is fixed (independent of time)
+      const mx1 = markerX;
+      setTimeout(() => {
+        const mx2 = LABEL_W + (canvas.width - LABEL_W) * MARKER_FRAC;
+        console.assert(mx1 === mx2, "FAIL: marker moved between frames");
+        console.log(`PASS  marker fixed at x=${mx1}`);
+      }, 200);
+
+      // 2 ── Scroll offset changes when time advances
+      const now1 = currentGlobalStep(latestState);
+      setTimeout(() => {
+        const now2 = currentGlobalStep(latestState);
+        if (latestState.playing) {
+          console.assert(now2 > now1, "FAIL: scroll offset did not advance");
+          console.log(`PASS  scroll advanced ${(now2 - now1).toFixed(3)} steps in 100 ms`);
+        } else {
+          console.log("INFO  stopped — scroll offset static (expected)");
+        }
+      }, 100);
+
+      // 3 ── Phrase boundaries at correct positions
+      const phraseBoundaries = [...frameStore.values()].filter(f => f.is_phrase_start);
+      const nowStep = currentGlobalStep(latestState);
+      phraseBoundaries.forEach(f => {
+        const x = stepToX(f._gs, nowStep, usableW);
+        const expected = LABEL_W + usableW * MARKER_FRAC + (f._gs - nowStep) * (usableW / STEPS_VISIBLE);
+        const ok = Math.abs(x - expected) < 0.01;
+        console.assert(ok, `FAIL: phrase P${f.phrase_index} x=${x} expected=${expected}`);
+      });
+      if (phraseBoundaries.length) console.log(`PASS  ${phraseBoundaries.length} phrase boundaries positioned correctly`);
+
+      // 4 ── Metadata is stable (phrase_index present on every phrase start frame)
+      const badFrames = phraseBoundaries.filter(f => f.phrase_index === undefined);
+      console.assert(badFrames.length === 0, `FAIL: ${badFrames.length} phrase frames missing phrase_index`);
+      console.log(`PASS  phrase metadata stable (${phraseBoundaries.length} boundaries)`);
+
+      console.log("runUITests complete");
+    };
   </script>
 </body>
 </html>

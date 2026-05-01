@@ -1,0 +1,13 @@
+INFO:     127.0.0.1:49297 - "GET /api/landscape-map.svg?width=240&height=140 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49298 - "GET /api/landscape-map.svg?width=240&height=140 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53307 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53307 - "GET /api/landscape-map.svg?width=240&height=140 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63951 - "GET /api/midi-ports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50060 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50060 - "GET /api/landscape-map.svg?width=240&height=140 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49822 - "GET /api/midi-ports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52725 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52725 - "GET /api/landscape-map.svg?width=240&height=140 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59200 - "GET /api/midi-ports HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53885 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57794 - "GET / HTTP/1.1" 200 OK

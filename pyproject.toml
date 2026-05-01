@@ -1,6 +1,6 @@
 [project]
 name = "thelmic"
-version = "0.1.0"
+version = "1.0.1"
 description = "An instrument you ride, not configure."
 requires-python = ">=3.11"
 dependencies = [

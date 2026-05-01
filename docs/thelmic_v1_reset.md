@@ -112,7 +112,7 @@ truth for new v1.0 implementation.
 
 ```text
 1. Percussive drive never collapses
-2. Silence only occurs in drop-prep
+2. Drop-prep is grid reminder
 3. Timing anchor always survives
 4. Motif persists at least one phrase
 5. Motif mutation <= one event or <= 20 percent
@@ -123,8 +123,7 @@ truth for new v1.0 implementation.
 
 ## Continuity and Anticipation
 
-This replaces the previous silence rules, drop survivor rules, lane removal
-rules, and rhythm continuity rules.
+This replaces legacy lane removal rules and rhythm continuity rules.
 
 The system must maintain continuous temporal drive at all times while allowing
 a single controlled anticipation sequence before a drop.
@@ -134,9 +133,9 @@ Core invariant: a timing anchor must always be present.
 Normal state:
 
 - Continuous percussive drive
-- No silence
+- No full-lane removal
 - No fading
-- No energy reduction
+- No drive reduction
 
 Drop-prep state:
 
@@ -153,7 +152,7 @@ Reintroduction:
 
 Disallowed:
 
-- Full silence
+- Full loss of grid
 - Loss of timing reference
 - Gradual decay of drive
 - Accidental gaps
@@ -201,8 +200,8 @@ Delete during the v1.0 reset:
 ```text
 old generation engine
 post-fix systems
-legacy silence model
-energy scoring system
+legacy gap-removal model
+legacy drive scoring system
 old pression engine
 legacy tests
 hidden behavioural utilities
@@ -228,14 +227,14 @@ output/rendering
 7. Build minimal generator
 8. Implement motif system
 9. Implement drop-prep behaviour
-10. Enforce structural exclusivity
+10. Apply structural exclusivity
 11. Rebuild pression later
 ```
 
 ## Minimal Generator Requirement
 
 The first v1.0 generator must maintain timing anchor, maintain percussive
-continuity, obey motif rules, avoid silence outside drop-prep, and pass all
+continuity, obey motif rules, preserve the grid through drop-prep, and pass all
 invariant tests.
 
 It does not need to sound good, be complex, or include pression.
@@ -246,8 +245,7 @@ It does not need to sound good, be complex, or include pression.
 No hidden behaviour.
 No post-fix systems.
 No rule bypasses.
-No silent corrections.
+No hidden corrections.
 ```
 
 All behaviour must exist inside declared components and obey v1.0 rules.
-
