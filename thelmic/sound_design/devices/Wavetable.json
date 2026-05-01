@@ -1,0 +1,30 @@
+{
+  "class": "InstrumentVector",
+  "summary": "Wavetable synth: two oscillators, sub, two filters, mod matrix. Live's class_name is 'InstrumentVector' (NOT 'Wavetable').",
+  "alt_class_names": ["Wavetable", "InstrumentVector"],
+  "params": [
+    {"name": "Volume",         "min": -70.0, "max": 6.0,    "default": 0.0,  "groups": ["mix"]},
+    {"name": "Voices",         "min": 1,     "max": 16,     "default": 8,    "groups": ["voicing"], "is_quantized": true},
+    {"name": "Unison Voices",  "min": 1,     "max": 8,      "default": 1,    "groups": ["voicing"], "is_quantized": true},
+    {"name": "Unison Amount",  "min": 0.0,   "max": 100.0,  "default": 0.0,  "groups": ["voicing"]},
+    {"name": "Glide",          "min": 0.0,   "max": 1000.0, "default": 0.0,  "groups": ["voicing"]},
+    {"name": "Transpose",      "min": -48,   "max": 48,     "default": 0,    "groups": ["pitch"], "is_quantized": true},
+    {"name": "Filter 1 Freq",  "min": 20.0,  "max": 22000.0,"default": 22000.0,"groups": ["filter1"]},
+    {"name": "Filter 1 Res",   "min": 0.0,   "max": 1.25,   "default": 0.0,  "groups": ["filter1"]},
+    {"name": "Filter 1 Drive", "min": 0.0,   "max": 24.0,   "default": 0.0,  "groups": ["filter1", "drive"]},
+    {"name": "Filter 2 Freq",  "min": 20.0,  "max": 22000.0,"default": 22000.0,"groups": ["filter2"]},
+    {"name": "Filter 2 Res",   "min": 0.0,   "max": 1.25,   "default": 0.0,  "groups": ["filter2"]},
+    {"name": "Osc 1 Position", "min": 0.0,   "max": 1.0,    "default": 0.0,  "groups": ["osc1", "wavetable"]},
+    {"name": "Osc 2 Position", "min": 0.0,   "max": 1.0,    "default": 0.0,  "groups": ["osc2", "wavetable"]},
+    {"name": "Sub Gain",       "min": -70.0, "max": 6.0,    "default": -70.0,"groups": ["sub"]},
+    {"name": "Pan",            "min": -1.0,  "max": 1.0,    "default": 0.0,  "groups": ["mix"]}
+  ],
+  "groups": {
+    "mix":       ["Volume", "Pan"],
+    "voicing":   ["Voices", "Unison Voices", "Unison Amount", "Glide"],
+    "filter1":   ["Filter 1 Freq", "Filter 1 Res", "Filter 1 Drive"],
+    "filter2":   ["Filter 2 Freq", "Filter 2 Res"],
+    "wavetable": ["Osc 1 Position", "Osc 2 Position"]
+  },
+  "notes": "Live exposes only the top-level macro params on Wavetable. Per-oscillator detune, table-select, mod-matrix routing must be done in the GUI; we cannot script them via device.parameters."
+}

@@ -1,0 +1,1711 @@
+{
+  "class": "Operator",
+  "summary": "Operator: 4-op FM synth. Per-oscillator (A/B/C/D) coarse/fine/level/wave/envelopes are all addressable. Filter, LFO, pitch envelope, shaper too. Live exposes 195 params; many are normalised 0..1.",
+  "params": [
+    {
+      "name": "Device On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Algorithm",
+      "min": 0.0,
+      "max": 10.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Transpose",
+      "min": -48.0,
+      "max": 48.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "PB Range",
+      "min": 0.0,
+      "max": 24.0,
+      "default": 5.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Volume",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Panorama",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pan < Key",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pan < Rnd",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Tone",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Spread",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 35.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Glide On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Glide Time",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "A Coarse",
+      "min": 0.0,
+      "max": 48.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "A Fine",
+      "min": 0.0,
+      "max": 1000.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "A Freq<Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "A Quantize",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "A Fix On ",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "A Fix Freq",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4345879852771759,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "A Fix Freq Mul",
+      "min": 0.0,
+      "max": 5.0,
+      "default": 4.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Level",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Retrig",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Phase",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Lev < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 50.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Lev < Key",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Wave",
+      "min": 0.0,
+      "max": 22.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-A Feedb",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-A < Pe",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-A < LFO",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Ae Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.6278579235076904,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Ae Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ae R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "B Coarse",
+      "min": 0.0,
+      "max": 48.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "B Fine",
+      "min": 0.0,
+      "max": 1000.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "B Freq<Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "B Quantize",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "B Fix On ",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "B Fix Freq",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4345879852771759,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "B Fix Freq Mul",
+      "min": 0.0,
+      "max": 5.0,
+      "default": 4.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Level",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Retrig",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Phase",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Lev < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 50.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Lev < Key",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Wave",
+      "min": 0.0,
+      "max": 22.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-B Feedb",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-B < Pe",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-B < LFO",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Be Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3999996781349182,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Be Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Be R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "C Coarse",
+      "min": 0.0,
+      "max": 48.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "C Fine",
+      "min": 0.0,
+      "max": 1000.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "C Freq<Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "C Quantize",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "C Fix On ",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "C Fix Freq",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4345879852771759,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "C Fix Freq Mul",
+      "min": 0.0,
+      "max": 5.0,
+      "default": 4.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Level",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Retrig",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Phase",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Lev < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 50.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Lev < Key",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Wave",
+      "min": 0.0,
+      "max": 22.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-C Feedb",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-C < Pe",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-C < LFO",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Ce Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3999996781349182,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Ce Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Ce R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "D Coarse",
+      "min": 0.0,
+      "max": 48.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "D Fine",
+      "min": 0.0,
+      "max": 1000.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "D Freq<Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "D Quantize",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "D Fix On ",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "D Fix Freq",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.4345879852771759,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "D Fix Freq Mul",
+      "min": 0.0,
+      "max": 5.0,
+      "default": 4.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Level",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Retrig",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Phase",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Lev < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 50.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Lev < Key",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Wave",
+      "min": 0.0,
+      "max": 22.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-D Feedb",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Osc-D < Pe",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Osc-D < LFO",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "De Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.3999996781349182,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "De Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "De R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Time",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 60.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Time < Key",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Pe Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Init",
+      "min": -48.0,
+      "max": 48.0,
+      "default": 12.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe A Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5445746183395386,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Peak",
+      "min": -48.0,
+      "max": 48.0,
+      "default": 12.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe D Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Sustain",
+      "min": -48.0,
+      "max": 48.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.35557058453559875,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe End",
+      "min": -48.0,
+      "max": 48.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe R Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Pe Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Amount",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Amt A",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Pe Dst B",
+      "min": 0.0,
+      "max": 23.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Pe Amt B",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "LFO Type",
+      "min": 0.0,
+      "max": 6.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "LFO Range",
+      "min": 0.0,
+      "max": 2.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "LFO Rate",
+      "min": 0.0,
+      "max": 127.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO Sync",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO R < K",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO Retrigger",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "LFO Amt",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.10000000149011612,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO Amt A",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO Dst B",
+      "min": 0.0,
+      "max": 23.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "LFO Amt B",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO < Vel",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "LFO < Pe",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Le Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.581428050994873,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.35557058453559875,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le End",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Le Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Le R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filter On",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Filter Type",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Filter Circuit - LP/HP",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Filter Circuit - BP/NO/Morph",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Filter Slope",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Filter Freq",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filter Res",
+      "min": 0.0,
+      "max": 1.25,
+      "default": 0.5,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filter Morph",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filter Drive",
+      "min": 0.0,
+      "max": 24.0,
+      "default": 6.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filt < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filt < Key",
+      "min": -200.0,
+      "max": 200.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Amount",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Filt < LFO",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Fe Attack",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Init",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe A Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Decay",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.581428050994873,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Peak",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe D Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Sustain",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Release",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.35557058453559875,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe End",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe R Slope",
+      "min": -1.0,
+      "max": 1.0,
+      "default": 1.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Mode",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Fe Loop",
+      "min": 0.0,
+      "max": 1.0,
+      "default": 0.5397940278053284,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe Retrig",
+      "min": 0.0,
+      "max": 14.0,
+      "default": 3.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Fe R < Vel",
+      "min": -100.0,
+      "max": 100.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Shaper Type",
+      "min": 0.0,
+      "max": 4.0,
+      "default": 0.0,
+      "is_quantized": true,
+      "groups": []
+    },
+    {
+      "name": "Shaper Mix",
+      "min": 0.0,
+      "max": 100.0,
+      "default": 100.0,
+      "is_quantized": false,
+      "groups": []
+    },
+    {
+      "name": "Shaper Drive",
+      "min": -12.0,
+      "max": 12.0,
+      "default": 0.0,
+      "is_quantized": false,
+      "groups": []
+    }
+  ],
+  "groups": {
+    "global": [
+      "Volume",
+      "Tone",
+      "Time",
+      "Spread",
+      "Algorithm",
+      "Transpose",
+      "PB Range"
+    ],
+    "osc_a": [
+      "Osc-A On",
+      "A Coarse",
+      "A Fine",
+      "Osc-A Level",
+      "Osc-A Wave",
+      "Osc-A Feedb",
+      "A Quantize",
+      "Osc-A Phase"
+    ],
+    "osc_b": [
+      "Osc-B On",
+      "B Coarse",
+      "B Fine",
+      "Osc-B Level",
+      "Osc-B Wave",
+      "Osc-B Feedb",
+      "B Quantize",
+      "Osc-B Phase"
+    ],
+    "osc_c": [
+      "Osc-C On",
+      "C Coarse",
+      "C Fine",
+      "Osc-C Level",
+      "Osc-C Wave",
+      "Osc-C Feedb"
+    ],
+    "osc_d": [
+      "Osc-D On",
+      "D Coarse",
+      "D Fine",
+      "Osc-D Level",
+      "Osc-D Wave",
+      "Osc-D Feedb"
+    ],
+    "envelope_a": [
+      "Ae Attack",
+      "Ae Decay",
+      "Ae Sustain",
+      "Ae Release",
+      "Ae Peak",
+      "Ae Init"
+    ],
+    "envelope_b": [
+      "Be Attack",
+      "Be Decay",
+      "Be Sustain",
+      "Be Release",
+      "Be Peak",
+      "Be Init"
+    ],
+    "filter": [
+      "Filter On",
+      "Filter Type",
+      "Filter Freq",
+      "Filter Res",
+      "Filter Drive",
+      "Filter Morph",
+      "Filter Slope"
+    ],
+    "filter_env": [
+      "Fe Attack",
+      "Fe Decay",
+      "Fe Sustain",
+      "Fe Release",
+      "Fe Amount"
+    ],
+    "pitch_env": [
+      "Pe On",
+      "Pe Attack",
+      "Pe Decay",
+      "Pe Sustain",
+      "Pe Release",
+      "Pe Amount",
+      "Pe Init",
+      "Pe Peak"
+    ],
+    "lfo": [
+      "LFO On",
+      "LFO Type",
+      "LFO Rate",
+      "LFO Sync",
+      "LFO Amt",
+      "LFO Range"
+    ],
+    "shaper": [
+      "Shaper Type",
+      "Shaper Mix",
+      "Shaper Drive"
+    ],
+    "glide": [
+      "Glide On",
+      "Glide Time"
+    ]
+  },
+  "musical_archetypes": {
+    "reese_bass": {
+      "_doc": "Detuned saw A+B through filter w/ resonance and drive. Tone keeps high partials present.",
+      "Algorithm": 0,
+      "Volume": 0.85,
+      "Tone": 0.95,
+      "Spread": 35,
+      "Filter On": 1,
+      "Filter Type": 0,
+      "Filter Freq": 0.42,
+      "Filter Res": 0.55,
+      "Filter Drive": 8,
+      "Osc-A On": 1,
+      "A Coarse": 24,
+      "Osc-A Level": 1.0,
+      "Osc-A Wave": 6,
+      "Osc-B On": 1,
+      "B Coarse": 24,
+      "B Fine": 14,
+      "Osc-B Level": 1.0,
+      "Osc-B Wave": 6,
+      "Ae Attack": 0.0,
+      "Ae Decay": 0.7,
+      "Ae Sustain": 1.0,
+      "Ae Release": 0.5
+    },
+    "fm_pluck": {
+      "Algorithm": 0,
+      "Volume": 0.85,
+      "Tone": 0.7,
+      "Osc-A Wave": 0,
+      "Ae Attack": 0.0,
+      "Ae Decay": 0.4,
+      "Ae Sustain": 0.0,
+      "Ae Release": 0.4
+    }
+  },
+  "notes": "Volume / Tone / Filter Freq are NORMALISED 0..1 in Live API; Spread/Phase/etc are 0..100. Wave indexes are quantized 0..22 selecting waveform. Algorithm 0..10 is FM topology.",
+  "_bootstrapped": true
+}

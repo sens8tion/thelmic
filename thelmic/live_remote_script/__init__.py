@@ -45,6 +45,21 @@ _UI_THREAD_COMMANDS = {
     "set_device_param",
     "get_device_param",
     "delete_device",
+    "move_device",
+    "set_track_volume",
+    "set_track_pan",
+    "set_track_mute",
+    "set_track_solo",
+    "set_send",
+    "get_return_tracks",
+    "get_master_track",
+    "define_rack_macro",
+    "get_rack_macros",
+    "set_macro_value",
+    "snapshot_track",
+    "restore_track",
+    "get_browser_tree",
+    "get_browser_items_at_path",
 }
 
 
@@ -234,6 +249,51 @@ class ThelmicLive(ControlSurface):
             )
         if cmd_type == "delete_device":
             return self._delete_device(params["track_index"], params["device_index"])
+        if cmd_type == "move_device":
+            return self._move_device(
+                params["track_index"], params["from_index"], params["to_index"]
+            )
+        if cmd_type == "set_track_volume":
+            return self._set_mixer(params["track_index"], "volume", params["value"])
+        if cmd_type == "set_track_pan":
+            return self._set_mixer(params["track_index"], "panning", params["value"])
+        if cmd_type == "set_track_mute":
+            return self._set_track_flag(params["track_index"], "mute", params["value"])
+        if cmd_type == "set_track_solo":
+            return self._set_track_flag(params["track_index"], "solo", params["value"])
+        if cmd_type == "set_send":
+            return self._set_send(
+                params["track_index"], params["send_index"], params["value"]
+            )
+        if cmd_type == "get_return_tracks":
+            return self._get_return_tracks()
+        if cmd_type == "get_master_track":
+            return self._get_master_track()
+        if cmd_type == "define_rack_macro":
+            return self._define_rack_macro(
+                params["track_index"],
+                params["device_index"],
+                params["macro_index"],
+                params.get("name"),
+                params.get("mappings", []),
+            )
+        if cmd_type == "get_rack_macros":
+            return self._get_rack_macros(params["track_index"], params["device_index"])
+        if cmd_type == "set_macro_value":
+            return self._set_macro_value(
+                params["track_index"],
+                params["device_index"],
+                params["macro_index"],
+                params["value"],
+            )
+        if cmd_type == "snapshot_track":
+            return self._snapshot_track(params["track_index"])
+        if cmd_type == "restore_track":
+            return self._restore_track(params["track_index"], params["snapshot"])
+        if cmd_type == "get_browser_tree":
+            return self._get_browser_tree(params.get("category", "all"))
+        if cmd_type == "get_browser_items_at_path":
+            return self._get_browser_items_at_path(params["path"])
         raise ValueError("unhandled UI command: " + cmd_type)
 
     # ------------------------------------------------------------------
@@ -415,3 +475,301 @@ class ThelmicLive(ControlSurface):
             raise IndexError("Device index out of range")
         track.delete_device(device_index)
         return {"deleted": True, "track_index": track_index, "device_index": device_index}
+
+    def _move_device(self, track_index, from_index, to_index):
+        track = self._track(track_index)
+        n = len(track.devices)
+        if from_index < 0 or from_index >= n:
+            raise IndexError("from_index out of range")
+        if to_index < 0 or to_index >= n:
+            raise IndexError("to_index out of range")
+        # Live API: Track.move_device(insert_index, device_index)
+        # Using the wider Live.Song.move_device path through track for safety.
+        track.move_device(from_index, to_index)
+        return {"moved": True, "from_index": from_index, "to_index": to_index}
+
+    # ---- mixer ------------------------------------------------------
+
+    def _set_mixer(self, track_index, attr, value):
+        track = self._track(track_index)
+        param = getattr(track.mixer_device, attr)
+        v = float(value)
+        if v < param.min:
+            v = param.min
+        elif v > param.max:
+            v = param.max
+        param.value = v
+        return {"track_index": track_index, "attr": attr, "value": param.value}
+
+    def _set_track_flag(self, track_index, attr, value):
+        track = self._track(track_index)
+        setattr(track, attr, bool(value))
+        return {"track_index": track_index, "attr": attr, "value": getattr(track, attr)}
+
+    def _set_send(self, track_index, send_index, value):
+        track = self._track(track_index)
+        sends = list(track.mixer_device.sends)
+        if send_index < 0 or send_index >= len(sends):
+            raise IndexError("send_index out of range")
+        param = sends[send_index]
+        v = float(value)
+        if v < param.min:
+            v = param.min
+        elif v > param.max:
+            v = param.max
+        param.value = v
+        return {"track_index": track_index, "send_index": send_index, "value": param.value}
+
+    def _get_return_tracks(self):
+        out = []
+        for i, t in enumerate(self._song.return_tracks):
+            out.append({
+                "index": i,
+                "name": t.name,
+                "volume": t.mixer_device.volume.value,
+                "panning": t.mixer_device.panning.value,
+                "device_count": len(t.devices),
+            })
+        return {"return_tracks": out}
+
+    def _get_master_track(self):
+        m = self._song.master_track
+        return {
+            "name": m.name,
+            "volume": m.mixer_device.volume.value,
+            "panning": m.mixer_device.panning.value,
+            "device_count": len(m.devices),
+        }
+
+    # ---- rack macros ------------------------------------------------
+
+    def _ensure_rack(self, track_index, device_index):
+        device = self._device(track_index, device_index)
+        if not getattr(device, "can_have_chains", False):
+            raise ValueError("Device is not a rack: " + device.name)
+        return device
+
+    def _get_rack_macros(self, track_index, device_index):
+        rack = self._ensure_rack(track_index, device_index)
+        # Macros 1..16 live as rack.parameters (param 0 = Device On).
+        macros = []
+        for i in range(1, len(rack.parameters)):
+            p = rack.parameters[i]
+            if not p.name.startswith("Macro"):
+                # Stop at non-Macro params (e.g. "Chain Selector" comes after).
+                continue
+            macros.append({
+                "macro_index": i - 1,
+                "name": p.name,
+                "value": p.value,
+                "min": p.min,
+                "max": p.max,
+            })
+        return {"track_index": track_index, "device_index": device_index, "macros": macros}
+
+    def _macro_param(self, rack, macro_index):
+        # macro_index 0..15 -> rack.parameters[macro_index + 1]
+        idx = macro_index + 1
+        if idx < 1 or idx >= len(rack.parameters):
+            raise IndexError("macro_index out of range: " + str(macro_index))
+        p = rack.parameters[idx]
+        if not p.name.startswith("Macro"):
+            raise ValueError("Parameter at slot " + str(idx) + " is not a Macro")
+        return p
+
+    def _set_macro_value(self, track_index, device_index, macro_index, value):
+        rack = self._ensure_rack(track_index, device_index)
+        p = self._macro_param(rack, macro_index)
+        v = float(value)
+        if v < p.min:
+            v = p.min
+        elif v > p.max:
+            v = p.max
+        p.value = v
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "macro_index": macro_index,
+            "value": p.value,
+        }
+
+    def _define_rack_macro(self, track_index, device_index, macro_index, name, mappings):
+        """Best-effort macro definition.
+
+        Live's API does not expose programmatic macro mapping (mappings are
+        edited in the rack UI's Map mode). What we CAN do safely from the
+        Remote Script is rename the macro and seed its initial value. The
+        `mappings` payload is acknowledged and returned for client-side
+        record-keeping (Patch JSON), but actual parameter targeting must be
+        done by the user in Map mode, OR by setting the underlying
+        parameters directly via set_device_param. This is documented behaviour
+        for the MVP; revisit if Live exposes a mapping API later.
+        """
+        rack = self._ensure_rack(track_index, device_index)
+        p = self._macro_param(rack, macro_index)
+        if name:
+            p.name = name
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "macro_index": macro_index,
+            "name": p.name,
+            "mappings_recorded": len(mappings or []),
+            "note": "macro renamed; programmatic mapping not exposed by Live API",
+        }
+
+    # ---- snapshots --------------------------------------------------
+
+    def _snapshot_track(self, track_index):
+        """Capture parameter values for every device on the track, plus mixer.
+
+        Output is opaque-ish JSON suitable for restore_track. We do NOT capture
+        chain shape here — restore is parameter-only. If devices were added or
+        removed between snapshot and restore, restore will skip the diff and
+        only re-apply parameters by (device_index, param_index) where they
+        still exist.
+        """
+        track = self._track(track_index)
+        devices = []
+        for di, dev in enumerate(track.devices):
+            params = []
+            for pi, p in enumerate(dev.parameters):
+                params.append({"i": pi, "n": p.name, "v": p.value})
+            devices.append({
+                "index": di,
+                "name": dev.name,
+                "class_name": dev.class_name,
+                "params": params,
+            })
+        snap = {
+            "track_index": track_index,
+            "name": track.name,
+            "mixer": {
+                "volume": track.mixer_device.volume.value,
+                "panning": track.mixer_device.panning.value,
+                "mute": track.mute,
+            },
+            "devices": devices,
+        }
+        return snap
+
+    def _restore_track(self, track_index, snapshot):
+        track = self._track(track_index)
+        applied = 0
+        skipped = 0
+        # mixer
+        try:
+            mx = snapshot.get("mixer", {})
+            if "volume" in mx:
+                track.mixer_device.volume.value = float(mx["volume"])
+            if "panning" in mx:
+                track.mixer_device.panning.value = float(mx["panning"])
+            if "mute" in mx:
+                track.mute = bool(mx["mute"])
+        except Exception as e:
+            self.log_message("restore mixer skipped: " + str(e))
+        for d in snapshot.get("devices", []):
+            di = d.get("index")
+            if di is None or di < 0 or di >= len(track.devices):
+                skipped += len(d.get("params", []))
+                continue
+            dev = track.devices[di]
+            if dev.class_name != d.get("class_name"):
+                skipped += len(d.get("params", []))
+                continue
+            for ent in d.get("params", []):
+                pi = ent.get("i")
+                if pi is None or pi < 0 or pi >= len(dev.parameters):
+                    skipped += 1
+                    continue
+                try:
+                    p = dev.parameters[pi]
+                    v = float(ent.get("v"))
+                    if v < p.min:
+                        v = p.min
+                    elif v > p.max:
+                        v = p.max
+                    p.value = v
+                    applied += 1
+                except Exception:
+                    skipped += 1
+        return {"track_index": track_index, "applied": applied, "skipped": skipped}
+
+    # ---- browser ----------------------------------------------------
+
+    def _browser(self):
+        app = self.application()
+        if not app or not getattr(app, "browser", None):
+            raise RuntimeError("Live browser not available")
+        return app.browser
+
+    def _get_browser_tree(self, category):
+        b = self._browser()
+        # Shallow tree: top-level categories + their immediate children's names/uris.
+        roots = {
+            "instruments": getattr(b, "instruments", None),
+            "sounds": getattr(b, "sounds", None),
+            "drums": getattr(b, "drums", None),
+            "audio_effects": getattr(b, "audio_effects", None),
+            "midi_effects": getattr(b, "midi_effects", None),
+        }
+        categories = []
+        wanted = list(roots.keys()) if category == "all" else [category]
+        for cat_name in wanted:
+            node = roots.get(cat_name)
+            if node is None:
+                continue
+            children = []
+            try:
+                for c in node.children:
+                    children.append({
+                        "name": getattr(c, "name", "?"),
+                        "uri": getattr(c, "uri", None),
+                        "is_folder": bool(getattr(c, "children", None)),
+                        "is_loadable": bool(getattr(c, "is_loadable", False)),
+                    })
+            except Exception:
+                pass
+            categories.append({"name": cat_name, "children": children})
+        return {"categories": categories}
+
+    def _get_browser_items_at_path(self, path):
+        b = self._browser()
+        parts = [p for p in path.split("/") if p]
+        if not parts:
+            raise ValueError("empty path")
+        roots = {
+            "instruments": getattr(b, "instruments", None),
+            "sounds": getattr(b, "sounds", None),
+            "drums": getattr(b, "drums", None),
+            "audio_effects": getattr(b, "audio_effects", None),
+            "midi_effects": getattr(b, "midi_effects", None),
+        }
+        head = parts[0].lower()
+        cur = roots.get(head)
+        if cur is None:
+            raise ValueError("unknown root category: " + parts[0])
+        for p in parts[1:]:
+            children = list(getattr(cur, "children", []) or [])
+            nxt = None
+            for c in children:
+                if getattr(c, "name", "").lower() == p.lower():
+                    nxt = c
+                    break
+            if nxt is None:
+                raise ValueError("path part not found: " + p)
+            cur = nxt
+        items = []
+        for c in getattr(cur, "children", []) or []:
+            items.append({
+                "name": getattr(c, "name", "?"),
+                "uri": getattr(c, "uri", None),
+                "is_folder": bool(getattr(c, "children", None)),
+                "is_loadable": bool(getattr(c, "is_loadable", False)),
+            })
+        return {
+            "path": path,
+            "name": getattr(cur, "name", "?"),
+            "uri": getattr(cur, "uri", None),
+            "items": items,
+        }

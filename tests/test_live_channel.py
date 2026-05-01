@@ -237,6 +237,8 @@ def test_status_surface(channel, server):
         "enabled",
         "connected",
         "priority_depth",
+        "bulk_depth",
+        "bulk_paused",
         "last_error",
         "commands_sent",
         "commands_dropped",

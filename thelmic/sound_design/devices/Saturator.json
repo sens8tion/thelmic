@@ -1,0 +1,22 @@
+{
+  "class": "Saturator",
+  "summary": "Multi-mode waveshaper: analog clip, soft sine, medium curve, hard curve, digital clip, plus a custom waveshape stage with DC, depth, period, frequency.",
+  "params": [
+    {"name": "Drive",         "min": -36.0, "max": 36.0,  "default": 0.0,  "groups": ["drive"]},
+    {"name": "Type",          "min": 0,     "max": 5,     "default": 1,    "groups": ["mode"], "is_quantized": true, "values": "0=Analog Clip, 1=Soft Sine, 2=Medium Curve, 3=Hard Curve, 4=Digital Clip, 5=Custom Waveshape"},
+    {"name": "Color",         "min": 0,     "max": 1,     "default": 0,    "groups": ["mode"], "is_quantized": true, "values": "0=Off, 1=On (preEQ + postEQ)"},
+    {"name": "Base",          "min": 50.0,  "max": 25000.0,"default": 800.0,"groups": ["color"]},
+    {"name": "Frequency",     "min": 50.0,  "max": 25000.0,"default": 8000.0,"groups": ["color"]},
+    {"name": "Width",         "min": 0.0,   "max": 9.0,   "default": 4.5,  "groups": ["color"]},
+    {"name": "Depth",         "min": 0.0,   "max": 1.0,   "default": 0.0,  "groups": ["color"]},
+    {"name": "Output",        "min": -36.0, "max": 36.0,  "default": 0.0,  "groups": ["mix"]},
+    {"name": "Soft Clip",     "min": 0,     "max": 1,     "default": 0,    "groups": ["mode"], "is_quantized": true},
+    {"name": "Dry/Wet",       "min": 0.0,   "max": 1.0,   "default": 1.0,  "groups": ["mix"]}
+  ],
+  "groups": {
+    "drive": ["Drive"],
+    "mode":  ["Type", "Color", "Soft Clip"],
+    "color": ["Base", "Frequency", "Width", "Depth"],
+    "mix":   ["Output", "Dry/Wet"]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "class": "DrumBus",
+  "summary": "Drum-bus processor: low-end shaper, transient design, compression, distortion, simple EQ. Designed for the drum group output.",
+  "params": [
+    {"name": "Drive",          "min": 0.0,  "max": 60.0,   "default": 0.0,  "groups": ["drive"]},
+    {"name": "Drive Type",     "min": 0,    "max": 2,      "default": 0,    "groups": ["drive"], "is_quantized": true, "values": "0=Soft, 1=Medium, 2=Hard"},
+    {"name": "Crunch",         "min": 0.0,  "max": 100.0,  "default": 0.0,  "groups": ["drive"]},
+    {"name": "Damping",        "min": 0.0,  "max": 100.0,  "default": 0.0,  "groups": ["high"]},
+    {"name": "Boom Amount",    "min": 0.0,  "max": 100.0,  "default": 0.0,  "groups": ["low"]},
+    {"name": "Boom Freq",      "min": 30.0, "max": 150.0,  "default": 60.0, "groups": ["low"]},
+    {"name": "Boom Decay",     "min": 0.0,  "max": 100.0,  "default": 50.0, "groups": ["low"]},
+    {"name": "Transients",     "min": -100.0,"max": 100.0, "default": 0.0,  "groups": ["transient"]},
+    {"name": "Comp Amount",    "min": 0.0,  "max": 100.0,  "default": 0.0,  "groups": ["compression"]},
+    {"name": "Output Gain",    "min": -24.0,"max": 24.0,   "default": 0.0,  "groups": ["mix"]},
+    {"name": "Dry/Wet",        "min": 0.0,  "max": 100.0,  "default": 100.0,"groups": ["mix"]}
+  ],
+  "groups": {
+    "drive":       ["Drive", "Drive Type", "Crunch"],
+    "low":         ["Boom Amount", "Boom Freq", "Boom Decay"],
+    "high":        ["Damping"],
+    "transient":   ["Transients"],
+    "compression": ["Comp Amount"],
+    "mix":         ["Output Gain", "Dry/Wet"]
+  }
+}

@@ -38,9 +38,13 @@ LOG = logging.getLogger("thelmic.live_channel")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9878  # ThelmicLive Remote Script port
 PRIORITY_QUEUE_MAX = 32
+BULK_QUEUE_MAX = 256
 COMMAND_TIMEOUT_S = 10.0
 RECONNECT_BACKOFF_INITIAL = 0.25
 RECONNECT_BACKOFF_MAX = 8.0
+
+LANE_PRIORITY = "priority"
+LANE_BULK = "bulk"
 
 
 def is_enabled() -> bool:
@@ -61,6 +65,8 @@ class ChannelStatus:
     enabled: bool
     connected: bool
     priority_depth: int
+    bulk_depth: int
+    bulk_paused: bool
     last_error: Optional[str]
     commands_sent: int
     commands_dropped: int
@@ -71,6 +77,8 @@ class ChannelStatus:
             "enabled": self.enabled,
             "connected": self.connected,
             "priority_depth": self.priority_depth,
+            "bulk_depth": self.bulk_depth,
+            "bulk_paused": self.bulk_paused,
             "last_error": self.last_error,
             "commands_sent": self.commands_sent,
             "commands_dropped": self.commands_dropped,
@@ -100,7 +108,9 @@ class LiveChannel:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
-        self._queue: Optional[asyncio.Queue] = None
+        self._priority_q: Optional[asyncio.Queue] = None
+        self._bulk_q: Optional[asyncio.Queue] = None
+        self._wakeup: Optional[asyncio.Event] = None
         self._dispatcher_task: Optional[asyncio.Task] = None
         self._connected = False
         self._reader: Optional[asyncio.StreamReader] = None
@@ -110,6 +120,7 @@ class LiveChannel:
         self._sent = 0
         self._dropped = 0
         self._failed = 0
+        self._bulk_paused = False
         self._stopped = threading.Event()
 
     # ------------------------------------------------------------------
@@ -134,7 +145,9 @@ class LiveChannel:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self._loop = loop
-            self._queue = asyncio.Queue(maxsize=PRIORITY_QUEUE_MAX)
+            self._priority_q = asyncio.Queue(maxsize=PRIORITY_QUEUE_MAX)
+            self._bulk_q = asyncio.Queue(maxsize=BULK_QUEUE_MAX)
+            self._wakeup = asyncio.Event()
             self._dispatcher_task = loop.create_task(self._dispatcher())
             ready.set()
             try:
@@ -237,55 +250,153 @@ class LiveChannel:
             "delete_device", {"track_index": track_index, "device_index": device_index}
         )
 
-    def load_device(self, track_index: int, item_uri: str) -> Future:
+    def load_device(self, track_index: int, item_uri: str, lane: str = LANE_PRIORITY) -> Future:
         return self._enqueue(
             "load_browser_item",
             {"track_index": track_index, "item_uri": item_uri},
+            lane,
         )
+
+    def move_device(self, track_index: int, from_index: int, to_index: int) -> Future:
+        return self._enqueue(
+            "move_device",
+            {"track_index": track_index, "from_index": from_index, "to_index": to_index},
+        )
+
+    def set_track_volume(self, track_index: int, value: float) -> Future:
+        return self._enqueue("set_track_volume", {"track_index": track_index, "value": float(value)})
+
+    def set_track_pan(self, track_index: int, value: float) -> Future:
+        return self._enqueue("set_track_pan", {"track_index": track_index, "value": float(value)})
+
+    def set_track_mute(self, track_index: int, on: bool) -> Future:
+        return self._enqueue("set_track_mute", {"track_index": track_index, "value": bool(on)})
+
+    def set_track_solo(self, track_index: int, on: bool) -> Future:
+        return self._enqueue("set_track_solo", {"track_index": track_index, "value": bool(on)})
+
+    def set_send(self, track_index: int, send_index: int, value: float) -> Future:
+        return self._enqueue(
+            "set_send",
+            {"track_index": track_index, "send_index": send_index, "value": float(value)},
+        )
+
+    def get_return_tracks(self) -> Future:
+        return self._enqueue("get_return_tracks", {})
+
+    def get_master_track(self) -> Future:
+        return self._enqueue("get_master_track", {})
+
+    def define_rack_macro(
+        self,
+        track_index: int,
+        device_index: int,
+        macro_index: int,
+        name: str | None = None,
+        mappings: list | None = None,
+    ) -> Future:
+        return self._enqueue(
+            "define_rack_macro",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "macro_index": macro_index,
+                "name": name,
+                "mappings": mappings or [],
+            },
+        )
+
+    def get_rack_macros(self, track_index: int, device_index: int) -> Future:
+        return self._enqueue(
+            "get_rack_macros",
+            {"track_index": track_index, "device_index": device_index},
+        )
+
+    def set_macro_value(self, track_index: int, device_index: int, macro_index: int, value: float) -> Future:
+        return self._enqueue(
+            "set_macro_value",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "macro_index": macro_index,
+                "value": float(value),
+            },
+        )
+
+    def snapshot_track(self, track_index: int) -> Future:
+        return self._enqueue("snapshot_track", {"track_index": track_index})
+
+    def restore_track(self, track_index: int, snapshot: dict) -> Future:
+        return self._enqueue(
+            "restore_track",
+            {"track_index": track_index, "snapshot": snapshot},
+        )
+
+    def get_browser_tree(self, category: str = "all") -> Future:
+        return self._enqueue("get_browser_tree", {"category": category})
+
+    def get_browser_items_at_path(self, path: str) -> Future:
+        return self._enqueue("get_browser_items_at_path", {"path": path})
+
+    def submit_bulk(self, cmd_type: str, params: dict) -> Future:
+        """Escape hatch: enqueue any command on the bulk lane.
+
+        Used by sound_design.apply_patch when batching many param writes.
+        """
+        return self._enqueue(cmd_type, params, lane=LANE_BULK)
 
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
     def status(self) -> ChannelStatus:
-        depth = self._queue.qsize() if self._queue is not None else 0
+        pd = self._priority_q.qsize() if self._priority_q is not None else 0
+        bd = self._bulk_q.qsize() if self._bulk_q is not None else 0
         return ChannelStatus(
             enabled=self._enabled,
             connected=self._connected,
-            priority_depth=depth,
+            priority_depth=pd,
+            bulk_depth=bd,
+            bulk_paused=self._bulk_paused,
             last_error=self._last_error,
             commands_sent=self._sent,
             commands_dropped=self._dropped,
             commands_failed=self._failed,
         )
 
+    def pause_bulk(self) -> None:
+        self._bulk_paused = True
+
+    def resume_bulk(self) -> None:
+        self._bulk_paused = False
+        if self._loop is not None and self._wakeup is not None:
+            self._loop.call_soon_threadsafe(self._wakeup.set)
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
-    def _enqueue(self, cmd_type: str, params: dict) -> Future:
+    def _enqueue(self, cmd_type: str, params: dict, lane: str = LANE_PRIORITY) -> Future:
         fut: Future = Future()
         if not self._enabled or self._loop is None:
             fut.set_exception(RuntimeError("LiveChannel disabled or not started"))
             return fut
 
         def _put():
-            assert self._queue is not None
+            q = self._priority_q if lane == LANE_PRIORITY else self._bulk_q
+            assert q is not None and self._wakeup is not None
             req_id = self._next_id
             self._next_id += 1
             payload = {"type": cmd_type, "params": params, "request_id": req_id}
             pending = _Pending(req_id, payload, fut)
             try:
-                self._queue.put_nowait(pending)
+                q.put_nowait(pending)
+                self._wakeup.set()
             except asyncio.QueueFull:
                 self._dropped += 1
-                LOG.warning(
-                    "LiveChannel queue full (max=%d), dropping %s",
-                    PRIORITY_QUEUE_MAX,
-                    cmd_type,
-                )
+                LOG.warning("LiveChannel %s queue full, dropping %s", lane, cmd_type)
                 if not fut.done():
-                    fut.set_exception(RuntimeError("LiveChannel queue full"))
+                    fut.set_exception(RuntimeError("LiveChannel " + lane + " queue full"))
 
         try:
             self._loop.call_soon_threadsafe(_put)
@@ -317,12 +428,28 @@ class LiveChannel:
                 backoff = min(backoff * 2, RECONNECT_BACKOFF_MAX)
         return False
 
-    async def _dispatcher(self):
-        assert self._queue is not None
+    async def _next_pending(self) -> Optional[_Pending]:
+        """Priority-first pull. Bulk is starved while priority is non-empty
+        or while bulk is paused. Sleeps on the wakeup event when both lanes
+        are empty (or only bulk has work and bulk is paused)."""
+        assert self._priority_q is not None and self._bulk_q is not None
+        assert self._wakeup is not None
         while not self._stopped.is_set():
+            if not self._priority_q.empty():
+                return self._priority_q.get_nowait()
+            if not self._bulk_paused and not self._bulk_q.empty():
+                return self._bulk_q.get_nowait()
+            self._wakeup.clear()
             try:
-                pending: _Pending = await self._queue.get()
+                await self._wakeup.wait()
             except asyncio.CancelledError:
+                return None
+        return None
+
+    async def _dispatcher(self):
+        while not self._stopped.is_set():
+            pending = await self._next_pending()
+            if pending is None:
                 return
             ok = await self._ensure_connected()
             if not ok:
