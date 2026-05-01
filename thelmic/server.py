@@ -30,7 +30,7 @@ from thelmic.note_generation_chain import BANK_STEPS, generate_bank, structure_f
 from thelmic.stream_engine import VERSION as STREAM_ENGINE_VERSION
 import thelmic.pression_engine as _pression_engine
 from thelmic.transformer_engine import VERSION as TRANSFORMER_ENGINE_VERSION
-from thelmic.transformer_engine import execute_transformers
+from thelmic.transformer_engine import execute_transformers, MutationContext
 from thelmic.heat_model import INERTIA_K as _HEAT_INERTIA_K
 from thelmic.heat_model import response_curve as heat_response_curve
 from thelmic.heat_model import mappings as compute_heat_mappings
@@ -675,7 +675,22 @@ def _state(include_bank: bool = True) -> dict:
     motifs = motifs_for_events(bank.all_events()) + empty_future_motifs()
     validate_motif_contract(motifs)
     subphrases = _compute_subphrases(bank_index, bank_index * BANK_STEPS)
-    _bank_modified, tx_results = execute_transformers(bank, motifs, subphrases)
+    # Build mutation context so transformers can generate new events via voice pipeline
+    from thelmic.phrase_engine import context_for_phrase, pending_archetype_for
+    from thelmic.note_generation_chain import structure_frames as _sf
+    _frames = _sf(bank_index)
+    _phrase_start = next(f for f in _frames if f.is_phrase_start)
+    _dims_snap = _compute_dimensions(_trajectory, _heat_applied)
+    _sr_snap   = _trajectory.active_feature().signature_rhythm
+    _ctx_snap  = context_for_phrase(
+        _phrase_start, _dims_snap, _sr_snap,
+        _active_archetype, False,
+    )
+    _mut_ctx = MutationContext(
+        context=_ctx_snap, dims=_dims_snap,
+        sr=_sr_snap, bank_index=bank_index,
+    )
+    _bank_modified, tx_results = execute_transformers(bank, motifs, subphrases, _mut_ctx)
     state = {
         "type": "state",
         "thelmic_version": THELMIC_VERSION,

@@ -35,13 +35,26 @@ v1.0 status
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Optional, Sequence
 
 from thelmic.bank_generator import Bank
 from thelmic.motif_engine import Motif, classify_motif_change
 
 
-VERSION = "v1.1"   # add_subdivision still deferred; velocity+simplify now live
+VERSION = "v1.2"   # add_subdivision live via MutationContext
+
+
+@dataclass(frozen=True)
+class MutationContext:
+    """Everything a transformer action needs to generate new events.
+
+    Passed through execute_transformers so add_subdivision can call back
+    into the voice pipeline without duplicating generation logic.
+    """
+    context:     object   # PhraseContext — avoids circular import at module level
+    dims:        object   # Dimensions
+    sr:          object   # SignatureRhythm
+    bank_index:  int
 
 # ---------------------------------------------------------------------------
 # Static execution tables (mirror musical_rules.md; no markdown parsed at runtime)
@@ -156,6 +169,7 @@ def _handle_action(
     subphrase_start_step: int,
     subphrase_end_step:   int,
     motifs_by_instrument: dict[str, Motif],
+    mut_ctx:              Optional[MutationContext] = None,
 ) -> _ActionResult:
 
     motif = motifs_by_instrument.get(target)
@@ -192,22 +206,14 @@ def _handle_action(
 
     # ── add_subdivision ─────────────────────────────────────────────────────
     if action == "add_subdivision":
-        # Deferred — Phase 8 (Transformer evolution / Mutation system).
-        #
-        # To add events we need to invoke voice intent streams (kick, snare, hat)
-        # at specific steps, which requires full phrase context and arc state.
-        # Implementing here would duplicate the generation pipeline.
-        #
-        # Correct implementation path:
-        #   1. generate_bank produces a bank with current voice output
-        #   2. transformer_engine proposes a NEW bank step using the voice stream
-        #   3. classify_motif_change validates the delta (≤1 event = LEGAL)
-        #   4. apply_fn inserts the new event
-        #
-        # Until Phase 8 is scheduled, anticipation_build and hat_drive
-        # gracefully no-op here (pre-drop hat thinning still handled by
-        # anticipation_engine.py which operates at generation time).
-        return None, None, "add_requires_voice_context_phase8", None
+        if mut_ctx is None:
+            return None, None, "add_requires_mutation_context", None
+        if motif is None:
+            return None, None, "no_motif_for_target", None
+        return _add_subdivision(
+            bank, target, subphrase_start_step, subphrase_end_step,
+            motif, mut_ctx,
+        )
 
     # ── increase_velocity ───────────────────────────────────────────────────
     if action == "increase_velocity":
@@ -286,6 +292,111 @@ def _handle_action(
 
 
 # ---------------------------------------------------------------------------
+# add_subdivision implementation
+# ---------------------------------------------------------------------------
+
+def _add_subdivision(
+    bank:                 Bank,
+    target:               str,
+    subphrase_start_step: int,
+    subphrase_end_step:   int,
+    motif:                Motif,
+    mut_ctx:              MutationContext,
+) -> _ActionResult:
+    """Add one subdivision event via the voice pipeline.
+
+    Uses structure_frames + intents_for_frame to generate a syntactically
+    correct event, then validates with classify_motif_change (1 add = LEGAL).
+    """
+    from thelmic.note_generation_chain import (
+        structure_frames, intents_for_frame, _resolved_to_midi_event,
+    )
+    from thelmic.stream_engine import ResolveStream
+
+    # Steps in window that already have this layer
+    existing_steps = {
+        e.musical_step
+        for phrase in bank.phrases
+        for e in phrase.events
+        if e.layer == target
+        and subphrase_start_step <= e.musical_step < subphrase_end_step
+    }
+
+    # Try voice pipeline first (works when archetype has empty steps)
+    all_frames    = structure_frames(mut_ctx.bank_index)
+    window_frames = [
+        f for f in all_frames
+        if subphrase_start_step <= f.musical_step < subphrase_end_step
+        and f.musical_step not in existing_steps
+        and not f.is_drop and not f.is_drop_prep
+    ]
+    if not window_frames:
+        return None, None, "no_candidate_steps", None
+
+    off_beat   = [f for f in window_frames if f.step_in_bar % 4 != 0]
+    candidates = off_beat if off_beat else window_frames
+    target_frame = candidates[len(candidates) // 2]
+
+    intents = intents_for_frame(
+        target_frame, mut_ctx.context, mut_ctx.dims, mut_ctx.sr,
+    )
+    layer_intents = [i for i in intents if i.instrument == target]
+
+    resolver = ResolveStream()
+
+    if layer_intents:
+        resolved = resolver.resolve(target_frame, tuple(layer_intents[:1]))
+        if resolved.events:
+            new_event = _resolved_to_midi_event(resolved.events[0], target_frame)
+            new_ref   = new_event.resolved_event_id or new_event.intent_id
+            proposed  = list(motif.event_references) + [new_ref]
+
+            def apply_add():
+                phrase_idx = (new_event.bar_index - 1) // 4
+                if 0 <= phrase_idx < len(bank.phrases):
+                    bank.phrases[phrase_idx].events.append(new_event)
+                    bank.phrases[phrase_idx].events.sort(key=lambda e: e.musical_step)
+
+            return motif, proposed, "add_subdivision", apply_add
+
+    # Voice refused (step not in archetype pattern) — create ghost hit directly.
+    # anticipation_build purpose: add 16th subdivisions between existing 8th hits,
+    # building toward denser hat as drop approaches. Ghost-level velocity (< 40).
+    from thelmic.voices import make_intent as _make_intent
+    from thelmic.note_generation_chain import _resolved_to_midi_event as _r2m
+    import dataclasses as _dc
+
+    # Borrow note from an existing event for this layer in the bank
+    ref_events = _window_events(bank, target, subphrase_start_step, subphrase_end_step)
+    if not ref_events:
+        return None, None, "no_reference_events", None
+
+    ref = ref_events[0]
+    ghost_vel = min(35, max(12, int(ref.velocity * 0.30)))   # ghost: 30% of anchor
+
+    ghost_intent = _make_intent(
+        target_frame, target, "build_subdivision",
+        ghost_vel, ref.duration * 0.5,
+        "anticipation_build", ref.note, 2,
+    )
+    resolved = resolver.resolve(target_frame, (ghost_intent,))
+    if not resolved.events:
+        return None, None, "resolver_rejected_ghost", None
+
+    new_event = _r2m(resolved.events[0], target_frame)
+    new_ref   = new_event.resolved_event_id or new_event.intent_id
+    proposed  = list(motif.event_references) + [new_ref]
+
+    def apply_ghost():
+        phrase_idx = (new_event.bar_index - 1) // 4
+        if 0 <= phrase_idx < len(bank.phrases):
+            bank.phrases[phrase_idx].events.append(new_event)
+            bank.phrases[phrase_idx].events.sort(key=lambda e: e.musical_step)
+
+    return motif, proposed, "add_subdivision_ghost", apply_ghost
+
+
+# ---------------------------------------------------------------------------
 # Public execution function
 # ---------------------------------------------------------------------------
 
@@ -293,6 +404,7 @@ def execute_transformers(
     bank:       Bank,
     motifs:     Sequence[Motif],
     subphrases: list[dict],
+    mut_ctx:    Optional[MutationContext] = None,
 ) -> tuple[Bank, list[TransformerExecutionResult]]:
     """Execute all transformers attached to sub-phrases.
 
@@ -325,6 +437,7 @@ def execute_transformers(
                         action, bank, target,
                         sp_start, sp_end + 1,
                         motifs_by_instrument,
+                        mut_ctx,
                     )
 
                     if motif_before is None or proposed_refs is None:
