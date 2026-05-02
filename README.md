@@ -269,6 +269,85 @@ The opening setup — sample selection, beat structures by style, style/key/ener
 
 ---
 
+## For the AI agent starting a session
+
+You're an LLM (Claude or otherwise) picking this repo up cold. Read this before doing anything in Live.
+
+### State you need before the first RPC
+
+1. **Live must be running** with the saved session loaded. A fresh project ships with 4 default tracks — `health_check` will fail-fast on this. Do **not** load samples or build clips into a fresh project; ask the human to open the saved `.als` first.
+2. **`LIVE_CHANNEL_ENABLED=1`** must be in the environment. The bridge is off by default — `LiveChannel.start()` silently no-ops without it. Set on the shell, not in code.
+3. **`PYTHONIOENCODING=utf-8`** on Windows, or non-ASCII clip names will crash stdout writes mid-session.
+4. **Remote Script changes need a full Live restart**, not just toggling the Control Surface dropdown. If you added an RPC, tell the human to fully restart Live before you call it.
+
+Boilerplate to put at the top of any script:
+
+```python
+import os, sys
+os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from thelmic.live_channel import LiveChannel
+from thelmic.agent_helpers import health_check, find_track, TRACK_LEVELS
+
+ch = LiveChannel(lower_priority=False); ch.start()
+ok, detail = health_check(ch, expected_track_names=["TECTONIC", "HARDKIT", ...])
+if not ok:
+    print(f"halted: {detail}")
+    sys.exit(0)
+```
+
+### Read these files before composing
+
+- **`thelmic/agent_helpers.py`** — start here. The parameter range registry alone will save you from sending raw dB to normalized 0..1 params and silencing channels. Every gotcha is captured as a named constant.
+- **`memory/MEMORY.md`** and the linked memory files — feedback the human has given on previous sessions; treat as system-prompt addenda.
+- **`scripts/arrangement_record.py`** — the canonical end-to-end pattern (health check → compositional adjustments → arm record → fire scenes → softened outro → decay tails). Don't reinvent this flow.
+
+### Default loop posture
+
+The loop's working surface is **session view**, not arrangement view. Compose into scene slots. Use `arrangement_record.py` only as the deliverable-artifact step — the personae A/B over arrangement takes, but mutations land in session clips/devices.
+
+The opening setup is non-negotiable substrate. Establish it explicitly with the human at session start:
+- **sample selection** — Splice MCP `prompt_to_stack` + `download_asset` if needed
+- **beat structures** — pick the genre's canonical pattern (amen / gabber / breakcore / four-on-floor / footwork) before laying anything down
+- **style / key / energy targets** — get a sentence-level intent ("165bpm jungle in G minor, energy ramps from intro to breakcore at scene 9") before you write the first clip
+
+### How to put the humans in the loop properly
+
+The human is a co-pilot, not a code reviewer. Bring them in at the right altitude:
+
+| Stage | What to ask | What NOT to ask |
+|-------|------------|-----------------|
+| Session-view setup | "165bpm jungle, G minor, energy arc?" — single-sentence intent | "should the kick be on the downbeat?" — that's your job |
+| Sample selection | "want me to pull a Splice stack for `<vibe>`, or hand-pick from user library?" | "which of these 12 kicks?" — pick one and move |
+| First take | run a full pass, then surface the take for A/B | nothing — let them hear before commenting |
+| Producer A/B | "likes/dislikes on song-shape, hooks, energy?" | mix questions |
+| Engineer A/B | "likes/dislikes on gain staging, masking, transients, glue?" | song-shape questions |
+| Mid-pass blockers | only when you genuinely cannot proceed (Live not running, expected track missing, RPC errors) | confirmation-seeking on routine choices |
+
+Two failure modes to avoid:
+- **Decision-fatigue spam** — asking a series of micro-confirmations ("kick velocity 110 ok? snare on 2/4 ok?"). Make the call, build the take, let them critique the take. Decisions belong to the human; *moves* belong to you.
+- **Blind autonomy** — building a 7-minute track without check-in. The audit point is each scene's first listenable form, not the final master.
+
+When the human says "I'll come back" or "go ahead", you have authority to make creative moves. When they say "make me a [genre] track" without further constraint, you still need ONE round-trip on style/key/energy before composing — don't guess.
+
+### Things you will be tempted to do that go wrong
+
+- **Stacking gain into a saturator-then-compressor chain** — every device's *input* must stay below clip, not just the final sum
+- **Sending raw dB to a 0..1 param** — Saturator Drive=14 silently clamps to 1.0 (fully maxed). Always check `param.min`/`param.max` first
+- **Hard-cutting a harsh voice into silence** — use `crash_decay_tail` or ms-stagger via `soft_outro_offsets`
+- **Tapering the impact note** — the drop hit is sacred, never round it
+- **Building hats on .25/.75 16ths only** — sounds behind the beat. Lock to the kick grid (every 16th, accent kick-aligned positions)
+- **Loading samples into individual drum-rack pads** — `selected_drum_pad + load_item` only populates the first pad. Use `bulk_load_drum_pads` or per-pad Simpler tracks
+- **Putting a Limiter on the master** — clamps the bass. Use a gentle Glue Comp instead
+
+### When you finish a session
+
+- Surface the take for A/B (run `scripts/arrangement_record.py` for a deliverable, or note the session-view scene set)
+- If you learned something the next agent shouldn't have to re-discover, add it to `thelmic/agent_helpers.py` (as a constant, helper, or comment) — not to a memory file unless it's user-feedback shaped
+- Don't write planning/decision documents — the helpers + memory + commit history carry the context
+
+---
+
 ## Troubleshoot
 
 - **`ConnectionRefusedError`**: Live isn't running, ThelmicLive isn't selected as a Control Surface, or the script crashed. Check `Help → Open Log Folder` → `Log.txt` for Python tracebacks.
