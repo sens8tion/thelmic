@@ -42,6 +42,17 @@ ARRANGEMENT = [
 # Anticipation pre-drop slots (last bar gets fills)
 ANTICIPATION_SLOTS = [3, 6, 13]
 
+# Sub-bar pre-fire overlaps: when a non-drop section enters with a voice
+# that pops on hard, pre-fire that voice's clip a fraction of a beat
+# BEFORE the scene boundary so it overlaps with the previous section.
+# Map: scene_index → list of (track_name, lead_beats)
+EARLY_FIRE_OVERLAPS = {
+    1: [("ORGAN", 0.5)],   # half-beat overlap into STIRRING
+    2: [("ORGAN", 0.5)],   # half-beat overlap into BUILD
+    3: [("ORGAN", 0.5)],   # half-beat overlap into RISER
+    6: [("ORGAN", 0.5)],   # half-beat overlap into REBUILD
+}
+
 
 def find_track(ch, sess_count, name_match):
     """Find first track whose name contains name_match (case-insens). Returns idx or None."""
@@ -323,14 +334,43 @@ def main(num_takes=1):
             ch.start_playback().result(timeout=5)
 
             elapsed_bars = 0
+            beat_seconds = bar_seconds / 4.0
+
+            def hold_then_prefire(hold_bars: int, next_slot: int | None):
+                """Sleep through a scene's hold; if the NEXT scene has
+                pre-fire overlaps, pre-fire them in the last fraction of
+                this hold so they overlap into the next section."""
+                next_overlaps = (EARLY_FIRE_OVERLAPS.get(next_slot, [])
+                                  if next_slot is not None else [])
+                if not next_overlaps:
+                    time.sleep(hold_bars * bar_seconds)
+                    return
+                max_lead = max(lb for _, lb in next_overlaps)
+                pre_sleep = hold_bars * bar_seconds - max_lead * beat_seconds
+                if pre_sleep > 0:
+                    time.sleep(pre_sleep)
+                ch.set_launch_quantization(0).result(timeout=3)   # no quant
+                for tname, lead in next_overlaps:
+                    tidx = find_track(ch, n, tname)
+                    if tidx is not None:
+                        try:
+                            ch.fire_clip(tidx, next_slot).result(timeout=3)
+                            print(f"    pre-fired {tname} S{next_slot} ({lead:.2f}b early)")
+                        except Exception as e:
+                            print(f"    pre-fire {tname} S{next_slot} fail: {e}")
+                time.sleep(max_lead * beat_seconds)
+                ch.set_launch_quantization(1).result(timeout=3)   # back to 1 bar
+
             for i, (slot, bars) in enumerate(ARRANGEMENT):
+                next_slot = ARRANGEMENT[i+1][0] if i+1 < len(ARRANGEMENT) else None
                 if i == 0:
-                    time.sleep(bars * bar_seconds)
+                    hold_then_prefire(bars, next_slot)
                     elapsed_bars += bars
                     continue
                 ch.fire_scene(slot).result(timeout=5)
-                print(f"  bar {start_bar + elapsed_bars:>3d}: fired slot {slot} (hold {bars})")
-                time.sleep(bars * bar_seconds)
+                tag = " [overlap+]" if next_slot in EARLY_FIRE_OVERLAPS else ""
+                print(f"  bar {start_bar + elapsed_bars:>3d}: fired slot {slot} (hold {bars}){tag}")
+                hold_then_prefire(bars, next_slot)
                 elapsed_bars += bars
 
             time.sleep(0.5)
