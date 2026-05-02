@@ -340,6 +340,47 @@ When the human says "I'll come back" or "go ahead", you have authority to make c
 - **Loading samples into individual drum-rack pads** — `selected_drum_pad + load_item` only populates the first pad. Use `bulk_load_drum_pads` or per-pad Simpler tracks
 - **Putting a Limiter on the master** — clamps the bass. Use a gentle Glue Comp instead
 
+### Session logging — capture for the training corpus
+
+Every session must be logged. The corpus (timestamped chats + audio dev
+states + .als checkpoints) is what the next-generation model trains on
+and what the process-engineering pass uses to extract patterns. Don't
+work without one running.
+
+```python
+from thelmic.session_log import SessionLog
+log = SessionLog.start(name="jungle-take-3")
+
+log.chat("user", "165bpm jungle in G minor, energy ramps to breakcore at slot 9")
+log.chat("agent", "starting amen breakbeat into HARDKIT...")
+
+# After a build phase
+log.snapshot(ch, label="after-drums")           # full state JSON
+log.action("apply_anticipation", {"slot": 3})
+
+# When the human listens & responds
+log.feedback(persona="producer",
+              likes=["breakcore-into-gabber pivot at scene 9"],
+              dislikes=["outro fade — too clean, want a hard tail"])
+log.feedback(persona="audio_engineer",
+              likes=["mid-bass thump on master"],
+              dislikes=["snare poking 5kHz on slot 4"])
+
+# Manual .als checkpoints (after the user does File>Save)
+log.checkpoint_als("C:/.../jungle.als", label="post-engineer-pass")
+
+log.note("decision: keep slot 9 pivot, retake outro with crash tail")
+log.close(summary="2 takes, engineer-approved, producer wants outro retake")
+```
+
+Layout written to `sessions/<timestamp>_<name>/`:
+- `log.jsonl` — append-only timestamped event stream (chat / action / snapshot / feedback / note / als_checkpoint / session_start / session_end)
+- `snapshots/*.json` — full state walk (tempo, all tracks → devices → params with ranges, clip note counts, master devices)
+- `als/*.als` — copied .als files for replayable audio outcome
+
+For full RPC tracing wrap your channel in `LoggingChannel(ch, log)` —
+every call auto-logs with args. Use sparingly (I/O cost).
+
 ### When you finish a session
 
 - Surface the take for A/B (run `scripts/arrangement_record.py` for a deliverable, or note the session-view scene set)
