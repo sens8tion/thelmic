@@ -201,9 +201,15 @@ This release closes the first loop — **a single LLM hand-builds a coherent, mi
 
 - **`scripts/arrangement_record.py`** — health-check + thinned anticipation builds + pull-back velocity ramps + breathing + staggered outro + HARDKIT decay tail. Runs the session straight onto the arrangement timeline; supports `python scripts/arrangement_record.py N` for N takes side-by-side.
 
-### The next loop: studio personnel in the loop
+### The next loop: agent-mediated studio personnel
 
-v0.next ends in session view. v0.next+1 starts there — and adds named personae who iterate with the agent on the same session. Each persona is an A/B critic over the latest take whose feedback is fed back into the next pass:
+v0.next ends in session view. v0.next+1 starts there — and adds named
+personae who iterate with the **agent-as-mediator** on the same session.
+The agent stands at the centre, translating each persona's intent into
+moves and capturing the entire transcript + state to the corpus. Every
+exchange flows through `MediatedSession`; every move auto-logs; every
+take pairs with snapshots and .als checkpoints. The corpus self-trains
+the next generation.
 
 ```
                      ┌─────────────────────────────────────┐
@@ -213,19 +219,23 @@ v0.next ends in session view. v0.next+1 starts there — and adds named personae
                      │  • style / key / energy targets     │
                      └──────────────────┬──────────────────┘
                                         │
-                     ┌──────────────────▼──────────────────┐
-                     │  Compositional pass (Claude)        │
-                     │  hand-builds clips into scenes,     │
-                     │  arms session-record, prints take   │
-                     └──────────────────┬──────────────────┘
+        ┌───────────────────────────────▼───────────────────────────────┐
+        │                  AGENT (mediator + logger)                    │
+        │  • compositional moves into Live (LoggingChannel: every       │
+        │    RPC auto-logged with args + result)                        │
+        │  • verbatim transcription of all persona dialogue             │
+        │  • state snapshots at decision points                         │
+        │  • .als checkpoints whenever a human File>Saves               │
+        │  • routes feedback into next pass directives                  │
+        └───────────────────────────────┬───────────────────────────────┘
                                         │
         ┌───────────────────────────────┼───────────────────────────────┐
         │                               │                               │
         ▼                               ▼                               ▼
 ┌───────────────┐               ┌───────────────┐               ┌───────────────┐
 │  PRODUCER     │               │  AUDIO ENG    │               │  (future)     │
-│  A/B over     │               │  A/B over     │               │  arranger,    │
-│  takes        │               │  takes        │               │  performer,   │
+│  A/B over     │  ◄── agent ──►│  A/B over     │  ◄── agent ──►│  arranger,    │
+│  takes        │   mediates    │  takes        │   mediates    │  performer,   │
 │               │               │               │               │  mastering    │
 │ likes:  …     │               │ likes:  …     │               │               │
 │ dislikes: …   │               │ dislikes: …   │               │               │
@@ -233,12 +243,15 @@ v0.next ends in session view. v0.next+1 starts there — and adds named personae
         │                               │                               │
         └───────────────────┬───────────┴───────────────────────────────┘
                             ▼
-                ┌─────────────────────────┐
-                │  Feedback aggregation   │
-                │  → next pass directives │
-                └────────────┬────────────┘
-                             │
-                             ▼
+            ┌────────────────────────────────────┐
+            │  log.jsonl + snapshots + .als      │
+            │      ▼                             │
+            │  training corpus (self-trains      │
+            │  next gen + process-engineering    │
+            │  pass extracts patterns)           │
+            └────────────────────────────────────┘
+                            │
+                            ▼
                   (loop: next compositional pass)
 ```
 
@@ -260,18 +273,182 @@ The opening setup — sample selection, beat structures by style, style/key/ener
 - The take-tiling pattern (`take_start_bar`) — multi-personae A/B works directly off it
 - The thinned-build / sacred-impact / staggered-outro patterns — they survive every iteration
 
-### What v0.next+1 adds
+---
 
-- Persona prompt packs (`memory/persona_producer.md`, `memory/persona_audio_engineer.md`)
-- A/B feedback collector — converts free-form likes/dislikes into structured directives (slot, voice, parameter, polarity)
-- Directive aggregator — resolves conflicts across personae, weights by domain (engineer wins on gain, producer wins on song-shape)
-- Iteration scaffolding — each pass reads directives, mutates the session, prints a fresh take, repeats
+## Phase plan
+
+### v0.next (this release) — agent + helpers + capture
+
+Ships:
+- 97 RPCs, async LOM bridge, hand-built Sound Design layer
+- `agent_helpers.py` — every studio-engineer principle that mattered in
+  the previous sessions surfaced as code (parameter range registry,
+  gain staging, impact-is-sacred patterns, decay tails, breathing,
+  staggered outros, multi-take tiling, gotcha flags)
+- `session_log.py` + `mediated_session.py` — the mediated capture
+  substrate: `open_session()` is the canonical entry point; every chat
+  turn, every RPC, every persona A/B, every state snapshot, every
+  .als File>Save flows through the agent into `sessions/<id>/`
+- `arrangement_record.py` — the deliverable-artifact step
+- README onboarding section for any agent picking this up cold
+
+The first loop is closed: a single LLM, hand-building a coherent mixed
+track end-to-end through the LOM bridge, with the entire process
+captured for replay.
+
+### v0.next+1 — multi-persona pipeline (agent-mediated)
+
+The intent of the next release, in one sentence:
+
+> **The agent mediates a closed iterative loop in which named human
+> personae (producer, audio engineer, future arranger / performer /
+> mastering) provide A/B feedback on takes, the agent translates that
+> feedback into the next compositional pass, and every exchange —
+> dialogue, moves, audio dev state, .als checkpoints — is captured to
+> a self-training corpus.**
+
+Why each piece matters:
+
+- **Agent as mediator, not assistant.** The agent stands at the centre
+  of every persona/Live exchange. Personae speak in natural language;
+  the agent translates intent into RPCs and audio outcomes. The agent
+  is the only thing that touches both sides, so the agent is also the
+  only thing that can capture the full transcript faithfully.
+
+- **Personae over a single voice.** Producer judges song-shape,
+  hooks, energy arc; engineer judges gain staging, masking,
+  transients, glue; future arranger judges section flow, performer
+  judges feel and groove, mastering judges loudness/translation. Each
+  persona's domain is bounded so directives can be aggregated cleanly
+  (engineer wins on gain, producer wins on song-shape, etc).
+
+- **A/B over takes, not specs.** Personae react to listenable output,
+  not text descriptions. Every pass produces a take; every persona
+  responds with `likes=[…], dislikes=[…]`; the agent converts these
+  into structured directives (slot, voice, parameter, polarity).
+
+- **Session view as working surface.** The arrangement print is a
+  deliverable artifact; mutations land in session-view scenes/clips/
+  devices. Sample selection, beat structures, style/key/energy are
+  the substrate every persona judges against — and they're directly
+  addressable in session view.
+
+- **Capture for self-training.** Chat → moves → state diff → audio
+  outcome → persona feedback, all temporally bound and replayable.
+  This corpus is what the next-generation model trains on; without
+  it the loop is just a craft tool. With it, the loop teaches itself.
+
+Concrete deliverables:
+
+1. **Persona prompt packs** in `memory/personae/`
+   - `producer.md` — domain, evaluation criteria, vocabulary, A/B template
+   - `audio_engineer.md` — same, plus the gain/mask/transient/glue ruleset
+   - extensibility for arranger / performer / mastering
+2. **Feedback collector** — converts free-form `likes`/`dislikes` into
+   structured directives `{slot, voice, parameter, polarity, source_persona}`
+3. **Directive aggregator** — domain-weighted conflict resolution across
+   personae; emits a ranked directive list for the next pass
+4. **Iteration scaffolding** — each pass reads directives, mutates the
+   session, prints a take, surfaces it for A/B, captures responses,
+   loops
+5. **Corpus tooling** — replay a session from `log.jsonl`; diff state
+   snapshots to extract "the move that produced the change"; export
+   training samples (prompt, action sequence, audio outcome, feedback)
+
+### v0.next+2 and beyond — process engineering
+
+Once the corpus has enough sessions:
+
+- Pattern extraction over `log.jsonl` — which moves consistently get
+  endorsed, which get retracted; which directive shapes route to which
+  RPC sequences; which initial conditions predict iteration count
+- Auto-distillation of successful patterns into new
+  `agent_helpers.py` recipes (closed loop on the helpers themselves)
+- Persona refinement — fine-tune on per-persona feedback so the agent
+  can predict objections before the human voices them
+- Multi-agent: separate agents wearing the personae; the mediator
+  agent stays neutral and orchestrates
 
 ---
 
 ## For the AI agent starting a session
 
 You're an LLM (Claude or otherwise) picking this repo up cold. Read this before doing anything in Live.
+
+### Read the phase plan first
+
+Before any move, read the **Phase plan** section below. v0.next ships
+the helpers, the capture substrate, and the first closed loop (single
+LLM → coherent mixed track). v0.next+1 — what we're building toward —
+is the agent-mediated multi-persona pipeline: producer + audio
+engineer (and future arranger / performer / mastering) iterating over
+takes, every exchange flowing through you and into the training
+corpus. Your work in any session contributes to that corpus, so
+treat capture as load-bearing, not housekeeping.
+
+### You are the mediator
+
+Every session in this stack runs through you. Humans (producer,
+audio engineer, future personae) speak; you translate intent into
+RPCs against Live; Live's state changes; humans react to the
+audible result; you log all of it. **The agent isn't a tool inside
+the loop — the agent is the loop's orchestrator.**
+
+Three things flow through you and must be captured:
+
+1. **Dialogue** — what the humans said, what you said back, verbatim, in order
+2. **Moves** — every RPC fired, with args (the LoggingChannel does this for you)
+3. **State** — snapshots of the audio dev state at decision points, plus .als checkpoints when the human saves
+
+The capture is not optional. The corpus this builds is what
+the next-generation model trains on, and what the
+process-engineering pass uses to extract patterns. **A session
+without a log might as well not have happened.**
+
+### Open every session through `mediated_session.open_session`
+
+```python
+from thelmic.mediated_session import open_session
+
+with open_session(name="jungle-iteration-3",
+                   expected_tracks=["TECTONIC", "HARDKIT", "SUBBONK"]) as sess:
+    sess.chat("user", "165bpm jungle in G minor, energy ramps to breakcore at slot 9")
+    sess.chat("agent", "starting amen breakbeat into HARDKIT...")
+
+    # Use sess.ch (LoggingChannel) for all RPCs — auto-logs every call
+    sess.ch.create_clip(7, 0, 64.0).result()
+    # ...build phase...
+
+    sess.snapshot("after-drums")     # state JSON + log entry
+
+    # When the producer/engineer responds, log their words AS they speak
+    sess.feedback("producer",
+                  likes=["breakcore-into-gabber pivot at scene 9"],
+                  dislikes=["outro fade — too clean, want a hard tail"])
+    sess.feedback("audio_engineer",
+                  likes=["mid-bass thump on master"],
+                  dislikes=["snare poking 5kHz on slot 4"])
+
+    sess.als("C:/.../jungle.als", label="post-engineer-pass")  # after File>Save
+    sess.note("decision: keep slot 9 pivot, retake outro with crash tail")
+# `with` block auto-closes log + stops channel; summary written on exit
+```
+
+`open_session()` does the boilerplate: starts a `SessionLog`, opens a
+`LiveChannel` wrapped in `LoggingChannel`, runs `health_check`, and
+takes an initial snapshot so every session has a "before" diff
+reference. Don't construct `LiveChannel` directly unless you're
+writing a low-level utility that genuinely must not log.
+
+### Mediation discipline
+
+- **Transcribe humans verbatim.** Don't paraphrase their feedback before logging it. The training corpus needs the raw signal.
+- **Log your own replies too.** Both sides of the dialogue belong in the log — the model learns from the agent moves as much as the human ones.
+- **Snapshot before AND after material changes.** A snapshot bracketing a build phase lets the diff be reconstructed. Cheap (<1s typically), high-value.
+- **Capture A/B as the persona speaks.** Don't batch up feedback at end of session — the temporal binding to the take they're reacting to is what makes the corpus learnable.
+- **Checkpoint .als at every save.** When the human does File>Save, immediately call `sess.als(path, label)` so the audio outcome pairs with the log entry.
+
+### State you need before the first RPC
 
 ### State you need before the first RPC
 
@@ -340,46 +517,23 @@ When the human says "I'll come back" or "go ahead", you have authority to make c
 - **Loading samples into individual drum-rack pads** — `selected_drum_pad + load_item` only populates the first pad. Use `bulk_load_drum_pads` or per-pad Simpler tracks
 - **Putting a Limiter on the master** — clamps the bass. Use a gentle Glue Comp instead
 
-### Session logging — capture for the training corpus
+### Session logging — always-on substrate, mediated by the agent
 
-Every session must be logged. The corpus (timestamped chats + audio dev
-states + .als checkpoints) is what the next-generation model trains on
-and what the process-engineering pass uses to extract patterns. Don't
-work without one running.
+The mediated-session pattern (above, "You are the mediator")
+describes the canonical entry point: `open_session()` returns a
+`MediatedSession` that bundles the channel + log + health check +
+initial snapshot. Every script and every agent loop in this stack
+goes through it. Direct `SessionLog` / `LiveChannel` construction
+is for low-level utilities only.
 
-```python
-from thelmic.session_log import SessionLog
-log = SessionLog.start(name="jungle-take-3")
-
-log.chat("user", "165bpm jungle in G minor, energy ramps to breakcore at slot 9")
-log.chat("agent", "starting amen breakbeat into HARDKIT...")
-
-# After a build phase
-log.snapshot(ch, label="after-drums")           # full state JSON
-log.action("apply_anticipation", {"slot": 3})
-
-# When the human listens & responds
-log.feedback(persona="producer",
-              likes=["breakcore-into-gabber pivot at scene 9"],
-              dislikes=["outro fade — too clean, want a hard tail"])
-log.feedback(persona="audio_engineer",
-              likes=["mid-bass thump on master"],
-              dislikes=["snare poking 5kHz on slot 4"])
-
-# Manual .als checkpoints (after the user does File>Save)
-log.checkpoint_als("C:/.../jungle.als", label="post-engineer-pass")
-
-log.note("decision: keep slot 9 pivot, retake outro with crash tail")
-log.close(summary="2 takes, engineer-approved, producer wants outro retake")
-```
-
-Layout written to `sessions/<timestamp>_<name>/`:
+The capture layout written to `sessions/<utc_ts>_<name>/`:
 - `log.jsonl` — append-only timestamped event stream (chat / action / snapshot / feedback / note / als_checkpoint / session_start / session_end)
-- `snapshots/*.json` — full state walk (tempo, all tracks → devices → params with ranges, clip note counts, master devices)
+- `snapshots/*.json` — full state walk (tempo, all tracks → devices → params with current values + min/max, clip note counts, master devices)
 - `als/*.als` — copied .als files for replayable audio outcome
 
-For full RPC tracing wrap your channel in `LoggingChannel(ch, log)` —
-every call auto-logs with args. Use sparingly (I/O cost).
+The corpus this builds is the v0.next+1 training substrate:
+chat → moves → state diffs → audio outcomes → persona feedback,
+all temporally bound, all replayable.
 
 ### When you finish a session
 
