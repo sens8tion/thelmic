@@ -23,6 +23,21 @@ def main():
         total_seconds = (TOTAL_BARS + TAIL_BARS) * bar_seconds
         sess.note(f"prepping render: {TOTAL_BARS}+{TAIL_BARS} bars = {total_seconds/60:.2f} min @ {bpm}bpm")
 
+        # CRITICAL: render must play back the ARRANGEMENT, not session view.
+        # If session clips are in flight (orange "Back to Arrangement" button
+        # lit at top of Arrangement view), Live renders THOSE not the printed
+        # arrangement. So: stop playback → stop all session clips →
+        # back_to_arrangement → song_time = 0.
+        try:
+            sess.raw_ch.stop_playback().result(timeout=3)
+            sess.raw_ch.stop_all_clips().result(timeout=3)
+            sess.raw_ch.back_to_arrangement().result(timeout=3)
+            sess.raw_ch.set_song_time(0.0).result(timeout=3)
+            print("  playback stopped, session clips stopped, back-to-arrangement, playhead=0")
+        except Exception as e:
+            print(f"  arrangement-mode prep fail: {e}")
+            sess.note(f"prep fail: {e}", kind="error")
+
         # Set arrangement loop bounds (in BEATS — 4 per bar)
         loop_end_beats = (TOTAL_BARS + TAIL_BARS) * 4.0
         try:
@@ -41,7 +56,14 @@ def main():
         print(f"  length:   {total_seconds/60:.2f} min ({total_seconds:.1f}s)")
         print(f"  bars:     {TOTAL_BARS} + {TAIL_BARS} tail = {TOTAL_BARS + TAIL_BARS}")
         print()
-        print("In Live, hit Ctrl+Shift+R (Export Audio/Video):")
+        print("BEFORE Ctrl+Shift+R — verify in Live:")
+        print("  • playhead at 1.1.1 (set above)")
+        print("  • 'Back to Arrangement' button (top-right of Arrangement)")
+        print("    is NOT lit orange — if it is, click it once.")
+        print("  • Otherwise the render captures session clips, not the")
+        print("    printed arrangement.")
+        print()
+        print("Then Ctrl+Shift+R (Export Audio/Video):")
         print("  Rendered Track:    Master")
         print("  Render Start:      1.1.1")
         print(f"  Render Length:     {TOTAL_BARS + TAIL_BARS}.1.1")
