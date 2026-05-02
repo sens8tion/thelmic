@@ -40,6 +40,10 @@ _UI_THREAD_COMMANDS = {
     "load_browser_item",
     "create_midi_track",
     "set_track_name",
+    "create_clip",
+    "add_notes_to_clip",
+    "set_clip_name",
+    "clear_clip",
     # thelmic extensions
     "get_device_info",
     "set_device_param",
@@ -60,6 +64,37 @@ _UI_THREAD_COMMANDS = {
     "restore_track",
     "get_browser_tree",
     "get_browser_items_at_path",
+    "set_device_sidechain_source",
+    "get_device_routing_options",
+    "fire_scene",
+    "stop_all_clips",
+    "set_track_output_routing",
+    "get_track_output_options",
+    "create_audio_track",
+    "set_track_monitoring",
+    "set_track_arm",
+    "set_clip_envelope",
+    "clear_clip_envelope",
+    "set_launch_quantization",
+    "get_track_meter",
+    "get_all_meters",
+    "list_browser_roots",
+    "load_item_at_path",
+    "set_clip_loop",
+    "fire_clip_at_beat",
+    "set_clip_loop_region",
+    "set_clip_warp",
+    "delete_track",
+    "get_arrangement_loop",
+    "set_arrangement_loop",
+    "get_drum_pads",
+    "set_drum_pad_mute",
+    "set_drum_pad_volume",
+    "load_master_device",
+    "get_master_device_info",
+    "set_master_device_param",
+    "get_master_device_param",
+    "delete_master_device",
 }
 
 
@@ -230,6 +265,18 @@ class ThelmicLive(ControlSurface):
             return self._create_midi_track(params.get("index", -1))
         if cmd_type == "set_track_name":
             return self._set_track_name(params["track_index"], params["name"])
+        if cmd_type == "create_clip":
+            return self._create_clip(
+                params["track_index"], params["clip_index"], params.get("length", 4.0)
+            )
+        if cmd_type == "add_notes_to_clip":
+            return self._add_notes_to_clip(
+                params["track_index"], params["clip_index"], params["notes"], params.get("replace", False)
+            )
+        if cmd_type == "set_clip_name":
+            return self._set_clip_name(params["track_index"], params["clip_index"], params["name"])
+        if cmd_type == "clear_clip":
+            return self._clear_clip(params["track_index"], params["clip_index"])
         if cmd_type == "get_device_info":
             return self._get_device_info(params["track_index"], params["device_index"])
         if cmd_type == "set_device_param":
@@ -294,6 +341,103 @@ class ThelmicLive(ControlSurface):
             return self._get_browser_tree(params.get("category", "all"))
         if cmd_type == "get_browser_items_at_path":
             return self._get_browser_items_at_path(params["path"])
+        if cmd_type == "set_device_sidechain_source":
+            return self._set_device_sidechain_source(
+                params["track_index"],
+                params["device_index"],
+                params["source_track_index"],
+            )
+        if cmd_type == "get_device_routing_options":
+            return self._get_device_routing_options(
+                params["track_index"], params["device_index"]
+            )
+        if cmd_type == "fire_scene":
+            return self._fire_scene(params["scene_index"])
+        if cmd_type == "stop_all_clips":
+            return self._stop_all_clips()
+        if cmd_type == "set_track_output_routing":
+            return self._set_track_output_routing(
+                params["track_index"], params["target_name"]
+            )
+        if cmd_type == "get_track_output_options":
+            return self._get_track_output_options(params["track_index"])
+        if cmd_type == "create_audio_track":
+            return self._create_audio_track(params.get("index", -1))
+        if cmd_type == "set_track_monitoring":
+            return self._set_track_monitoring(params["track_index"], params["state"])
+        if cmd_type == "set_track_arm":
+            return self._set_track_flag(params["track_index"], "arm", params["value"])
+        if cmd_type == "set_clip_envelope":
+            return self._set_clip_envelope(
+                params["clip_track"], params["clip_index"],
+                params["target_track"], params["target_device"], params["target_param"],
+                params["breakpoints"],
+            )
+        if cmd_type == "clear_clip_envelope":
+            return self._clear_clip_envelope(
+                params["clip_track"], params["clip_index"],
+                params["target_track"], params["target_device"], params["target_param"],
+            )
+        if cmd_type == "set_launch_quantization":
+            return self._set_launch_quantization(params["bars"])
+        if cmd_type == "get_track_meter":
+            return self._get_track_meter(params["track_index"])
+        if cmd_type == "get_all_meters":
+            return self._get_all_meters()
+        if cmd_type == "list_browser_roots":
+            return self._list_browser_roots()
+        if cmd_type == "load_item_at_path":
+            return self._load_item_at_path(
+                params["track_index"], params["path"], params.get("item_name"),
+                params.get("drum_pad_note"), params.get("drum_device_index"),
+            )
+        if cmd_type == "set_clip_loop":
+            return self._set_clip_loop(
+                params["track_index"], params["clip_index"], params["loop"],
+            )
+        if cmd_type == "set_clip_loop_region":
+            return self._set_clip_loop_region(
+                params["track_index"], params["clip_index"],
+                params["loop_start"], params["loop_end"],
+            )
+        if cmd_type == "set_clip_warp":
+            return self._set_clip_warp(
+                params["track_index"], params["clip_index"],
+                params.get("warping"), params.get("warp_mode"),
+            )
+        if cmd_type == "delete_track":
+            return self._delete_track(params["track_index"])
+        if cmd_type == "get_arrangement_loop":
+            return self._get_arrangement_loop()
+        if cmd_type == "set_arrangement_loop":
+            return self._set_arrangement_loop(
+                params.get("start"), params.get("length"), params.get("on"),
+            )
+        if cmd_type == "get_drum_pads":
+            return self._get_drum_pads(params["track_index"], params["device_index"])
+        if cmd_type == "set_drum_pad_mute":
+            return self._set_drum_pad_mute(
+                params["track_index"], params["device_index"], params["note"], params["mute"],
+            )
+        if cmd_type == "set_drum_pad_volume":
+            return self._set_drum_pad_volume(
+                params["track_index"], params["device_index"], params["note"], params["value"],
+            )
+        if cmd_type == "load_master_device":
+            return self._load_master_device(params.get("uri"), params.get("path"), params.get("item_name"))
+        if cmd_type == "get_master_device_info":
+            return self._get_master_device_info(params["device_index"])
+        if cmd_type == "set_master_device_param":
+            return self._set_master_device_param(
+                params["device_index"], params.get("param_index"),
+                params.get("param_name"), params["value"],
+            )
+        if cmd_type == "get_master_device_param":
+            return self._get_master_device_param(
+                params["device_index"], params.get("param_index"), params.get("param_name"),
+            )
+        if cmd_type == "delete_master_device":
+            return self._delete_master_device(params["device_index"])
         raise ValueError("unhandled UI command: " + cmd_type)
 
     # ------------------------------------------------------------------
@@ -360,6 +504,67 @@ class ThelmicLive(ControlSurface):
         t.name = name
         return {"name": t.name}
 
+    def _create_clip(self, track_index, clip_index, length):
+        track = self._track(track_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip_index out of range")
+        slot = track.clip_slots[clip_index]
+        if slot.has_clip:
+            slot.delete_clip()
+        slot.create_clip(float(length))
+        return {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "name": slot.clip.name,
+            "length": slot.clip.length,
+        }
+
+    def _add_notes_to_clip(self, track_index, clip_index, notes, replace):
+        track = self._track(track_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip_index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        live_notes = []
+        for n in notes:
+            live_notes.append((
+                int(n.get("pitch", 60)),
+                float(n.get("start_time", 0.0)),
+                float(n.get("duration", 0.25)),
+                int(n.get("velocity", 100)),
+                bool(n.get("mute", False)),
+            ))
+        if replace:
+            try:
+                clip.remove_notes_extended(0, 128, 0.0, clip.length)
+            except Exception:
+                # Older API path
+                try:
+                    clip.select_all_notes()
+                    clip.replace_selected_notes(tuple(live_notes))
+                    return {"note_count": len(live_notes), "replaced": True}
+                except Exception:
+                    pass
+        clip.set_notes(tuple(live_notes))
+        return {"note_count": len(live_notes), "replaced": replace}
+
+    def _set_clip_name(self, track_index, clip_index, name):
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        slot.clip.name = name
+        return {"name": slot.clip.name}
+
+    def _clear_clip(self, track_index, clip_index):
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if slot.has_clip:
+            slot.delete_clip()
+        return {"cleared": True}
+
     def _set_tempo(self, tempo):
         self._song.tempo = tempo
         return {"tempo": self._song.tempo}
@@ -391,29 +596,111 @@ class ThelmicLive(ControlSurface):
         app.browser.load_item(item)
         return {"loaded": True, "item_name": item.name, "track_name": track.name}
 
-    def _find_browser_item_by_uri(self, node, uri, depth=0, max_depth=10):
+    def _find_browser_item_by_uri(self, node, uri, depth=0, max_depth=12):
         if hasattr(node, "uri") and node.uri == uri:
             return node
         if depth >= max_depth:
             return None
-        if hasattr(node, "instruments"):
-            for cat in (
-                node.instruments,
-                node.sounds,
-                node.drums,
-                node.audio_effects,
-                node.midi_effects,
-            ):
-                hit = self._find_browser_item_by_uri(cat, uri, depth + 1, max_depth)
-                if hit:
-                    return hit
+        # If this looks like the Browser root, walk EVERY attribute (instruments,
+        # sounds, drums, plugins, samples, user_library, etc.).
+        if hasattr(node, "instruments") and not hasattr(node, "uri"):
+            for attr in dir(node):
+                if attr.startswith("_"):
+                    continue
+                try:
+                    val = getattr(node, attr)
+                except Exception:
+                    continue
+                if val is None or callable(val):
+                    continue
+                if hasattr(val, "uri") or hasattr(val, "children"):
+                    hit = self._find_browser_item_by_uri(val, uri, depth + 1, max_depth)
+                    if hit:
+                        return hit
             return None
-        if hasattr(node, "children") and node.children:
-            for c in node.children:
+        # Recurse into children
+        try:
+            children = getattr(node, "children", None)
+        except Exception:
+            children = None
+        if children:
+            for c in children:
                 hit = self._find_browser_item_by_uri(c, uri, depth + 1, max_depth)
                 if hit:
                     return hit
         return None
+
+    def _load_item_at_path(self, track_index, path, item_name=None, drum_pad_note=None, drum_device_index=None):
+        """Walk path, optionally match item by name, then load_item to track.
+
+        path: e.g. 'user_library/Samples/Splice'. If item_name is given, find
+        the child of that name; else load the path's terminal node itself.
+        """
+        track = self._track(track_index)
+        b = self._browser()
+        parts = [p for p in path.split("/") if p]
+        head = parts[0].lower()
+        cur = None
+        for attr in dir(b):
+            if attr.startswith("_"):
+                continue
+            if attr.lower() == head:
+                try:
+                    cur = getattr(b, attr)
+                except Exception:
+                    cur = None
+                break
+        if cur is None:
+            raise ValueError("unknown root: " + parts[0])
+        for p in parts[1:]:
+            children = list(getattr(cur, "children", []) or [])
+            nxt = None
+            for c in children:
+                if getattr(c, "name", "").lower() == p.lower():
+                    nxt = c
+                    break
+            if nxt is None:
+                raise ValueError("path part not found: " + p)
+            cur = nxt
+        if item_name:
+            children = list(getattr(cur, "children", []) or [])
+            target = None
+            for c in children:
+                if getattr(c, "name", "").lower() == item_name.lower():
+                    target = c
+                    break
+            if target is None:
+                names = [getattr(c, "name", "?") for c in children][:20]
+                raise ValueError("item '" + item_name + "' not in " + path + ". Sample: " + ", ".join(names))
+            cur = target
+        if not getattr(cur, "is_loadable", False):
+            raise ValueError("item not loadable: " + getattr(cur, "name", "?"))
+        self._song.view.selected_track = track
+        # If drum-pad target requested, select the pad first so load goes there
+        if drum_pad_note is not None:
+            di = drum_device_index if drum_device_index is not None else 0
+            if di >= len(track.devices):
+                raise ValueError("drum_device_index out of range: " + str(di))
+            rack = track.devices[di]
+            if not hasattr(rack, "drum_pads"):
+                raise ValueError("device " + rack.name + " is not a Drum Rack")
+            pad_idx = int(drum_pad_note)
+            if pad_idx < 0 or pad_idx > 127:
+                raise ValueError("drum_pad_note out of MIDI range")
+            self._song.view.selected_track = track
+            self._song.view.select_device(rack)
+            try:
+                self._song.view.selected_drum_pad = rack.drum_pads[pad_idx]
+            except Exception as e:
+                raise ValueError("could not select drum pad " + str(pad_idx) + ": " + str(e))
+        b.load_item(cur)
+        return {
+            "loaded": True,
+            "track_index": track_index,
+            "item_name": getattr(cur, "name", "?"),
+            "track_name": track.name,
+            "drum_pad_note": drum_pad_note,
+        }
 
     # ---- thelmic extensions -----------------------------------------
 
@@ -695,6 +982,531 @@ class ThelmicLive(ControlSurface):
                     skipped += 1
         return {"track_index": track_index, "applied": applied, "skipped": skipped}
 
+    # ---- routing / sidechain ----------------------------------------
+
+    def _device_routing_attrs(self, device):
+        """Find which Live API attribute name a device uses for input routing.
+
+        Live 11+ uses audio_input_routing_type; older uses input_routing_type.
+        """
+        if hasattr(device, "audio_input_routing_type"):
+            return ("audio_input_routing_type", "available_audio_input_routing_types",
+                    "audio_input_routing_channel", "available_audio_input_routing_channels")
+        return ("input_routing_type", "available_input_routing_types",
+                "input_routing_channel", "available_input_routing_channels")
+
+    def _get_device_routing_options(self, track_index, device_index):
+        device = self._device(track_index, device_index)
+        type_attr, type_avail_attr, ch_attr, ch_avail_attr = self._device_routing_attrs(device)
+        types = []
+        try:
+            for rt in getattr(device, type_avail_attr, []) or []:
+                types.append(getattr(rt, "display_name", str(rt)))
+        except Exception as e:
+            self.log_message("routing types err: " + str(e))
+        channels = []
+        try:
+            for rc in getattr(device, ch_avail_attr, []) or []:
+                channels.append(getattr(rc, "display_name", str(rc)))
+        except Exception as e:
+            self.log_message("routing channels err: " + str(e))
+        current_type = ""
+        try:
+            current_type = getattr(getattr(device, type_attr), "display_name", "")
+        except Exception:
+            pass
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "device_name": device.name,
+            "available_types": types,
+            "available_channels": channels,
+            "current_type": current_type,
+        }
+
+    def _set_device_sidechain_source(self, track_index, device_index, source_track_index):
+        device = self._device(track_index, device_index)
+        source_track = self._track(source_track_index)
+        type_attr, type_avail_attr, ch_attr, ch_avail_attr = self._device_routing_attrs(device)
+        candidates = list(getattr(device, type_avail_attr, []) or [])
+        # Match against source track name; fall back to substring match
+        target = None
+        src_name = source_track.name
+        for rt in candidates:
+            if getattr(rt, "display_name", "") == src_name:
+                target = rt
+                break
+        if target is None:
+            for rt in candidates:
+                dn = getattr(rt, "display_name", "")
+                if src_name in dn or dn in src_name:
+                    target = rt
+                    break
+        if target is None:
+            names = [getattr(rt, "display_name", "?") for rt in candidates]
+            raise ValueError(
+                "No routing entry matches source '" + src_name + "'. Available: " + ", ".join(names)
+            )
+        setattr(device, type_attr, target)
+        # Also try to enable S/C On if it's a Compressor-style param
+        try:
+            for p in device.parameters:
+                if p.name == "S/C On":
+                    p.value = 1.0
+                    break
+        except Exception:
+            pass
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "source_track_index": source_track_index,
+            "source_name": getattr(target, "display_name", src_name),
+        }
+
+    # ---- track output routing ---------------------------------------
+
+    def _track_output_attrs(self, track):
+        if hasattr(track, "output_routing_type"):
+            return ("output_routing_type", "available_output_routing_types",
+                    "output_routing_channel", "available_output_routing_channels")
+        # very old versions
+        return ("current_output_routing", "available_output_routings", None, None)
+
+    def _get_track_output_options(self, track_index):
+        track = self._track(track_index)
+        type_attr, type_avail_attr, ch_attr, ch_avail_attr = self._track_output_attrs(track)
+        types = []
+        try:
+            for rt in getattr(track, type_avail_attr, []) or []:
+                types.append(getattr(rt, "display_name", str(rt)))
+        except Exception as e:
+            self.log_message("output types err: " + str(e))
+        current = ""
+        try:
+            current = getattr(getattr(track, type_attr), "display_name", "")
+        except Exception:
+            pass
+        return {
+            "track_index": track_index,
+            "available_types": types,
+            "current_type": current,
+        }
+
+    def _set_track_output_routing(self, track_index, target_name):
+        track = self._track(track_index)
+        type_attr, type_avail_attr, ch_attr, ch_avail_attr = self._track_output_attrs(track)
+        candidates = list(getattr(track, type_avail_attr, []) or [])
+        target = None
+        for rt in candidates:
+            dn = getattr(rt, "display_name", "")
+            if dn == target_name:
+                target = rt
+                break
+        if target is None:
+            for rt in candidates:
+                dn = getattr(rt, "display_name", "")
+                if target_name in dn or dn in target_name:
+                    target = rt
+                    break
+        if target is None:
+            names = [getattr(rt, "display_name", "?") for rt in candidates]
+            raise ValueError(
+                "No output routing matches '" + target_name + "'. Available: " + ", ".join(names)
+            )
+        setattr(track, type_attr, target)
+        return {
+            "track_index": track_index,
+            "target": getattr(target, "display_name", target_name),
+        }
+
+    def _create_audio_track(self, index):
+        self._song.create_audio_track(index)
+        new_idx = len(self._song.tracks) - 1 if index == -1 else index
+        return {"index": new_idx, "name": self._song.tracks[new_idx].name}
+
+    def _resolve_target_param(self, target_track, target_device, target_param):
+        device = self._device(target_track, target_device)
+        if isinstance(target_param, int):
+            return device.parameters[target_param]
+        for p in device.parameters:
+            if p.name == target_param:
+                return p
+        for p in device.parameters:
+            if p.name.lower() == target_param.lower():
+                return p
+        raise ValueError("Unknown param '" + target_param + "' on " + device.name)
+
+    def _set_clip_envelope(self, clip_track, clip_index, target_track, target_device, target_param, breakpoints):
+        """Write a clip automation envelope.
+
+        breakpoints: list of [time_in_beats, value] pairs.
+        Will REPLACE any existing envelope for this parameter on the clip.
+        """
+        track = self._track(clip_track)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip_index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        param = self._resolve_target_param(target_track, target_device, target_param)
+        # remove any existing envelope first
+        try:
+            clip.clear_envelope(param)
+        except Exception:
+            pass
+        env = clip.create_automation_envelope(param)
+        # Sort breakpoints by time so we can compute step lengths
+        bps = sorted([(float(bp[0]), float(bp[1])) for bp in breakpoints], key=lambda x: x[0])
+        # Staircase: each step holds value v from t until next breakpoint's time.
+        # Last step holds to clip end (we use 0.5 beat as a safe tail).
+        for i, (t, v) in enumerate(bps):
+            if i + 1 < len(bps):
+                length = max(0.001, bps[i + 1][0] - t)
+            else:
+                length = 0.5
+            try:
+                env.insert_step(t, length, v)
+            except Exception as e:
+                self.log_message("envelope insert_step failed at t=" + str(t) + ": " + str(e))
+                try:
+                    env.add_breakpoint(t, v)
+                except Exception:
+                    pass
+        return {
+            "clip_track": clip_track,
+            "clip_index": clip_index,
+            "target": param.name,
+            "breakpoints_written": len(breakpoints),
+        }
+
+    def _clear_clip_envelope(self, clip_track, clip_index, target_track, target_device, target_param):
+        track = self._track(clip_track)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        param = self._resolve_target_param(target_track, target_device, target_param)
+        try:
+            clip.clear_envelope(param)
+        except Exception as e:
+            self.log_message("clear envelope failed: " + str(e))
+        return {"cleared": True, "target": param.name}
+
+    def _get_track_meter(self, track_index):
+        track = self._track(track_index)
+        return {
+            "track_index": track_index,
+            "name": track.name,
+            "left":  float(getattr(track, "output_meter_left",  0.0) or 0.0),
+            "right": float(getattr(track, "output_meter_right", 0.0) or 0.0),
+            "level": float(getattr(track, "output_meter_level", 0.0) or 0.0),
+        }
+
+    def _get_all_meters(self):
+        out = []
+        for i, t in enumerate(self._song.tracks):
+            out.append({
+                "track_index": i,
+                "name": t.name,
+                "left":  float(getattr(t, "output_meter_left",  0.0) or 0.0),
+                "right": float(getattr(t, "output_meter_right", 0.0) or 0.0),
+                "level": float(getattr(t, "output_meter_level", 0.0) or 0.0),
+            })
+        # also master
+        try:
+            m = self._song.master_track
+            out.append({
+                "track_index": -1,
+                "name": "Master",
+                "left":  float(getattr(m, "output_meter_left",  0.0) or 0.0),
+                "right": float(getattr(m, "output_meter_right", 0.0) or 0.0),
+                "level": float(getattr(m, "output_meter_level", 0.0) or 0.0),
+            })
+        except Exception:
+            pass
+        return {"meters": out}
+
+    def _set_launch_quantization(self, bars):
+        """Set Live's global clip-launch quantization.
+
+        bars accepts: 0 (None), 0.0625 (1/16), 0.125 (1/8), 0.25 (1/4), 0.5 (1/2),
+        1, 2, 4, 8, 16 (bars). Picks the closest available enum value Live offers.
+        """
+        # Live's Quantization enum values typically:
+        # 0 q_no_q, 1 q_8_bars, 2 q_4_bars, 3 q_2_bars, 4 q_bar, 5 q_half,
+        # 7 q_quarter, 9 q_eight, 11 q_sixteenth, 13 q_thirtytwoth.
+        # Live 12 may add 16-bar (or it may not — fall back to 8 bars).
+        try:
+            import Live
+            Q = Live.Song.Quantization
+            # Build mapping defensively — Live versions vary on what's exposed
+            mapping = {}
+            for bars_val, attr in [
+                (0, "q_no_q"),
+                (0.0625, "q_sixteenth"),
+                (0.125, "q_eight"),
+                (0.25, "q_quarter"),
+                (0.5, "q_half"),
+                (1, "q_bar"),
+                (2, "q_2_bars"),
+                (4, "q_4_bars"),
+                (8, "q_8_bars"),
+            ]:
+                if hasattr(Q, attr):
+                    mapping[bars_val] = getattr(Q, attr)
+            # 16 bars requested? Use 16-bars if exposed, else 8 bars.
+            if bars == 16:
+                if hasattr(Q, "q_16_bars"):
+                    target = Q.q_16_bars
+                    chosen = 16
+                else:
+                    target = Q.q_8_bars
+                    chosen = 8
+            else:
+                target = mapping.get(bars, Q.q_bar)
+                chosen = bars
+            self._song.clip_trigger_quantization = target
+            return {"requested_bars": bars, "applied_bars": chosen}
+        except Exception as e:
+            self.log_message("set_launch_quantization err: " + str(e))
+            raise
+
+    def _set_clip_loop(self, track_index, clip_index, loop):
+        track = self._track(track_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip_index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        slot.clip.looping = bool(loop)
+        return {"track_index": track_index, "clip_index": clip_index, "looping": slot.clip.looping}
+
+    def _set_clip_loop_region(self, track_index, clip_index, loop_start, loop_end):
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        clip.looping = True
+        clip.loop_start = float(loop_start)
+        clip.loop_end = float(loop_end)
+        return {
+            "track_index": track_index, "clip_index": clip_index,
+            "loop_start": clip.loop_start, "loop_end": clip.loop_end,
+        }
+
+    def _delete_track(self, track_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("track_index out of range")
+        # song.delete_track expects an index
+        self._song.delete_track(track_index)
+        return {"deleted_track_index": track_index, "tracks_remaining": len(self._song.tracks)}
+
+    # ---- arrangement loop ------------------------------------------
+
+    def _get_arrangement_loop(self):
+        return {
+            "start": float(self._song.loop_start),
+            "length": float(self._song.loop_length),
+            "on": bool(self._song.loop),
+        }
+
+    def _set_arrangement_loop(self, start=None, length=None, on=None):
+        if start is not None:
+            self._song.loop_start = float(start)
+        if length is not None:
+            self._song.loop_length = float(length)
+        if on is not None:
+            self._song.loop = bool(on)
+        return {
+            "start": float(self._song.loop_start),
+            "length": float(self._song.loop_length),
+            "on": bool(self._song.loop),
+        }
+
+    # ---- drum rack pads --------------------------------------------
+
+    def _get_drum_rack(self, track_index, device_index):
+        track = self._track(track_index)
+        if device_index < 0 or device_index >= len(track.devices):
+            raise IndexError("device_index out of range")
+        rack = track.devices[device_index]
+        if not hasattr(rack, "drum_pads"):
+            raise ValueError("device " + rack.name + " is not a Drum Rack")
+        return rack
+
+    def _get_drum_pads(self, track_index, device_index):
+        rack = self._get_drum_rack(track_index, device_index)
+        out = []
+        for note in range(36, 100):  # standard drum-rack span
+            try:
+                pad = rack.drum_pads[note]
+            except Exception:
+                continue
+            chains = []
+            try:
+                for c in pad.chains:
+                    chains.append({"name": getattr(c, "name", "?"), "mute": bool(getattr(c, "mute", False))})
+            except Exception:
+                pass
+            if not chains and bool(getattr(pad, "mute", False)) is False and not getattr(pad, "name", ""):
+                continue  # skip empty pads
+            out.append({
+                "note": note,
+                "name": getattr(pad, "name", ""),
+                "mute": bool(getattr(pad, "mute", False)),
+                "solo": bool(getattr(pad, "solo", False)),
+                "chain_count": len(chains),
+                "chains": chains,
+            })
+        return {"track_index": track_index, "device_index": device_index, "pads": out}
+
+    def _set_drum_pad_mute(self, track_index, device_index, note, mute):
+        rack = self._get_drum_rack(track_index, device_index)
+        pad = rack.drum_pads[int(note)]
+        pad.mute = bool(mute)
+        return {"note": int(note), "mute": pad.mute}
+
+    def _set_drum_pad_volume(self, track_index, device_index, note, value):
+        rack = self._get_drum_rack(track_index, device_index)
+        pad = rack.drum_pads[int(note)]
+        # Pad volume is on the first chain's mixer_device.volume
+        try:
+            chain = pad.chains[0]
+            chain.mixer_device.volume.value = float(value)
+            return {"note": int(note), "volume": chain.mixer_device.volume.value}
+        except Exception as e:
+            raise ValueError("could not set pad volume: " + str(e))
+
+    # ---- master track devices ---------------------------------------
+
+    def _load_master_device(self, uri=None, path=None, item_name=None):
+        master = self._song.master_track
+        b = self._browser()
+        if uri:
+            item = self._find_browser_item_by_uri(b, uri)
+            if not item:
+                raise ValueError("Browser item not found: " + uri)
+        elif path:
+            parts = [p for p in path.split("/") if p]
+            head = parts[0].lower()
+            cur = None
+            for attr in dir(b):
+                if attr.startswith("_"): continue
+                if attr.lower() == head:
+                    try: cur = getattr(b, attr)
+                    except Exception: cur = None
+                    break
+            if cur is None:
+                raise ValueError("unknown root: " + parts[0])
+            for p in parts[1:]:
+                children = list(getattr(cur, "children", []) or [])
+                nxt = None
+                for c in children:
+                    if getattr(c, "name", "").lower() == p.lower():
+                        nxt = c; break
+                if nxt is None:
+                    raise ValueError("path part not found: " + p)
+                cur = nxt
+            if item_name:
+                children = list(getattr(cur, "children", []) or [])
+                target = None
+                for c in children:
+                    if getattr(c, "name", "").lower() == item_name.lower():
+                        target = c; break
+                if target is None:
+                    raise ValueError("item '" + item_name + "' not in " + path)
+                cur = target
+            item = cur
+        else:
+            raise ValueError("must supply uri or path")
+        self._song.view.selected_track = master
+        b.load_item(item)
+        return {"loaded": True, "item_name": getattr(item, "name", "?")}
+
+    def _get_master_device_info(self, device_index):
+        master = self._song.master_track
+        if device_index < 0 or device_index >= len(master.devices):
+            raise IndexError("device_index out of range on master")
+        device = master.devices[device_index]
+        params = []
+        for i, p in enumerate(device.parameters):
+            params.append({
+                "index": i, "name": p.name, "value": p.value,
+                "min": p.min, "max": p.max, "is_quantized": p.is_quantized,
+            })
+        return {
+            "device_index": device_index, "name": device.name, "class_name": device.class_name,
+            "parameter_count": len(params), "parameters": params,
+        }
+
+    def _set_master_device_param(self, device_index, param_index, param_name, value):
+        master = self._song.master_track
+        device = master.devices[device_index]
+        param, idx = self._resolve_param(device, param_index, param_name)
+        v = float(value)
+        if v < param.min: v = param.min
+        elif v > param.max: v = param.max
+        param.value = v
+        return {"device_index": device_index, "param_index": idx, "param_name": param.name, "value": param.value}
+
+    def _get_master_device_param(self, device_index, param_index, param_name):
+        master = self._song.master_track
+        device = master.devices[device_index]
+        param, idx = self._resolve_param(device, param_index, param_name)
+        return {"device_index": device_index, "param_index": idx, "param_name": param.name,
+                "value": param.value, "min": param.min, "max": param.max}
+
+    def _delete_master_device(self, device_index):
+        master = self._song.master_track
+        if device_index < 0 or device_index >= len(master.devices):
+            raise IndexError("device_index out of range on master")
+        master.delete_device(device_index)
+        return {"deleted": True, "device_index": device_index}
+
+    def _set_clip_warp(self, track_index, clip_index, warping=None, warp_mode=None):
+        """warping: bool. warp_mode: int (0=Beats, 1=Tones, 2=Texture, 3=Re-Pitch, 4=Complex, 5=REX, 6=Complex Pro)."""
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        if warping is not None:
+            clip.warping = bool(warping)
+        if warp_mode is not None:
+            clip.warp_mode = int(warp_mode)
+        return {
+            "track_index": track_index, "clip_index": clip_index,
+            "warping": clip.warping, "warp_mode": int(clip.warp_mode),
+        }
+
+    def _set_track_monitoring(self, track_index, state):
+        """state: 0 = In (always), 1 = Auto, 2 = Off."""
+        track = self._track(track_index)
+        track.current_monitoring_state = int(state)
+        return {"track_index": track_index, "monitoring_state": track.current_monitoring_state}
+
+    # ---- transport --------------------------------------------------
+
+    def _fire_scene(self, scene_index):
+        scenes = list(self._song.scenes)
+        if scene_index < 0 or scene_index >= len(scenes):
+            raise IndexError("scene_index out of range")
+        scenes[scene_index].fire()
+        return {"scene_index": scene_index, "fired": True}
+
+    def _stop_all_clips(self):
+        try:
+            self._song.stop_all_clips()
+        except Exception:
+            for t in self._song.tracks:
+                try:
+                    t.stop_all_clips()
+                except Exception:
+                    pass
+        return {"stopped": True}
+
     # ---- browser ----------------------------------------------------
 
     def _browser(self):
@@ -733,20 +1545,60 @@ class ThelmicLive(ControlSurface):
             categories.append({"name": cat_name, "children": children})
         return {"categories": categories}
 
+    def _list_browser_roots(self):
+        b = self._browser()
+        out = []
+        for attr in dir(b):
+            if attr.startswith("_"):
+                continue
+            try:
+                val = getattr(b, attr)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            entry = {"attr": attr}
+            if hasattr(val, "name"):
+                try:
+                    entry["name"] = val.name
+                except Exception:
+                    pass
+            if hasattr(val, "children"):
+                try:
+                    entry["child_count"] = len(list(val.children))
+                except Exception:
+                    pass
+            out.append(entry)
+        return {"roots": out}
+
     def _get_browser_items_at_path(self, path):
         b = self._browser()
         parts = [p for p in path.split("/") if p]
         if not parts:
             raise ValueError("empty path")
-        roots = {
-            "instruments": getattr(b, "instruments", None),
-            "sounds": getattr(b, "sounds", None),
-            "drums": getattr(b, "drums", None),
-            "audio_effects": getattr(b, "audio_effects", None),
-            "midi_effects": getattr(b, "midi_effects", None),
-        }
         head = parts[0].lower()
-        cur = roots.get(head)
+        # Try direct attribute lookup on browser (handles plugins, places, user_library, etc.)
+        cur = None
+        # First attempt: case-insensitive dir() match
+        for attr in dir(b):
+            if attr.startswith("_"):
+                continue
+            if attr.lower() == head:
+                try:
+                    cur = getattr(b, attr)
+                except Exception:
+                    cur = None
+                break
+        if cur is None:
+            # Fallback: try canonical roots explicitly
+            roots = {
+                "instruments": getattr(b, "instruments", None),
+                "sounds": getattr(b, "sounds", None),
+                "drums": getattr(b, "drums", None),
+                "audio_effects": getattr(b, "audio_effects", None),
+                "midi_effects": getattr(b, "midi_effects", None),
+            }
+            cur = roots.get(head)
         if cur is None:
             raise ValueError("unknown root category: " + parts[0])
         for p in parts[1:]:

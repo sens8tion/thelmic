@@ -202,6 +202,46 @@ class LiveChannel:
             "fire_clip", {"track_index": track_index, "clip_index": clip_index}
         )
 
+    def stop_clip(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue(
+            "stop_clip", {"track_index": track_index, "clip_index": clip_index}
+        )
+
+    def create_clip(self, track_index: int, clip_index: int, length_beats: float = 4.0) -> Future:
+        return self._enqueue(
+            "create_clip",
+            {"track_index": track_index, "clip_index": clip_index, "length": float(length_beats)},
+        )
+
+    def add_notes_to_clip(
+        self,
+        track_index: int,
+        clip_index: int,
+        notes: list,
+        *,
+        replace: bool = False,
+    ) -> Future:
+        return self._enqueue(
+            "add_notes_to_clip",
+            {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "notes": notes,
+                "replace": replace,
+            },
+        )
+
+    def set_clip_name(self, track_index: int, clip_index: int, name: str) -> Future:
+        return self._enqueue(
+            "set_clip_name",
+            {"track_index": track_index, "clip_index": clip_index, "name": name},
+        )
+
+    def clear_clip(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue(
+            "clear_clip", {"track_index": track_index, "clip_index": clip_index}
+        )
+
     def get_session_info(self) -> Future:
         return self._enqueue("get_session_info", {})
 
@@ -262,6 +302,12 @@ class LiveChannel:
             "move_device",
             {"track_index": track_index, "from_index": from_index, "to_index": to_index},
         )
+
+    def set_track_name(self, track_index: int, name: str) -> Future:
+        return self._enqueue("set_track_name", {"track_index": track_index, "name": name})
+
+    def create_midi_track(self, index: int = -1) -> Future:
+        return self._enqueue("create_midi_track", {"index": index})
 
     def set_track_volume(self, track_index: int, value: float) -> Future:
         return self._enqueue("set_track_volume", {"track_index": track_index, "value": float(value)})
@@ -337,6 +383,149 @@ class LiveChannel:
 
     def get_browser_items_at_path(self, path: str) -> Future:
         return self._enqueue("get_browser_items_at_path", {"path": path})
+
+    def set_device_sidechain_source(self, track_index: int, device_index: int, source_track_index: int) -> Future:
+        return self._enqueue(
+            "set_device_sidechain_source",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "source_track_index": source_track_index,
+            },
+        )
+
+    def get_device_routing_options(self, track_index: int, device_index: int) -> Future:
+        return self._enqueue(
+            "get_device_routing_options",
+            {"track_index": track_index, "device_index": device_index},
+        )
+
+    def fire_scene(self, scene_index: int) -> Future:
+        return self._enqueue("fire_scene", {"scene_index": scene_index})
+
+    def stop_all_clips(self) -> Future:
+        return self._enqueue("stop_all_clips", {})
+
+    def set_track_output_routing(self, track_index: int, target_name: str) -> Future:
+        return self._enqueue(
+            "set_track_output_routing",
+            {"track_index": track_index, "target_name": target_name},
+        )
+
+    def get_track_output_options(self, track_index: int) -> Future:
+        return self._enqueue("get_track_output_options", {"track_index": track_index})
+
+    def create_audio_track(self, index: int = -1) -> Future:
+        return self._enqueue("create_audio_track", {"index": index})
+
+    def set_track_monitoring(self, track_index: int, state: int) -> Future:
+        """state: 0=In, 1=Auto, 2=Off"""
+        return self._enqueue("set_track_monitoring", {"track_index": track_index, "state": int(state)})
+
+    def set_track_arm(self, track_index: int, on: bool) -> Future:
+        return self._enqueue("set_track_arm", {"track_index": track_index, "value": bool(on)})
+
+    def set_clip_envelope(self, clip_track: int, clip_index: int,
+                          target_track: int, target_device: int,
+                          target_param: int | str, breakpoints: list) -> Future:
+        return self._enqueue("set_clip_envelope", {
+            "clip_track": clip_track, "clip_index": clip_index,
+            "target_track": target_track, "target_device": target_device,
+            "target_param": target_param, "breakpoints": breakpoints,
+        })
+
+    def clear_clip_envelope(self, clip_track: int, clip_index: int,
+                            target_track: int, target_device: int,
+                            target_param: int | str) -> Future:
+        return self._enqueue("clear_clip_envelope", {
+            "clip_track": clip_track, "clip_index": clip_index,
+            "target_track": target_track, "target_device": target_device,
+            "target_param": target_param,
+        })
+
+    def load_item_at_path(self, track_index: int, path: str, item_name: str | None = None,
+                          drum_pad_note: int | None = None,
+                          drum_device_index: int | None = None) -> Future:
+        return self._enqueue("load_item_at_path", {
+            "track_index": track_index, "path": path, "item_name": item_name,
+            "drum_pad_note": drum_pad_note, "drum_device_index": drum_device_index,
+        })
+
+    def set_clip_loop(self, track_index: int, clip_index: int, loop: bool) -> Future:
+        return self._enqueue("set_clip_loop", {
+            "track_index": track_index, "clip_index": clip_index, "loop": bool(loop),
+        })
+
+    def set_clip_loop_region(self, track_index: int, clip_index: int, loop_start: float, loop_end: float) -> Future:
+        return self._enqueue("set_clip_loop_region", {
+            "track_index": track_index, "clip_index": clip_index,
+            "loop_start": float(loop_start), "loop_end": float(loop_end),
+        })
+
+    def set_clip_warp(self, track_index: int, clip_index: int,
+                      warping: bool | None = None, warp_mode: int | None = None) -> Future:
+        return self._enqueue("set_clip_warp", {
+            "track_index": track_index, "clip_index": clip_index,
+            "warping": warping, "warp_mode": warp_mode,
+        })
+
+    def delete_track(self, track_index: int) -> Future:
+        return self._enqueue("delete_track", {"track_index": track_index})
+
+    def get_arrangement_loop(self) -> Future:
+        return self._enqueue("get_arrangement_loop", {})
+
+    def set_arrangement_loop(self, start: float | None = None, length: float | None = None,
+                             on: bool | None = None) -> Future:
+        return self._enqueue("set_arrangement_loop", {"start": start, "length": length, "on": on})
+
+    def get_drum_pads(self, track_index: int, device_index: int) -> Future:
+        return self._enqueue("get_drum_pads", {"track_index": track_index, "device_index": device_index})
+
+    def set_drum_pad_mute(self, track_index: int, device_index: int, note: int, mute: bool) -> Future:
+        return self._enqueue("set_drum_pad_mute", {
+            "track_index": track_index, "device_index": device_index, "note": int(note), "mute": bool(mute),
+        })
+
+    def set_drum_pad_volume(self, track_index: int, device_index: int, note: int, value: float) -> Future:
+        return self._enqueue("set_drum_pad_volume", {
+            "track_index": track_index, "device_index": device_index, "note": int(note), "value": float(value),
+        })
+
+    def load_master_device(self, uri: str | None = None, path: str | None = None,
+                           item_name: str | None = None) -> Future:
+        return self._enqueue("load_master_device", {"uri": uri, "path": path, "item_name": item_name})
+
+    def get_master_device_info(self, device_index: int) -> Future:
+        return self._enqueue("get_master_device_info", {"device_index": device_index})
+
+    def set_master_device_param(self, device_index: int, param: int | str, value: float) -> Future:
+        params = {"device_index": device_index, "value": float(value)}
+        if isinstance(param, int): params["param_index"] = param
+        else: params["param_name"] = param
+        return self._enqueue("set_master_device_param", params)
+
+    def get_master_device_param(self, device_index: int, param: int | str) -> Future:
+        params = {"device_index": device_index}
+        if isinstance(param, int): params["param_index"] = param
+        else: params["param_name"] = param
+        return self._enqueue("get_master_device_param", params)
+
+    def delete_master_device(self, device_index: int) -> Future:
+        return self._enqueue("delete_master_device", {"device_index": device_index})
+
+    def list_browser_roots(self) -> Future:
+        return self._enqueue("list_browser_roots", {})
+
+    def get_track_meter(self, track_index: int) -> Future:
+        return self._enqueue("get_track_meter", {"track_index": track_index})
+
+    def get_all_meters(self) -> Future:
+        return self._enqueue("get_all_meters", {})
+
+    def set_launch_quantization(self, bars: float) -> Future:
+        """bars: 0 (off), 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16."""
+        return self._enqueue("set_launch_quantization", {"bars": bars})
 
     def submit_bulk(self, cmd_type: str, params: dict) -> Future:
         """Escape hatch: enqueue any command on the bulk lane.
