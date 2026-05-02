@@ -183,6 +183,92 @@ The Remote Script ships embedded in (1) with a one-shot installer that drops the
 
 ---
 
+## Release: agentic studio pipeline (v0.next)
+
+This release closes the first loop — **a single LLM hand-builds a coherent, mixed track end-to-end through the LOM bridge** — and frames the next loop, where multiple specialist personae collaborate iteratively over the same session.
+
+### What v0.next adds
+
+- **`thelmic/agent_helpers.py`** — high-level helpers carrying every lesson the previous sessions earned the hard way:
+  - **Parameter range registry** — Live params that look like dB/Hz but are normalized 0..1 (Saturator Drive, Drum Buss, Compressor, EQ8 Frequency); the few that aren't (Drum Buss Transients ±1, EQ8 Gain raw dB, GlueComp Threshold raw dB)
+  - **Gain-staging** (`gain_stage_track`, `TRACK_LEVELS`) — role-keyed defaults (sub 0.55 / hat 0.65 / present 0.78 / unity 0.85)
+  - **Studio-engineer principles as code** — `HARD_CUT_SAFE_VOICES` vs `HARSH_VOICES_NEED_TAPER`, ms-scale staggers, "impact is sacred" (`pull_back_before_drop` / `thin_build_for_massive_drop` preserve the impact note untouched)
+  - **Decay tails** (`crash_decay_tail`, `low_kick_decay_tail`) — never let a loud voice cut into silence
+  - **Amplitude breathing** (`breathe_velocity`) — sinusoidal velocity modulation for life on held patterns
+  - **Soft outros** (`soft_outro_offsets`) — harsh voices exit first, sub/kick last, reverb tail rings
+  - **Multi-take** (`take_start_bar`, `TAKE_GAP_BARS`) — tile N takes side-by-side on the arrangement timeline
+  - **Gotcha flags** as named booleans — `DRUM_PAD_INDIVIDUAL_LOAD_BROKEN`, `LIMITER_ON_MASTER_KILLS_BASS`, `SIMPLER_SLICING_VIA_PROPERTY`, etc. so future code can grep them out
+
+- **`scripts/arrangement_record.py`** — health-check + thinned anticipation builds + pull-back velocity ramps + breathing + staggered outro + HARDKIT decay tail. Runs the session straight onto the arrangement timeline; supports `python scripts/arrangement_record.py N` for N takes side-by-side.
+
+### The next loop: studio personnel in the loop
+
+v0.next ends in session view. v0.next+1 starts there — and adds named personae who iterate with the agent on the same session. Each persona is an A/B critic over the latest take whose feedback is fed back into the next pass:
+
+```
+                     ┌─────────────────────────────────────┐
+                     │  Session view setup (the beginning) │
+                     │  • sample selection (Splice MCP)    │
+                     │  • beat structures by genre         │
+                     │  • style / key / energy targets     │
+                     └──────────────────┬──────────────────┘
+                                        │
+                     ┌──────────────────▼──────────────────┐
+                     │  Compositional pass (Claude)        │
+                     │  hand-builds clips into scenes,     │
+                     │  arms session-record, prints take   │
+                     └──────────────────┬──────────────────┘
+                                        │
+        ┌───────────────────────────────┼───────────────────────────────┐
+        │                               │                               │
+        ▼                               ▼                               ▼
+┌───────────────┐               ┌───────────────┐               ┌───────────────┐
+│  PRODUCER     │               │  AUDIO ENG    │               │  (future)     │
+│  A/B over     │               │  A/B over     │               │  arranger,    │
+│  takes        │               │  takes        │               │  performer,   │
+│               │               │               │               │  mastering    │
+│ likes:  …     │               │ likes:  …     │               │               │
+│ dislikes: …   │               │ dislikes: …   │               │               │
+└───────┬───────┘               └───────┬───────┘               └───────┬───────┘
+        │                               │                               │
+        └───────────────────┬───────────┴───────────────────────────────┘
+                            ▼
+                ┌─────────────────────────┐
+                │  Feedback aggregation   │
+                │  → next pass directives │
+                └────────────┬────────────┘
+                             │
+                             ▼
+                  (loop: next compositional pass)
+```
+
+**Producer persona** — judges song-shape, hooks, energy arc, structural surprise, replay value. Feedback like *"like the breakcore-into-gabber pivot at slot 9, dislike the outro fade — too clean for this track, want a hard tail"*.
+
+**Audio engineer persona** — judges gain staging, frequency masking, transient integrity, stereo image, glue. Feedback like *"like the mid-bass thump on master, dislike the snare poking out at 5kHz on slot 4, sub feels disconnected from kick post-drop"*.
+
+The aggregation layer turns natural-language likes/dislikes into a structured directive set the next compositional pass executes against, while keeping the bones of the takes the personae endorsed.
+
+### Why session view is where the loop starts
+
+The opening setup — sample selection, beat structures by style, style/key/energy shifts — *is the substrate every persona judges against*. Producer feedback that says "more pace in row 9" needs the beat-structure layer to be addressable; engineer feedback that says "sub disconnected from kick" needs the bus/sidechain topology to be addressable. Session view, with its scene-as-section grid, makes both directly editable. The arrangement print is just a deliverable artifact; **the loop's working surface is session view**.
+
+### What carries forward
+
+- All 97 RPCs and the async client (no churn — the bridge is solid)
+- `agent_helpers.py` with the studio-engineer principles baked in
+- `memory/` corpus as system-prompt addenda for any persona
+- The take-tiling pattern (`take_start_bar`) — multi-personae A/B works directly off it
+- The thinned-build / sacred-impact / staggered-outro patterns — they survive every iteration
+
+### What v0.next+1 adds
+
+- Persona prompt packs (`memory/persona_producer.md`, `memory/persona_audio_engineer.md`)
+- A/B feedback collector — converts free-form likes/dislikes into structured directives (slot, voice, parameter, polarity)
+- Directive aggregator — resolves conflicts across personae, weights by domain (engineer wins on gain, producer wins on song-shape)
+- Iteration scaffolding — each pass reads directives, mutates the session, prints a fresh take, repeats
+
+---
+
 ## Troubleshoot
 
 - **`ConnectionRefusedError`**: Live isn't running, ThelmicLive isn't selected as a Control Surface, or the script crashed. Check `Help → Open Log Folder` → `Log.txt` for Python tracebacks.

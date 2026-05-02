@@ -112,6 +112,22 @@ _UI_THREAD_COMMANDS = {
     "set_selected_clip_slot",
     "set_device_property",
     "load_audio_to_slot",
+    "set_session_record",
+    "get_song_time",
+    "set_song_time",
+    "back_to_arrangement",
+    "set_record_mode",
+    "set_metronome",
+    "set_overdub",
+    "set_clip_mixer_envelope",
+    "get_track_clips",
+    "set_track_color",
+    "move_track",
+    "get_track_input_options",
+    "set_track_input_routing",
+    "freeze_track",
+    "flatten_track",
+    "duplicate_track",
 }
 
 
@@ -522,6 +538,59 @@ class ThelmicLive(ControlSurface):
                 params["track_index"], params["slot"],
                 params.get("path"), params.get("item_name"),
             )
+        if cmd_type == "set_session_record":
+            self._song.session_record = bool(params["on"])
+            return {"session_record": self._song.session_record}
+        if cmd_type == "get_song_time":
+            return {
+                "song_time": float(self._song.current_song_time),
+                "is_playing": bool(self._song.is_playing),
+                "is_arranging": bool(getattr(self._song, "is_counting_in", False)) or bool(self._song.is_playing),
+            }
+        if cmd_type == "set_song_time":
+            self._song.current_song_time = float(params["beat"])
+            return {"song_time": self._song.current_song_time}
+        if cmd_type == "back_to_arrangement":
+            self._song.back_to_arranger = False
+            return {"back_to_arranger": False}
+        if cmd_type == "set_record_mode":
+            self._song.record_mode = bool(params["on"])
+            return {"record_mode": self._song.record_mode}
+        if cmd_type == "set_metronome":
+            self._song.metronome = bool(params["on"])
+            return {"metronome": self._song.metronome}
+        if cmd_type == "set_overdub":
+            self._song.overdub = bool(params["on"])
+            return {"overdub": self._song.overdub}
+        if cmd_type == "set_clip_mixer_envelope":
+            return self._set_clip_mixer_envelope(
+                params["clip_track"], params["clip_index"],
+                params["target_track"], params["mixer_param"], params["breakpoints"],
+            )
+        if cmd_type == "get_track_clips":
+            return self._get_track_clips(params["track_index"])
+        if cmd_type == "set_track_color":
+            track = self._track(params["track_index"])
+            track.color_index = int(params["color_index"])
+            return {"color_index": track.color_index}
+        if cmd_type == "move_track":
+            self._song.move_track(params["track_index"], params["target_position"])
+            return {"moved": True}
+        if cmd_type == "get_track_input_options":
+            return self._get_track_input_options(params["track_index"])
+        if cmd_type == "set_track_input_routing":
+            return self._set_track_input_routing(params["track_index"], params["target_name"])
+        if cmd_type == "freeze_track":
+            track = self._track(params["track_index"])
+            track.freeze()
+            return {"frozen": True}
+        if cmd_type == "flatten_track":
+            track = self._track(params["track_index"])
+            track.flatten()
+            return {"flattened": True}
+        if cmd_type == "duplicate_track":
+            self._song.duplicate_track(params["track_index"])
+            return {"duplicated": True, "tracks": len(self._song.tracks)}
         raise ValueError("unhandled UI command: " + cmd_type)
 
     # ------------------------------------------------------------------
@@ -1659,6 +1728,85 @@ class ThelmicLive(ControlSurface):
         if fine is not None:
             clip.pitch_fine = int(fine)
         return {"pitch_coarse": clip.pitch_coarse, "pitch_fine": clip.pitch_fine}
+
+    def _set_clip_mixer_envelope(self, clip_track, clip_index, target_track, mixer_param, breakpoints):
+        """Envelope a track-mixer parameter (volume / panning / sends[N]) across a clip.
+
+        mixer_param: 'volume', 'panning', 'send_0', 'send_1', etc.
+        """
+        track = self._track(clip_track)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        target = self._track(target_track)
+        mixer = target.mixer_device
+        if mixer_param == "volume":
+            param = mixer.volume
+        elif mixer_param == "panning":
+            param = mixer.panning
+        elif mixer_param.startswith("send_"):
+            idx = int(mixer_param.split("_")[1])
+            sends = list(mixer.sends)
+            if idx < 0 or idx >= len(sends):
+                raise IndexError("send index out of range")
+            param = sends[idx]
+        else:
+            raise ValueError("unknown mixer_param: " + mixer_param)
+        try:
+            clip.clear_envelope(param)
+        except Exception:
+            pass
+        env = clip.create_automation_envelope(param)
+        bps = sorted([(float(b[0]), float(b[1])) for b in breakpoints], key=lambda x: x[0])
+        for i, (t, v) in enumerate(bps):
+            length = max(0.001, bps[i+1][0] - t) if i + 1 < len(bps) else 0.5
+            try: env.insert_step(t, length, v)
+            except Exception: pass
+        return {
+            "clip_track": clip_track, "clip_index": clip_index,
+            "target_track": target_track, "param": mixer_param,
+            "breakpoints_written": len(bps),
+        }
+
+    def _get_track_clips(self, track_index):
+        track = self._track(track_index)
+        clips = []
+        for i, slot in enumerate(track.clip_slots):
+            if slot.has_clip:
+                clip = slot.clip
+                clips.append({
+                    "slot": i, "name": clip.name, "length": float(clip.length),
+                    "is_audio": bool(clip.is_audio_clip), "looping": bool(clip.looping),
+                })
+        return {"track_index": track_index, "name": track.name, "clips": clips,
+                "slot_count": len(list(track.clip_slots))}
+
+    def _get_track_input_options(self, track_index):
+        track = self._track(track_index)
+        types = []
+        try:
+            for rt in (track.available_input_routing_types or []):
+                types.append(getattr(rt, "display_name", str(rt)))
+        except Exception: pass
+        current = ""
+        try: current = getattr(track.input_routing_type, "display_name", "")
+        except Exception: pass
+        return {"track_index": track_index, "available_types": types, "current_type": current}
+
+    def _set_track_input_routing(self, track_index, target_name):
+        track = self._track(track_index)
+        candidates = list(track.available_input_routing_types or [])
+        target = None
+        for rt in candidates:
+            dn = getattr(rt, "display_name", "")
+            if dn == target_name or target_name in dn:
+                target = rt; break
+        if target is None:
+            names = [getattr(rt, "display_name", "?") for rt in candidates]
+            raise ValueError("no input matches '" + target_name + "'. Available: " + ", ".join(names))
+        track.input_routing_type = target
+        return {"track_index": track_index, "target": getattr(target, "display_name", target_name)}
 
     def _set_selected_clip_slot(self, track_index, slot):
         track = self._track(track_index)

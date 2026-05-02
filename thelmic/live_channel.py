@@ -202,6 +202,12 @@ class LiveChannel:
             "fire_clip", {"track_index": track_index, "clip_index": clip_index}
         )
 
+    def start_playback(self) -> Future:
+        return self._enqueue("start_playback", {})
+
+    def stop_playback(self) -> Future:
+        return self._enqueue("stop_playback", {})
+
     def stop_clip(self, track_index: int, clip_index: int) -> Future:
         return self._enqueue(
             "stop_clip", {"track_index": track_index, "clip_index": clip_index}
@@ -611,6 +617,67 @@ class LiveChannel:
             "track_index": track_index, "slot": slot,
             "path": path, "item_name": item_name,
         })
+
+    def set_session_record(self, on: bool) -> Future:
+        return self._enqueue("set_session_record", {"on": bool(on)})
+
+    def get_song_time(self) -> Future:
+        return self._enqueue("get_song_time", {})
+
+    def set_song_time(self, beat: float) -> Future:
+        return self._enqueue("set_song_time", {"beat": float(beat)})
+
+    def back_to_arrangement(self) -> Future:
+        return self._enqueue("back_to_arrangement", {})
+
+    def set_record_mode(self, on: bool) -> Future:
+        return self._enqueue("set_record_mode", {"on": bool(on)})
+
+    def set_metronome(self, on: bool) -> Future:
+        return self._enqueue("set_metronome", {"on": bool(on)})
+
+    def set_overdub(self, on: bool) -> Future:
+        return self._enqueue("set_overdub", {"on": bool(on)})
+
+    def set_clip_mixer_envelope(self, clip_track: int, clip_index: int,
+                                 target_track: int, mixer_param: str,
+                                 breakpoints: list) -> Future:
+        """mixer_param: 'volume' / 'panning' / 'send_0' / 'send_1' / ..."""
+        return self._enqueue("set_clip_mixer_envelope", {
+            "clip_track": clip_track, "clip_index": clip_index,
+            "target_track": target_track, "mixer_param": mixer_param,
+            "breakpoints": breakpoints,
+        })
+
+    def get_track_clips(self, track_index: int) -> Future:
+        return self._enqueue("get_track_clips", {"track_index": track_index})
+
+    def set_track_color(self, track_index: int, color_index: int) -> Future:
+        return self._enqueue("set_track_color", {
+            "track_index": track_index, "color_index": int(color_index),
+        })
+
+    def move_track(self, track_index: int, target_position: int) -> Future:
+        return self._enqueue("move_track", {
+            "track_index": track_index, "target_position": int(target_position),
+        })
+
+    def get_track_input_options(self, track_index: int) -> Future:
+        return self._enqueue("get_track_input_options", {"track_index": track_index})
+
+    def set_track_input_routing(self, track_index: int, target_name: str) -> Future:
+        return self._enqueue("set_track_input_routing", {
+            "track_index": track_index, "target_name": target_name,
+        })
+
+    def freeze_track(self, track_index: int) -> Future:
+        return self._enqueue("freeze_track", {"track_index": track_index})
+
+    def flatten_track(self, track_index: int) -> Future:
+        return self._enqueue("flatten_track", {"track_index": track_index})
+
+    def duplicate_track(self, track_index: int) -> Future:
+        return self._enqueue("duplicate_track", {"track_index": track_index})
 
     def list_browser_roots(self) -> Future:
         return self._enqueue("list_browser_roots", {})
