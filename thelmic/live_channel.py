@@ -514,6 +514,104 @@ class LiveChannel:
     def delete_master_device(self, device_index: int) -> Future:
         return self._enqueue("delete_master_device", {"device_index": device_index})
 
+    def duplicate_clip(self, track_index: int, src_slot: int, dst_slot: int) -> Future:
+        return self._enqueue("duplicate_clip", {
+            "track_index": track_index, "src_slot": src_slot, "dst_slot": dst_slot,
+        })
+
+    def bulk_load_drum_pads(self, track_index: int, device_index: int,
+                            browser_path: str, items: list) -> Future:
+        """items: [{"name": "filename.wav", "note": 36}, ...]"""
+        return self._enqueue("bulk_load_drum_pads", {
+            "track_index": track_index, "device_index": device_index,
+            "browser_path": browser_path, "items": items,
+        })
+
+    def set_clip_reverse(self, track_index: int, clip_index: int, reverse: bool) -> Future:
+        return self._enqueue("set_clip_reverse", {
+            "track_index": track_index, "clip_index": clip_index, "reverse": bool(reverse),
+        })
+
+    def set_clip_pitch(self, track_index: int, clip_index: int,
+                       coarse: int | None = None, fine: int | None = None) -> Future:
+        return self._enqueue("set_clip_pitch", {
+            "track_index": track_index, "clip_index": clip_index,
+            "coarse": coarse, "fine": fine,
+        })
+
+    def set_clip_gain(self, track_index: int, clip_index: int, gain: float) -> Future:
+        return self._enqueue("set_clip_gain", {
+            "track_index": track_index, "clip_index": clip_index, "gain": float(gain),
+        })
+
+    def get_device_property(self, track_index: int, device_index: int, attr: str) -> Future:
+        """Read any device attribute by name — e.g. 'gain_reduction' on Compressor."""
+        return self._enqueue("get_device_property", {
+            "track_index": track_index, "device_index": device_index, "attr": attr,
+        })
+
+    def create_scene(self, index: int = -1) -> Future:
+        return self._enqueue("create_scene", {"index": index})
+
+    def delete_scene(self, scene_index: int) -> Future:
+        return self._enqueue("delete_scene", {"scene_index": scene_index})
+
+    def get_scene_count(self) -> Future:
+        return self._enqueue("get_scene_count", {})
+
+    def get_drum_pad_chain_info(self, track_index: int, device_index: int, note: int) -> Future:
+        return self._enqueue("get_drum_pad_chain_info", {
+            "track_index": track_index, "device_index": device_index, "note": int(note),
+        })
+
+    def set_drum_pad_chain_audio_output(self, track_index: int, device_index: int,
+                                        note: int, target_name: str) -> Future:
+        return self._enqueue("set_drum_pad_chain_audio_output", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "target_name": target_name,
+        })
+
+    def set_drum_pad_chain_send(self, track_index: int, device_index: int, note: int,
+                                 send_index: int, value: float) -> Future:
+        return self._enqueue("set_drum_pad_chain_send", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "send_index": send_index, "value": float(value),
+        })
+
+    def set_drum_pad_chain_volume(self, track_index: int, device_index: int,
+                                   note: int, value: float) -> Future:
+        return self._enqueue("set_drum_pad_chain_volume", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "value": float(value),
+        })
+
+    def load_into_drum_pad_chain(self, track_index: int, device_index: int, note: int,
+                                  uri: str | None = None, path: str | None = None,
+                                  item_name: str | None = None) -> Future:
+        return self._enqueue("load_into_drum_pad_chain", {
+            "track_index": track_index, "device_index": device_index, "note": int(note),
+            "uri": uri, "path": path, "item_name": item_name,
+        })
+
+    def set_selected_clip_slot(self, track_index: int, slot: int) -> Future:
+        return self._enqueue("set_selected_clip_slot", {
+            "track_index": track_index, "slot": slot,
+        })
+
+    def set_device_property(self, track_index: int, device_index: int,
+                            attr: str, value) -> Future:
+        return self._enqueue("set_device_property", {
+            "track_index": track_index, "device_index": device_index,
+            "attr": attr, "value": value,
+        })
+
+    def load_audio_to_slot(self, track_index: int, slot: int,
+                           path: str, item_name: str | None = None) -> Future:
+        return self._enqueue("load_audio_to_slot", {
+            "track_index": track_index, "slot": slot,
+            "path": path, "item_name": item_name,
+        })
+
     def list_browser_roots(self) -> Future:
         return self._enqueue("list_browser_roots", {})
 
