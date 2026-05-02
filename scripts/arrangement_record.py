@@ -13,6 +13,9 @@ from thelmic.live_channel import LiveChannel
 
 
 # Scene sequence: (slot, bars to hold)
+# Final intense section alternates 15 and 16 in 8-bar phrases — they
+# play nicely into/out of each other and the swap creates extra dynamic
+# interplay vs holding each statically. Total bars unchanged (48 = 32+16).
 ARRANGEMENT = [
     (0,  16),  # INTRO pad
     (1,  16),  # STIRRING
@@ -27,8 +30,13 @@ ARRANGEMENT = [
     (12, 16),  # FOOTWORK FULL
     (13, 16),  # JUNGLE RETURN (anticipation)
     (14, 32),  # GABBER RECAP
-    (15, 32),  # DOUBLE PACE FINALE
-    (16, 16),  # OUTRO
+    # Finale alternation: 15↔16 every 8 bars × 6 = 48 bars
+    (15,  8),  # DOUBLE PACE FINALE
+    (16,  8),  # OUTRO bank
+    (15,  8),
+    (16,  8),
+    (15,  8),
+    (16,  8),
 ]
 
 # Anticipation pre-drop slots (last bar gets fills)
