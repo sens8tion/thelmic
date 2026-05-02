@@ -373,7 +373,12 @@ def main(num_takes=1):
                 hold_then_prefire(bars, next_slot)
                 elapsed_bars += bars
 
-            time.sleep(0.5)
+            # Let the crash decay + reverb tail ring out before stopping —
+            # otherwise the printed arrangement chops the tail. Crash decay
+            # is 6 beats, plus pad/reverb tails ~800ms, plus margin.
+            from thelmic.agent_helpers import OUTRO_LET_REVERB_RING_MS
+            tail_seconds = max(6 * beat_seconds, OUTRO_LET_REVERB_RING_MS / 1000.0) + 1.0
+            time.sleep(tail_seconds)
             ch.stop_playback().result(timeout=5)
             ch.set_session_record(False).result(timeout=5)
             ch.set_record_mode(False).result(timeout=5)
