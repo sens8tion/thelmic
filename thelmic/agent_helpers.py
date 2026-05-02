@@ -541,6 +541,112 @@ HATS_MUST_LOCK_TO_KICK_GRID = True
 
 
 # ======================================================================
+# FREQUENCY SEPARATION OF CONCERNS — sound-stage carving
+# ======================================================================
+#
+# Standard mix-engineering move: each voice owns a frequency region;
+# everything else is cut below (HP) or above (LP) so they don't mask
+# each other. The kick gets the punch zone, sub owns sub, hats own top,
+# mid voices live above the bass region. Below is the role table for a
+# typical jungle/DnB stack — adjust to taste per session.
+
+# role -> (hp_hz, lp_hz_or_None) — None means no LP (full top)
+FREQ_SEPARATION = {
+    "kick":      (35,   None),
+    "snare":     (90,   None),
+    "hat":       (250,  None),
+    "perc":      (120,  None),
+    "sub":       (30,   700),
+    "mid_bass":  (50,   400),
+    "bass":      (40,   None),
+    "stab":      (200,  None),
+    "lead":      (140,  None),
+    "pad":       (250,  None),
+    "organ":     (180,  None),
+    "vox":       (150,  None),
+    "drums_bus": (40,   None),
+    "fx":        (180,  None),
+}
+
+
+def apply_freq_separation(ch, track_index: int, role: str,
+                           eq_uri: str = "query:Audio%20Effects#EQ%20Eight"
+                           ) -> int:
+    """Carve frequency space for a track based on its role. Adds an EQ8 if
+    missing, sets band 1 = HP (always) and band 8 = LP (if role has one).
+    Returns the EQ8 device index."""
+    if role not in FREQ_SEPARATION:
+        raise ValueError(f"unknown role '{role}', valid: {list(FREQ_SEPARATION)}")
+    hp, lp = FREQ_SEPARATION[role]
+    eq = ensure_device(ch, track_index, "Eq8", eq_uri)
+    set_eq_band(ch, track_index, eq, 1, ftype=EQ8_HP_12_GUESS, hz=hp,
+                gain=0.0, q_norm=0.5, on=True)
+    if lp is not None:
+        set_eq_band(ch, track_index, eq, 8, ftype=EQ8_LP_12_GUESS, hz=lp,
+                    gain=0.0, q_norm=0.5, on=True)
+    return eq
+
+
+# ======================================================================
+# SMOOTH ENTRIES — non-drop entries get fade-in + sub-second filter sweep
+# ======================================================================
+#
+# When a voice enters mid-track and it's NOT the drop impact, hard-on
+# attacks sound jarring. Two-part smooth-in:
+#   1. Volume envelope: ramp 0 → 1.0 over ~250ms (clip envelope on
+#      track Volume / Mixer device)
+#   2. Filter sweep: EQ8 HP starts at a high frequency (cutting the body)
+#      and sweeps down to its resting HP value over ~400ms — opens the
+#      voice into the mix, gives the ear a transition cue
+#
+# Drops are exempt: an impact note never gets faded — it lives on the
+# contrast with the silence/thinned bar before it.
+
+ENTRY_FADE_MS_DEFAULT = 250
+ENTRY_FILTER_SWEEP_MS_DEFAULT = 400
+ENTRY_FILTER_SWEEP_FROM_HZ = 2000   # start cutting below this
+# `to_hz` defaults to the role's resting HP
+
+
+def smooth_clip_entry(ch, track_index: int, slot: int, *,
+                       sweep_ms: int = ENTRY_FILTER_SWEEP_MS_DEFAULT,
+                       sweep_from_hz: float = ENTRY_FILTER_SWEEP_FROM_HZ,
+                       sweep_to_hz: float = 180.0,
+                       eq_device_index: int | None = None,
+                       eq_band: int = 1,
+                       bpm: float | None = None) -> bool:
+    """Smooth-in a non-drop clip entry via a sub-second HP filter sweep:
+    EQ8 HP frequency sweeps from sweep_from_hz down to sweep_to_hz over
+    sweep_ms. The brightness opening into the mix gives the ear a
+    transition cue without a hard volume fade.
+
+    Caller must have a track-level EQ8 (use apply_freq_separation first).
+    Returns True if the envelope was set, False otherwise (eg empty slot)."""
+    if bpm is None:
+        sess = ch.get_session_info().result(timeout=5)
+        bpm = sess.get("tempo", 120.0)
+    sweep_beats = ms_to_beats(sweep_ms, bpm)
+    if eq_device_index is None:
+        eq_device_index = find_device(ch, track_index, "Eq8")
+        if eq_device_index is None:
+            raise RuntimeError(f"track {track_index}: no EQ8 — call apply_freq_separation first")
+    sweep_breakpoints = [
+        (0.0,         hz_to_norm(sweep_from_hz)),
+        (sweep_beats, hz_to_norm(sweep_to_hz)),
+    ]
+    freq_param_name = f"{eq_band} Frequency A"
+    try:
+        ch.set_clip_envelope(track_index, slot,
+                              target_track=track_index,
+                              target_device=eq_device_index,
+                              target_param=freq_param_name,
+                              breakpoints=sweep_breakpoints).result(timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+# ======================================================================
 # STUDIO ENGINEER PRINCIPLES — practical advice as code, not folklore
 # ======================================================================
 #
@@ -835,6 +941,10 @@ __all__ = [
     "configure_master_glue",
     # gain staging
     "gain_stage_track", "TRACK_LEVELS",
+    # frequency separation + smooth entries
+    "FREQ_SEPARATION", "apply_freq_separation",
+    "ENTRY_FADE_MS_DEFAULT", "ENTRY_FILTER_SWEEP_MS_DEFAULT",
+    "smooth_clip_entry",
     # recipes
     "midbass_thump_recipe", "sub_track_recipe", "drop_anticipation_recipe",
     # studio engineer principles
