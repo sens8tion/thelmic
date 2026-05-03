@@ -111,6 +111,13 @@ ARRANGEMENT = [
     ("scene",  5,  8),                        # BREAKDOWN   — quick recovery
     ("scene", 13,  8),                        # JUNGLE RET  — half-anticipation
     # ── REBUILD into D2 ─────────────────────────────────────
+    # MASTER bus EQ8 HP rises during rebuild — global filter pulls everything thin
+    # (Live's master-EQ band 1 is Bell type 3 by default, so this acts as a
+    # low-cut tilt). Pairs with the per-track HP rise for a unified effect.
+    ("ramp", {"track": "MASTER", "device_substring": "eq8",
+              "param_name": "1 Frequency A", "from": 0.20, "to": 0.55,
+              "duration_bars": 8, "steps": 24, "curve": "exp",
+              "tag": "MASTER global thinning for D2"}),
     # TECTONIC HP comes BACK DOWN during the rebuild (bass returning)
     ("ramp", {"track": "TECTONIC", "device_substring": "eq8",
               "param_name": "1 Frequency A", "from": 0.55, "to": 0.10,
@@ -146,6 +153,21 @@ ARRANGEMENT = [
     ("silence", 6, "void before Rotterdam"),  # ⏸ 6 beats — void
     ("tempo", 165.0, "snap back at D2"),
     # ── ⚡⚡ DROP 2: ROTTERDAM (gabber → breakcore → sustained gabber) ─
+    # MASTER global filter SLAMS open at D2 (was raised during rebuild)
+    ("ramp", {"track": "MASTER", "device_substring": "eq8",
+              "param_name": "1 Frequency A", "from": 0.55, "to": 0.10,
+              "duration_bars": 1, "steps": 8, "curve": "exp",
+              "tag": "MASTER slams open at D2"}),
+    # MASTER Saturator drive intensifies during the rotterdam (global warmth → grit)
+    ("ramp", {"track": "MASTER", "device_substring": "saturator",
+              "param_name": "Drive", "from": 0.10, "to": 0.45,
+              "duration_bars": 16, "steps": 24, "curve": "exp",
+              "tag": "MASTER drive intensifies in gabber"}),
+    # MASTER Glue Comp threshold ramps lower for global pumping cohesion
+    ("ramp", {"track": "MASTER", "device_substring": "glue",
+              "param_name": "Threshold", "from": -10.0, "to": -16.0,
+              "duration_bars": 16, "steps": 24, "curve": "linear",
+              "tag": "MASTER glue tightens"}),
     # SUBBONK comp tightens HARDER during D2
     ("ramp", {"track": "SUBBONK", "device_substring": "compressor",
               "param_name": "Threshold", "from": 0.30, "to": 0.15,
@@ -174,6 +196,15 @@ ARRANGEMENT = [
     ("scene",  9, 16),                        # BREAKCORE   — Rotterdam saturation peak
     ("scene",  7, 24),                        # GABBER 2    — sustained max density
     # ── DESCENT + REPRISE ──────────────────────────────────
+    # MASTER ramps back to gentle levels for the descent
+    ("ramp", {"track": "MASTER", "device_substring": "saturator",
+              "param_name": "Drive", "from": 0.45, "to": 0.10,
+              "duration_bars": 4, "steps": 16, "curve": "linear",
+              "tag": "MASTER drive release"}),
+    ("ramp", {"track": "MASTER", "device_substring": "glue",
+              "param_name": "Threshold", "from": -16.0, "to": -10.0,
+              "duration_bars": 4, "steps": 16, "curve": "linear",
+              "tag": "MASTER glue release"}),
     # TECTONIC pitch returns to 0 over the descent (bass ascending out of sub)
     ("ramp", {"track": "TECTONIC", "device_substring": "operator",
               "param_name": "Transpose", "from": -12.0, "to": 0.0,
@@ -509,22 +540,42 @@ def _event_bars(event):
 # ----------------------------------------------------------------------
 
 def _resolve_ramp_target(ch, n_tracks, ramp):
-    """Resolve a ramp's target track / device / param indices."""
+    """Resolve a ramp's target track / device / param indices.
+    track='MASTER' / 'MAIN' routes to master bus (returned as tidx=-1)."""
     tname = ramp.get("track")
-    tidx = find_track(ch, n_tracks, tname) if tname else None
-    if tidx is None: return None
-    dev_idx = ramp.get("device_idx")
-    if dev_idx is None and ramp.get("device_substring"):
-        info = ch.get_track_info(tidx).result(timeout=3)
-        substr = ramp["device_substring"].lower()
-        for di, d in enumerate(info.get("devices", [])):
-            nm = (d.get("name") or "") + " " + (d.get("class_name") or "")
-            if substr in nm.lower():
-                dev_idx = di; break
-    if dev_idx is None: return None
+    is_master = tname is not None and tname.upper() in ("MASTER", "MAIN")
+
+    if is_master:
+        tidx = -1
+        dev_idx = ramp.get("device_idx")
+        if dev_idx is None and ramp.get("device_substring"):
+            substr = ramp["device_substring"].lower()
+            for di in range(8):
+                try:
+                    minfo = ch.get_master_device_info(di).result(timeout=3)
+                except Exception:
+                    break
+                nm = (minfo.get("name") or "") + " " + (minfo.get("class_name") or "")
+                if substr in nm.lower():
+                    dev_idx = di; break
+        if dev_idx is None: return None
+        di = ch.get_master_device_info(dev_idx).result(timeout=3)
+    else:
+        tidx = find_track(ch, n_tracks, tname) if tname else None
+        if tidx is None: return None
+        dev_idx = ramp.get("device_idx")
+        if dev_idx is None and ramp.get("device_substring"):
+            info = ch.get_track_info(tidx).result(timeout=3)
+            substr = ramp["device_substring"].lower()
+            for di, d in enumerate(info.get("devices", [])):
+                nm = (d.get("name") or "") + " " + (d.get("class_name") or "")
+                if substr in nm.lower():
+                    dev_idx = di; break
+        if dev_idx is None: return None
+        di = ch.get_device_info(tidx, dev_idx).result(timeout=3)
+
     pname = ramp.get("param_name")
     if pname is None: return None
-    di = ch.get_device_info(tidx, dev_idx).result(timeout=3)
     pidx = next((p["index"] for p in di["parameters"] if p["name"] == pname), None)
     if pidx is None: return None
     return (tidx, dev_idx, pidx)
@@ -560,8 +611,7 @@ def _drain_ramps(ch, pending_ramps):
 
     Fire-and-forget through the BULK queue lane so ramp RPCs don't block
     priority-lane sync calls (stop_all_clips, fire_scene, set_tempo).
-    Critical for staying in sync with the playhead — blocking-on-result or
-    sharing the priority lane would accumulate drift catastrophically."""
+    tidx=-1 routes to master bus via set_master_device_param."""
     if not pending_ramps: return
     now = time.monotonic()
     remaining = []
@@ -569,10 +619,15 @@ def _drain_ramps(ch, pending_ramps):
         when, tidx, dev, pidx, v = entry
         if when <= now:
             try:
-                ch._enqueue("set_device_param",
-                              {"track_index": tidx, "device_index": dev,
-                               "param_index": pidx, "value": float(v)},
-                              lane="bulk")
+                if tidx == -1:
+                    ch._enqueue("set_master_device_param",
+                                  {"device_index": dev, "param_index": pidx,
+                                   "value": float(v)}, lane="bulk")
+                else:
+                    ch._enqueue("set_device_param",
+                                  {"track_index": tidx, "device_index": dev,
+                                   "param_index": pidx, "value": float(v)},
+                                  lane="bulk")
             except Exception: pass
         else:
             remaining.append(entry)

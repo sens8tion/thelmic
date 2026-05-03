@@ -417,12 +417,13 @@ def main():
                               pull_back=True, breathe=True)
         print(f"  S3: {n}")
 
-        # ── PASS 9: TECTONIC S4,S6,S7 — full octave during drops ─
-        print("\nPASS 9: TECTONIC S4,S6,S7 — full power")
+        # ── PASS 9: TECTONIC S4,S6,S7,S9 — full octave during drops ─
+        print("\nPASS 9: TECTONIC S4,S6,S7,S9 — full power")
         for slot, length, oct_shift, dens, tag in [
             (4, 32.0, 12, "16th", "mid_arp_drop_ragga"),
             (6, 16.0, 12, "16th", "mid_arp_rebuild"),
             (7, 32.0, 12, "16th", "mid_arp_rotterdam"),
+            (9, 32.0,  0, "16th", "mid_arp_breakcore"),    # base octave for chaos
         ]:
             t = []
             n_reps = int(length / 16)
@@ -441,6 +442,7 @@ def main():
             (4, 32.0,  0, "stab_drop_ragga"),  # back to Cm
             (6, 16.0,  3, "stab_rebuild"),     # Ebm (up a min3rd — different tonal centre for D2)
             (7, 32.0,  0, "stab_rotterdam"),   # back to Cm
+            (9, 32.0, -1, "stab_breakcore"),   # Bm (uneasy semitone tension during chaos)
         ]:
             stb = []
             for r in range(int(length / 4)):
@@ -458,6 +460,8 @@ def main():
                 (2, 16.0, [0.0, 4.0, 8.0, 12.0]),
                 (3, 16.0, [0.0, 4.0, 8.0, 12.0, 14.0, 15.0]),  # tighten into drop
                 (6, 16.0, [0.0, 4.0, 8.0, 12.0, 14.0, 15.0]),
+                (7, 32.0, [0.0, 16.0]),                        # join impact stack
+                (9, 32.0, [0.0, 8.0, 16.0, 24.0]),             # breakcore stabs
             ]:
                 n = write_midi_clip(ch, T["VOX YO"], slot, length, f"yo_{slot}",
                                       vocal_pulse(0, hits), pull_back=False)
@@ -475,14 +479,17 @@ def main():
                                       vocal_pulse(0, hits), pull_back=False)
                 print(f"  S{slot}: {n}")
 
-        # ── PASS 13: VOX SEL ("selassie i!") — sustained ──────────
-        print("\nPASS 13: VOX SEL during D2")
+        # ── PASS 13: VOX SEL ("selassie i!") — D2 + breakcore ─────
+        print("\nPASS 13: VOX SEL during D2 + breakcore")
         if T["VOX SEL"] is not None:
-            # In the rotterdam: long-held trigger every 4 bars
-            sel_hits = [0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0]
+            sel_hits_d2 = [0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 28.0]
             n = write_midi_clip(ch, T["VOX SEL"], 7, 32.0, "selassie_rotterdam",
-                                  vocal_pulse(0, sel_hits, vel=120), pull_back=False)
+                                  vocal_pulse(0, sel_hits_d2, vel=120), pull_back=False)
             print(f"  S7: {n}")
+            sel_hits_bc = [0.0, 8.0, 16.0, 24.0]
+            n = write_midi_clip(ch, T["VOX SEL"], 9, 32.0, "selassie_breakcore",
+                                  vocal_pulse(0, sel_hits_bc, vel=110), pull_back=False)
+            print(f"  S9: {n}")
 
         sess.snapshot("after-compose")
         print("\n" + "=" * 60)
