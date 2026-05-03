@@ -100,6 +100,11 @@ _UI_THREAD_COMMANDS = {
     "set_clip_reverse",
     "set_clip_pitch",
     "set_clip_gain",
+    "set_clip_fades",
+    "get_clip_props",
+    "clear_arrangement_clips",
+    "inspect_clip_envelopes",
+    "re_enable_automation",
     "get_device_property",
     "create_scene",
     "delete_scene",
@@ -493,6 +498,21 @@ class ThelmicLive(ControlSurface):
             return self._set_clip_gain(
                 params["track_index"], params["clip_index"], params["gain"],
             )
+        if cmd_type == "set_clip_fades":
+            return self._set_clip_fades(
+                params["track_index"], params["clip_index"],
+                params.get("fade_in"), params.get("fade_out"),
+            )
+        if cmd_type == "get_clip_props":
+            return self._get_clip_props(params["track_index"], params["clip_index"])
+        if cmd_type == "inspect_clip_envelopes":
+            return self._inspect_clip_envelopes(params["track_index"], params["clip_index"])
+        if cmd_type == "re_enable_automation":
+            try:
+                self._song.re_enable_automation()
+                return {"re_enabled": True}
+            except Exception as e:
+                return {"re_enabled": False, "err": str(e)}
         if cmd_type == "get_device_property":
             return self._get_device_property(
                 params["track_index"], params["device_index"], params["attr"],
@@ -1309,28 +1329,38 @@ class ThelmicLive(ControlSurface):
         except Exception:
             pass
         env = clip.create_automation_envelope(param)
-        # Sort breakpoints by time so we can compute step lengths
+        # Sort breakpoints by time
         bps = sorted([(float(bp[0]), float(bp[1])) for bp in breakpoints], key=lambda x: x[0])
-        # Staircase: each step holds value v from t until next breakpoint's time.
-        # Last step holds to clip end (we use 0.5 beat as a safe tail).
-        for i, (t, v) in enumerate(bps):
-            if i + 1 < len(bps):
-                length = max(0.001, bps[i + 1][0] - t)
-            else:
-                length = 0.5
-            try:
-                env.insert_step(t, length, v)
-            except Exception as e:
-                self.log_message("envelope insert_step failed at t=" + str(t) + ": " + str(e))
+        # Prefer add_breakpoint (interpolated) so values actually animate
+        # at audio rate. Fall back to insert_step (staircase) if not
+        # available on this Live version.
+        n_written = 0
+        last_err = None
+        for t, v in bps:
+            wrote = False
+            for fn_name in ("add_breakpoint", "insert_step"):
+                fn = getattr(env, fn_name, None)
+                if fn is None: continue
                 try:
-                    env.add_breakpoint(t, v)
-                except Exception:
-                    pass
+                    if fn_name == "insert_step":
+                        # length-needed variant: use small fixed length
+                        fn(t, 0.001, v)
+                    else:
+                        fn(t, v)
+                    n_written += 1
+                    wrote = True
+                    break
+                except Exception as e:
+                    last_err = (fn_name, str(e))
+            if not wrote and last_err:
+                self.log_message("envelope write failed at t=" + str(t)
+                                  + " via " + last_err[0] + ": " + last_err[1])
         return {
             "clip_track": clip_track,
             "clip_index": clip_index,
             "target": param.name,
-            "breakpoints_written": len(breakpoints),
+            "breakpoints_written": n_written,
+            "fn_attempted": "add_breakpoint preferred",
         }
 
     def _clear_clip_envelope(self, clip_track, clip_index, target_track, target_device, target_param):
@@ -2066,6 +2096,110 @@ class ThelmicLive(ControlSurface):
         clip = slot.clip
         clip.gain = float(gain)
         return {"gain": clip.gain}
+
+    def _get_clip_props(self, track_index, clip_index):
+        """Read every diagnostic clip property we can reach for debugging
+        clip-launch timing / start-offset / loop / warp issues."""
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            return {"has_clip": False}
+        c = slot.clip
+        out = {"has_clip": True, "name": c.name}
+        for attr in ("length", "loop_start", "loop_end", "start_marker",
+                     "end_marker", "looping", "warping", "warp_mode",
+                     "is_audio_clip", "is_midi_clip", "is_playing",
+                     "fades_enabled", "fade_in_time", "fade_out_time",
+                     "launch_mode", "launch_quantization",
+                     "legato", "ram_mode", "gain", "pitch_coarse",
+                     "pitch_fine", "signature_numerator",
+                     "signature_denominator", "color_index"):
+            try:
+                v = getattr(c, attr)
+                if not isinstance(v, (int, float, bool, str)):
+                    v = str(v)
+                out[attr] = v
+            except Exception:
+                pass
+        return out
+
+    def _inspect_clip_envelopes(self, track_index, clip_index):
+        """Return clip + envelope object diagnostics."""
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            return {"has_clip": False}
+        clip = slot.clip
+        out = {
+            "has_clip": True,
+            "name": clip.name,
+            "is_audio_clip": getattr(clip, "is_audio_clip", None),
+            "has_envelopes": bool(getattr(clip, "has_envelopes", False)),
+        }
+        envs_attr = getattr(clip, "automation_envelopes", None)
+        if envs_attr is not None:
+            try:
+                envs = list(envs_attr)
+                out["automation_envelopes_count"] = len(envs)
+                env_summaries = []
+                for e in envs:
+                    summary = {
+                        "param_attr_present": hasattr(e, "parameter"),
+                        "param": None,
+                        "events_count": None,
+                        "values_at_times": {},
+                    }
+                    if hasattr(e, "parameter"):
+                        try:
+                            p = e.parameter
+                            summary["param"] = p.name if p is not None else None
+                        except Exception as ex:
+                            summary["param_err"] = str(ex)
+                    # try events_in_range to enumerate stored events
+                    try:
+                        events = list(e.events_in_range(0.0, 64.0))
+                        summary["events_count"] = len(events)
+                        if events:
+                            summary["events_sample"] = [
+                                {"time": getattr(ev, "time", None),
+                                 "value": getattr(ev, "value", None)}
+                                for ev in events[:5]
+                            ]
+                    except Exception as ex:
+                        summary["events_err"] = str(ex)
+                    # value_at_time at a few sample beats
+                    try:
+                        for beat in (0.0, 4.0, 8.0, 12.0, 16.0):
+                            summary["values_at_times"][beat] = e.value_at_time(beat)
+                    except Exception as ex:
+                        summary["value_at_time_err"] = str(ex)
+                    env_summaries.append(summary)
+                out["envelopes"] = env_summaries
+            except Exception as ex:
+                out["envelopes_iter_err"] = str(ex)
+        return out
+
+    def _set_clip_fades(self, track_index, clip_index, fade_in=None, fade_out=None):
+        """Audio-clip fade in/out times in SECONDS. clip.fades_enabled
+        must be on for them to take effect. MIDI clips don't support this."""
+        track = self._track(track_index)
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        clip = slot.clip
+        out = {}
+        try:
+            if hasattr(clip, "fades_enabled"):
+                clip.fades_enabled = True
+            if fade_in is not None:
+                clip.fade_in_time = float(fade_in)
+                out["fade_in"] = clip.fade_in_time
+            if fade_out is not None:
+                clip.fade_out_time = float(fade_out)
+                out["fade_out"] = clip.fade_out_time
+        except Exception as e:
+            raise RuntimeError("set_clip_fades failed (audio clip required?): " + str(e))
+        return out
 
     def _set_clip_warp(self, track_index, clip_index, warping=None, warp_mode=None):
         """warping: bool. warp_mode: int (0=Beats, 1=Tones, 2=Texture, 3=Re-Pitch, 4=Complex, 5=REX, 6=Complex Pro)."""

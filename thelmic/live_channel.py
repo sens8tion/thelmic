@@ -520,6 +520,27 @@ class LiveChannel:
     def delete_master_device(self, device_index: int) -> Future:
         return self._enqueue("delete_master_device", {"device_index": device_index})
 
+    def set_clip_fades(self, track_index: int, clip_index: int,
+                        fade_in: float | None = None,
+                        fade_out: float | None = None) -> Future:
+        return self._enqueue("set_clip_fades", {
+            "track_index": track_index, "clip_index": clip_index,
+            "fade_in": fade_in, "fade_out": fade_out,
+        })
+
+    def get_clip_props(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue("get_clip_props", {
+            "track_index": track_index, "clip_index": clip_index,
+        })
+
+    def inspect_clip_envelopes(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue("inspect_clip_envelopes", {
+            "track_index": track_index, "clip_index": clip_index,
+        })
+
+    def re_enable_automation(self) -> Future:
+        return self._enqueue("re_enable_automation", {})
+
     def duplicate_clip(self, track_index: int, src_slot: int, dst_slot: int) -> Future:
         return self._enqueue("duplicate_clip", {
             "track_index": track_index, "src_slot": src_slot, "dst_slot": dst_slot,
