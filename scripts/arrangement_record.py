@@ -77,8 +77,13 @@ ARRANGEMENT = [
               "duration_bars": 16, "steps": 32, "curve": "linear",
               "tag": "HARDKIT HP relaxes into D1"}),
     ("scene",  3, 16),                        # RISER       — thinned + impact pattern
-    ("silence", 4, "void before D1"),         # ⏸ 1-bar void → big-er D1
-    # ── ⚡ DROP 1 (ragga jungle) ──────────────────────────
+    ("silence", 2, "tiny void"),              # ⏸ 0.5b — false-drop setup
+    # ── ⚡ FALSE D1 ─────────────────────────────────────────
+    ("scene",  4, 4),                         # FAKE D1     — drop hits for 4 bars
+    ("silence", 4, "FAKE-OUT void"),          # ⏸ 1 bar — listener thinks "done"
+    ("scene",  1, 4),                         # callback to STIRRING (sudden drop in dynamics)
+    ("silence", 4, "real void before D1"),    # ⏸ 1 bar — real anticipation
+    # ── ⚡ REAL D1 ─────────────────────────────────────────
     # SUBBONK compressor threshold ramp — sidechain tightens during the drop
     ("ramp", {"track": "SUBBONK", "device_substring": "compressor",
               "param_name": "Threshold", "from": 0.55, "to": 0.30,
@@ -89,17 +94,34 @@ ARRANGEMENT = [
               "param_name": "Drive", "from": 0.15, "to": 0.45,
               "duration_bars": 24, "steps": 24, "curve": "exp",
               "tag": "TECTONIC drive grits up over D1"}),
-    ("scene",  4, 24),                        # DROP 1      — slam but not the bigness
+    ("scene",  4, 24),                        # DROP 1 (real) — full ragga jungle
     # ── PIVOT (throw the listener) ─────────────────────────
     # COLD MIST LP closes during the pivot for tonal contrast
     ("ramp", {"track": "COLD MIST", "device_substring": "eq8",
               "param_name": "8 Frequency A", "from": 0.85, "to": 0.45,
               "duration_bars": 8, "steps": 24, "curve": "exp",
               "tag": "COLD MIST LP close over BREAKDOWN"}),
+    # Anti-build: TECTONIC HP rises during the pivot (filter starts cutting bass)
+    # Creates a thinning effect that makes D2 feel bigger when the bass returns
+    ("ramp", {"track": "TECTONIC", "device_substring": "eq8",
+              "param_name": "1 Frequency A", "from": 0.20, "to": 0.55,
+              "duration_bars": 16, "steps": 32, "curve": "exp",
+              "tag": "TECTONIC HP rises (anti-build during pivot)"}),
     ("scene", 12,  8),                        # FOOTWORK    — different rhythmic feel
     ("scene",  5,  8),                        # BREAKDOWN   — quick recovery
     ("scene", 13,  8),                        # JUNGLE RET  — half-anticipation
-    # ── REBUILD into D2: chopper amount + tempo pull-back + sync rate tighten ─
+    # ── REBUILD into D2 ─────────────────────────────────────
+    # TECTONIC HP comes BACK DOWN during the rebuild (bass returning)
+    ("ramp", {"track": "TECTONIC", "device_substring": "eq8",
+              "param_name": "1 Frequency A", "from": 0.55, "to": 0.10,
+              "duration_bars": 8, "steps": 24, "curve": "linear",
+              "tag": "TECTONIC HP collapses for D2 (bass slam)"}),
+    # TECTONIC pitch slides DOWN an octave during rebuild — when D2 hits
+    # the bass is at full sub depth (Transpose 0 → -12)
+    ("ramp", {"track": "TECTONIC", "device_substring": "operator",
+              "param_name": "Transpose", "from": 0.0, "to": -12.0,
+              "duration_bars": 8, "steps": 24, "curve": "exp",
+              "tag": "TECTONIC pitch slide DOWN to sub for D2"}),
     # ORGAN Chopper #1 Amount 0→1 over the rebuild
     ("ramp", {"track": "ORGAN", "device_idx": 2,
               "param_name": "Amount", "from": 0.0, "to": 1.0,
@@ -119,8 +141,8 @@ ARRANGEMENT = [
               "duration_bars": 8, "steps": 18, "curve": "linear",
               "tag": "Chopper1 rate tighten"}),
     ("scene",  6,  8),                        # REBUILD     — tightening
-    # Tempo pull-back 165→158 over the silence, then snap back at D2
-    ("tempo", 158.0, "pull-back"),
+    # Bigger tempo pull-back: 165→145 (more dramatic stretch feel)
+    ("tempo", 145.0, "DRAMATIC pull-back"),
     ("silence", 6, "void before Rotterdam"),  # ⏸ 6 beats — void
     ("tempo", 165.0, "snap back at D2"),
     # ── ⚡⚡ DROP 2: ROTTERDAM (gabber → breakcore → sustained gabber) ─
@@ -129,11 +151,20 @@ ARRANGEMENT = [
               "param_name": "Threshold", "from": 0.30, "to": 0.15,
               "duration_bars": 16, "steps": 24, "curve": "exp",
               "tag": "SUBBONK comp peak during gabber"}),
-    # TECTONIC drive peaks during the gabber
+    # TECTONIC drive peaks during the gabber — cranked
     ("ramp", {"track": "TECTONIC", "device_substring": "saturator",
-              "param_name": "Drive", "from": 0.45, "to": 0.75,
+              "param_name": "Drive", "from": 0.45, "to": 0.85,
               "duration_bars": 16, "steps": 24, "curve": "exp",
-              "tag": "TECTONIC drive peak gabber"}),
+              "tag": "TECTONIC drive peak gabber (cranked)"}),
+    # ORGAN Choppers Amount climbs again during gabber for max stutter
+    ("ramp", {"track": "ORGAN", "device_idx": 2,
+              "param_name": "Amount", "from": 1.0, "to": 1.0,
+              "duration_bars": 16, "steps": 4, "curve": "linear",
+              "tag": "Chopper1 hold full during gabber"}),
+    ("ramp", {"track": "ORGAN", "device_idx": 3,
+              "param_name": "Amount", "from": 1.0, "to": 1.0,
+              "duration_bars": 16, "steps": 4, "curve": "linear",
+              "tag": "Chopper2 hold full during gabber"}),
     ("scene",  7, 16),                        # GABBER 1    — drop hits
     # During BREAKCORE, ramp HARDKIT Saturator drive up for max density
     ("ramp", {"track": "HARDKIT", "device_substring": "saturator",
@@ -143,6 +174,11 @@ ARRANGEMENT = [
     ("scene",  9, 16),                        # BREAKCORE   — Rotterdam saturation peak
     ("scene",  7, 24),                        # GABBER 2    — sustained max density
     # ── DESCENT + REPRISE ──────────────────────────────────
+    # TECTONIC pitch returns to 0 over the descent (bass ascending out of sub)
+    ("ramp", {"track": "TECTONIC", "device_substring": "operator",
+              "param_name": "Transpose", "from": -12.0, "to": 0.0,
+              "duration_bars": 4, "steps": 16, "curve": "linear",
+              "tag": "TECTONIC pitch returns to root"}),
     # On the descent, drop saturator drives back to gentle
     ("ramp", {"track": "HARDKIT", "device_substring": "saturator",
               "param_name": "Drive", "from": 0.65, "to": 0.10,
