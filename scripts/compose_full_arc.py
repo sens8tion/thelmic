@@ -435,6 +435,22 @@ def main():
 
         # ── PASS 10: STAB — ragga organ chord stabs ──────────────
         print("\nPASS 10: STAB chord stabs across the build")
+        # Write a soft sustained intro pad on STAB slot 0 (since TECTONIC
+        # is muted during intro for the sub-free open). Long held chords
+        # at low velocity create the patient breath-y opening.
+        if T["STAB"] is not None:
+            intro_pad = []
+            chord = [60, 63, 67]   # Cm minor triad
+            # 4 chord changes over 16 bars — each held 4 bars
+            for bar_idx, root_off in enumerate([0, 0, -2, 0]):  # Cm, Cm, Bbm, Cm
+                bs = bar_idx * 4 * 4   # 16 beats per bar block? wait 4*4=16
+                # Actually bs is in beats; each chord block is 4 bars = 16 beats
+                bs = bar_idx * 16
+                for p in chord:
+                    intro_pad.append((p + root_off, bs, 16.0, 55))   # super soft pad
+            n = write_midi_clip(ch, T["STAB"], 0, 16.0, "intro_pad", intro_pad,
+                                  pull_back=False, breathe=True)
+            print(f"  S0: {n} (intro pad)")
         for slot, length, root_shift, tag in [
             (1, 16.0,  0, "stab_intro"),       # Cm
             (2, 16.0, -2, "stab_build"),       # Bbm (down a tone — tension)
@@ -443,13 +459,23 @@ def main():
             (6, 16.0,  3, "stab_rebuild"),     # Ebm (up a min3rd — different tonal centre for D2)
             (7, 32.0,  0, "stab_rotterdam"),   # back to Cm
             (9, 32.0, -1, "stab_breakcore"),   # Bm (uneasy semitone tension during chaos)
+            (11, 16.0, 0, "stab_outro_pad"),   # Cm sustained — gentle harmonic close
         ]:
-            stb = []
-            for r in range(int(length / 4)):
-                stb.extend(stab_chord_4bar(r * 4, root_shift))
+            if slot == 11:
+                # Outro: long sustained chords, very soft
+                outro_chord = [60, 63, 67]
+                stb = []
+                for bar_idx in range(4):
+                    bs = bar_idx * 4
+                    for p in outro_chord:
+                        stb.append((p, bs, 4.0, max(35, 60 - bar_idx * 6)))
+            else:
+                stb = []
+                for r in range(int(length / 4)):
+                    stb.extend(stab_chord_4bar(r * 4, root_shift))
             n = write_midi_clip(ch, T["STAB"], slot, length, tag, stb,
                                   pull_back=(slot in (3, 6)),    # tighten before drops
-                                  breathe=True)
+                                  breathe=(slot != 11))
             print(f"  S{slot}: {n}")
 
         # ── PASS 11: VOX YO ("yo!") — at scene boundaries during build ─
