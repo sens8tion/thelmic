@@ -197,6 +197,17 @@ class LiveChannel:
     def set_tempo(self, bpm: float) -> Future:
         return self._enqueue("set_tempo", {"tempo": float(bpm)})
 
+    def set_scene_tempo(self, scene_index: int, tempo: float) -> Future:
+        """Bake a per-scene tempo so Live snaps to it when the scene fires.
+        Persists in the .als. Pass 0 (or negative) to unbind a scene's
+        tempo override."""
+        return self._enqueue("set_scene_tempo", {
+            "scene_index": int(scene_index), "tempo": float(tempo),
+        })
+
+    def get_scene_tempo(self, scene_index: int) -> Future:
+        return self._enqueue("get_scene_tempo", {"scene_index": int(scene_index)})
+
     def fire_clip(self, track_index: int, clip_index: int) -> Future:
         return self._enqueue(
             "fire_clip", {"track_index": track_index, "clip_index": clip_index}

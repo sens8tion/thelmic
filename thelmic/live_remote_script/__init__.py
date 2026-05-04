@@ -67,6 +67,8 @@ _UI_THREAD_COMMANDS = {
     "set_device_sidechain_source",
     "get_device_routing_options",
     "fire_scene",
+    "set_scene_tempo",
+    "get_scene_tempo",
     "stop_all_clips",
     "set_track_output_routing",
     "get_track_output_options",
@@ -406,6 +408,12 @@ class ThelmicLive(ControlSurface):
             )
         if cmd_type == "fire_scene":
             return self._fire_scene(params["scene_index"])
+        if cmd_type == "set_scene_tempo":
+            return self._set_scene_tempo(
+                params["scene_index"], params["tempo"]
+            )
+        if cmd_type == "get_scene_tempo":
+            return self._get_scene_tempo(params["scene_index"])
         if cmd_type == "stop_all_clips":
             return self._stop_all_clips()
         if cmd_type == "set_track_output_routing":
@@ -2366,6 +2374,25 @@ class ThelmicLive(ControlSurface):
             raise IndexError("scene_index out of range")
         scenes[scene_index].fire()
         return {"scene_index": scene_index, "fired": True}
+
+    def _set_scene_tempo(self, scene_index, tempo):
+        """Bake a per-scene tempo. Live snaps the project tempo when the
+        scene fires. Set tempo to 0 (or negative) to unbind."""
+        scenes = list(self._song.scenes)
+        if scene_index < 0 or scene_index >= len(scenes):
+            raise IndexError("scene_index out of range")
+        scene = scenes[scene_index]
+        try:
+            scene.tempo = float(tempo)
+        except Exception as e:
+            raise RuntimeError("Scene.tempo not assignable: " + str(e))
+        return {"scene_index": scene_index, "tempo": float(scene.tempo)}
+
+    def _get_scene_tempo(self, scene_index):
+        scenes = list(self._song.scenes)
+        if scene_index < 0 or scene_index >= len(scenes):
+            raise IndexError("scene_index out of range")
+        return {"scene_index": scene_index, "tempo": float(scenes[scene_index].tempo)}
 
     def _stop_all_clips(self):
         try:
