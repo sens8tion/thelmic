@@ -13,7 +13,10 @@ class BuildDropRelease:
     section_palette = [
         "intro", "stirring", "build", "riser", "anticipation",
         "drop", "fake_drop", "breakdown", "pivot", "rebuild",
-        "second_drop", "chaos_peak", "descent", "reprise", "outro",
+        "second_drop", "chaos_peak", "sustained_peak", "descent",
+        "reprise", "outro",
+        # genre-flavored sub-roles (caller may use any; these are recognised)
+        "footwork", "jungle_return",
     ]
 
     DROP_ROLES = {"drop", "second_drop", "chaos_peak"}
