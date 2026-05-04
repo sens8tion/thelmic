@@ -134,6 +134,20 @@ _UI_THREAD_COMMANDS = {
     "freeze_track",
     "flatten_track",
     "duplicate_track",
+    # New: per-clip MIDI note manipulation, follow actions, view, grooves,
+    # capture, listener snapshot.
+    "get_clip_notes",
+    "remove_clip_notes",
+    "set_clip_follow_action",
+    "get_clip_follow_action",
+    "select_track",
+    "select_scene",
+    "show_view",
+    "capture_midi",
+    "get_grooves",
+    "set_clip_groove",
+    "clear_clip_groove",
+    "get_listener_snapshot",
 }
 
 
@@ -617,6 +631,53 @@ class ThelmicLive(ControlSurface):
         if cmd_type == "duplicate_track":
             self._song.duplicate_track(params["track_index"])
             return {"duplicated": True, "tracks": len(self._song.tracks)}
+        if cmd_type == "get_clip_notes":
+            return self._get_clip_notes(
+                params["track_index"], params["clip_index"],
+                params.get("from_pitch", 0), params.get("pitch_span", 128),
+                params.get("from_time", 0.0), params.get("time_span"),
+            )
+        if cmd_type == "remove_clip_notes":
+            return self._remove_clip_notes(
+                params["track_index"], params["clip_index"],
+                params.get("from_pitch", 0), params.get("pitch_span", 128),
+                params.get("from_time", 0.0), params.get("time_span"),
+            )
+        if cmd_type == "set_clip_follow_action":
+            return self._set_clip_follow_action(
+                params["track_index"], params["clip_index"],
+                params.get("action_a"), params.get("action_b"),
+                params.get("chance_a"), params.get("chance_b"),
+                params.get("time_beats"), params.get("enabled"),
+            )
+        if cmd_type == "get_clip_follow_action":
+            return self._get_clip_follow_action(
+                params["track_index"], params["clip_index"]
+            )
+        if cmd_type == "select_track":
+            return self._select_track(params["track_index"])
+        if cmd_type == "select_scene":
+            return self._select_scene(params["scene_index"])
+        if cmd_type == "show_view":
+            return self._show_view(params["view"])
+        if cmd_type == "capture_midi":
+            try:
+                self._song.capture_midi()
+                return {"captured": True}
+            except Exception as e:
+                return {"captured": False, "err": str(e)}
+        if cmd_type == "get_grooves":
+            return self._get_grooves()
+        if cmd_type == "set_clip_groove":
+            return self._set_clip_groove(
+                params["track_index"], params["clip_index"], params["groove_index"]
+            )
+        if cmd_type == "clear_clip_groove":
+            return self._set_clip_groove(
+                params["track_index"], params["clip_index"], -1
+            )
+        if cmd_type == "get_listener_snapshot":
+            return self._get_listener_snapshot()
         raise ValueError("unhandled UI command: " + cmd_type)
 
     # ------------------------------------------------------------------
@@ -2434,4 +2495,166 @@ class ThelmicLive(ControlSurface):
             "name": getattr(cur, "name", "?"),
             "uri": getattr(cur, "uri", None),
             "items": items,
+        }
+
+    # ------------------------------------------------------------------
+    # MIDI note manipulation, follow actions, view, grooves, capture,
+    # listener-snapshot helpers
+    # ------------------------------------------------------------------
+
+    def _clip_or_raise(self, track_index, clip_index):
+        track = self._track(track_index)
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip_index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("No clip in slot")
+        return slot.clip
+
+    def _get_clip_notes(self, track_index, clip_index, from_pitch, pitch_span, from_time, time_span):
+        clip = self._clip_or_raise(track_index, clip_index)
+        if time_span is None:
+            time_span = float(clip.length)
+        notes_out = []
+        # Prefer Live 11+ extended API (returns objects with note_id +
+        # probability + velocity_deviation); fall back to legacy tuples.
+        try:
+            ext = clip.get_notes_extended(int(from_pitch), int(pitch_span),
+                                          float(from_time), float(time_span))
+            for n in ext:
+                notes_out.append({
+                    "note_id": getattr(n, "note_id", None),
+                    "pitch": int(n.pitch),
+                    "start_time": float(n.start_time),
+                    "duration": float(n.duration),
+                    "velocity": float(n.velocity),
+                    "mute": bool(n.mute),
+                    "probability": float(getattr(n, "probability", 1.0)),
+                    "velocity_deviation": float(getattr(n, "velocity_deviation", 0.0)),
+                })
+        except AttributeError:
+            tuples = clip.get_notes(float(from_time), int(from_pitch),
+                                    float(time_span), int(pitch_span))
+            for t in tuples:
+                pitch, start, dur, vel, mute = t
+                notes_out.append({
+                    "note_id": None, "pitch": int(pitch),
+                    "start_time": float(start), "duration": float(dur),
+                    "velocity": float(vel), "mute": bool(mute),
+                    "probability": 1.0, "velocity_deviation": 0.0,
+                })
+        return {"count": len(notes_out), "notes": notes_out}
+
+    def _remove_clip_notes(self, track_index, clip_index, from_pitch, pitch_span, from_time, time_span):
+        clip = self._clip_or_raise(track_index, clip_index)
+        if time_span is None:
+            time_span = float(clip.length)
+        try:
+            clip.remove_notes_extended(int(from_pitch), int(pitch_span),
+                                       float(from_time), float(time_span))
+        except AttributeError:
+            clip.remove_notes(float(from_time), int(from_pitch),
+                              float(time_span), int(pitch_span))
+        return {"removed": True}
+
+    # Follow-action enum: 0=none, 1=stop, 2=play_again, 3=previous, 4=next,
+    # 5=first, 6=last, 7=any, 8=other, 9=jump (Live 11). Live 12 expands
+    # this; we accept any int and let Live validate.
+    def _set_clip_follow_action(self, track_index, clip_index, action_a, action_b,
+                                chance_a, chance_b, time_beats, enabled):
+        clip = self._clip_or_raise(track_index, clip_index)
+        applied = {}
+        if action_a is not None:
+            clip.follow_action_a = int(action_a); applied["action_a"] = int(action_a)
+        if action_b is not None:
+            clip.follow_action_b = int(action_b); applied["action_b"] = int(action_b)
+        if chance_a is not None:
+            clip.follow_action_chance_a = int(chance_a); applied["chance_a"] = int(chance_a)
+        if chance_b is not None:
+            clip.follow_action_chance_b = int(chance_b); applied["chance_b"] = int(chance_b)
+        if time_beats is not None:
+            clip.follow_action_time = float(time_beats); applied["time_beats"] = float(time_beats)
+        if enabled is not None and hasattr(clip, "follow_action_enabled"):
+            clip.follow_action_enabled = bool(enabled); applied["enabled"] = bool(enabled)
+        return {"applied": applied}
+
+    def _get_clip_follow_action(self, track_index, clip_index):
+        clip = self._clip_or_raise(track_index, clip_index)
+        return {
+            "action_a": int(getattr(clip, "follow_action_a", 0)),
+            "action_b": int(getattr(clip, "follow_action_b", 0)),
+            "chance_a": int(getattr(clip, "follow_action_chance_a", 1)),
+            "chance_b": int(getattr(clip, "follow_action_chance_b", 0)),
+            "time_beats": float(getattr(clip, "follow_action_time", 1.0)),
+            "enabled": bool(getattr(clip, "follow_action_enabled", True)),
+        }
+
+    def _select_track(self, track_index):
+        track = self._track(track_index)
+        self._song.view.selected_track = track
+        return {"selected": track.name, "track_index": track_index}
+
+    def _select_scene(self, scene_index):
+        scenes = list(self._song.scenes)
+        if scene_index < 0 or scene_index >= len(scenes):
+            raise IndexError("scene_index out of range")
+        self._song.view.selected_scene = scenes[scene_index]
+        return {"selected_scene": scene_index}
+
+    def _show_view(self, view_name):
+        # Valid: "Browser", "Detail", "Detail/Clip", "Detail/DeviceChain",
+        # "Session", "Arranger".
+        app = __import__("Live").Application.get_application()
+        app.view.show_view(view_name)
+        return {"shown": view_name}
+
+    def _get_grooves(self):
+        out = []
+        pool = getattr(self._song, "groove_pool", None)
+        if pool is None:
+            # Pre-Live-11 fallback (deprecated `song.grooves`)
+            grooves = list(getattr(self._song, "grooves", []) or [])
+        else:
+            grooves = list(getattr(pool, "grooves", []) or [])
+        for i, g in enumerate(grooves):
+            out.append({"index": i, "name": getattr(g, "name", "?")})
+        return {"count": len(out), "grooves": out}
+
+    def _set_clip_groove(self, track_index, clip_index, groove_index):
+        clip = self._clip_or_raise(track_index, clip_index)
+        if groove_index is None or groove_index < 0:
+            clip.groove = None
+            return {"groove": None}
+        pool = getattr(self._song, "groove_pool", None)
+        grooves = list(getattr(pool, "grooves", []) if pool is not None
+                       else getattr(self._song, "grooves", []) or [])
+        if groove_index >= len(grooves):
+            raise IndexError("groove_index out of range")
+        clip.groove = grooves[groove_index]
+        return {"groove": getattr(grooves[groove_index], "name", "?"),
+                "groove_index": groove_index}
+
+    # Polling-based shim until protocol grows a server->client push channel.
+    # Same data the Live LOM listeners would push, batched into one read.
+    def _get_listener_snapshot(self):
+        playing_clips = []
+        for ti, t in enumerate(self._song.tracks):
+            ps = getattr(t, "playing_slot_index", -1)
+            fs = getattr(t, "fired_slot_index", -1)
+            playing_clips.append({
+                "track_index": ti,
+                "playing_slot": int(ps) if ps is not None else -1,
+                "fired_slot": int(fs) if fs is not None else -1,
+            })
+        return {
+            "is_playing": bool(self._song.is_playing),
+            "current_song_time": float(self._song.current_song_time),
+            "tempo": float(self._song.tempo),
+            "signature_numerator": int(self._song.signature_numerator),
+            "signature_denominator": int(self._song.signature_denominator),
+            "metronome": bool(self._song.metronome),
+            "session_record": bool(self._song.session_record),
+            "record_mode": bool(self._song.record_mode),
+            "back_to_arranger": bool(getattr(self._song, "back_to_arranger", False)),
+            "playing_clips": playing_clips,
         }

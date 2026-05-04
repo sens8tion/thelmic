@@ -40,7 +40,7 @@ There are mistakes baked into the journey — see [`memory/`](memory/) for the c
 │  python:                        │  TCP    │  MIDI Remote Script:     │
 │  thelmic.live_channel           │ ◄─────► │  ThelmicLive             │
 │   • async TCP client            │   :9878 │   • UI-thread dispatcher │
-│   • priority + bulk queues      │         │   • 64 RPCs              │
+│   • priority + bulk queues      │         │   • 108 RPCs             │
 │   • lazy connect, drop-on-      │         │   • LOM access           │
 │     overflow, request-id corr   │         │                          │
 │   • LOWER process priority      │         └──────────────────────────┘
@@ -50,13 +50,16 @@ There are mistakes baked into the journey — see [`memory/`](memory/) for the c
 
 The Remote Script is a thin RPC dispatcher (~1600 lines) that exposes Live's Object Model surface. Each RPC blocks on the Live UI thread for 20–200 ms; the Python client side is fully async with bounded queues so the realtime MIDI engine never waits on it.
 
-### What the 64 RPCs cover
+### What the 108 RPCs cover
 
 | Category | RPCs | What you can do |
 |----------|------|-----------------|
 | Session / transport | `ping`, `get_session_info`, `set_tempo`, `start_playback`, `stop_playback`, `fire_clip`, `stop_clip`, `stop_all_clips`, `fire_scene`, `set_launch_quantization` | Tempo control, scene firing, transport, launch-quant |
 | Tracks / mixer / routing | `create_midi_track`, `create_audio_track`, `delete_track`, `set_track_name`, `set_track_volume`, `set_track_pan`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_track_monitoring`, `set_track_output_routing`, `get_track_output_options`, `set_send`, `get_return_tracks`, `get_master_track`, `get_track_info` | Full track lifecycle, output routing (bus topology), monitoring states for sidechain inputs |
-| Clips | `create_clip`, `set_clip_name`, `clear_clip`, `add_notes_to_clip`, `set_clip_loop`, `set_clip_loop_region`, `set_clip_warp`, `set_clip_envelope`, `clear_clip_envelope` | MIDI authoring, loop region for stutter/chop, warp mode, automation envelopes (Saturator drive ramp, filter sweep, etc.) |
+| Clips | `create_clip`, `set_clip_name`, `clear_clip`, `add_notes_to_clip`, `get_clip_notes`, `remove_clip_notes`, `set_clip_loop`, `set_clip_loop_region`, `set_clip_warp`, `set_clip_envelope`, `clear_clip_envelope`, `set_clip_groove`, `clear_clip_groove`, `get_grooves` | MIDI authoring **and surgical per-note edits** (read with `note_id`+probability+velocity_deviation, remove by pitch/time region, then `add_notes_to_clip` to humanize / transpose / regenerate phrase without rewriting the clip), loop region, warp mode, automation envelopes, groove-pool assignment |
+| Follow actions | `set_clip_follow_action`, `get_clip_follow_action` | Conditional clip chaining for scene-launching variation: stop, play_again, previous, next, first, last, any, other, jump — with chance weights and dwell time |
+| View / capture | `select_track`, `select_scene`, `show_view`, `capture_midi` | Drive Live's UI focus from scripts (jump to Detail/Clip after generation), pull recently played MIDI from the armed track into a clip |
+| Listener snapshot | `get_listener_snapshot` | Polling shim for the LOM observer pattern — one read returns is_playing, song_time, tempo, signature, metronome, session_record, and per-track playing/fired slot indices |
 | Devices | `get_device_info`, `set_device_param`, `get_device_param`, `delete_device`, `move_device`, `set_device_sidechain_source`, `get_device_routing_options`, `define_rack_macro`, `set_macro_value`, `get_rack_macros`, `snapshot_track`, `restore_track` | Per-param control, real sidechain key routing, rack macros, full-track snapshots |
 | Master bus | `load_master_device`, `get_master_device_info`, `set_master_device_param`, `get_master_device_param`, `delete_master_device` | Master-track Limiter/EQ/Glue Comp |
 | Drum Rack | `get_drum_pads`, `set_drum_pad_mute`, `set_drum_pad_volume`, `load_item_at_path` (with drum-pad target) | Mute the snap-pad-that-isn't-a-snap, load samples directly into pads |
@@ -284,7 +287,7 @@ The opening setup — sample selection, beat structures by style, style/key/ener
 ### v0.next (this release) — agent + helpers + capture
 
 Ships:
-- 97 RPCs, async LOM bridge, hand-built Sound Design layer
+- 108 RPCs, async LOM bridge, hand-built Sound Design layer
 - `agent_helpers.py` — every studio-engineer principle that mattered in
   the previous sessions surfaced as code (parameter range registry,
   gain staging, impact-is-sacred patterns, decay tails, breathing,

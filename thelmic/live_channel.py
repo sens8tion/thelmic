@@ -721,6 +721,121 @@ class LiveChannel:
         """bars: 0 (off), 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8, 16."""
         return self._enqueue("set_launch_quantization", {"bars": bars})
 
+    # ------------------------------------------------------------------
+    # MIDI note manipulation (per-clip, surgical)
+    # ------------------------------------------------------------------
+
+    def get_clip_notes(self, track_index: int, clip_index: int,
+                       from_pitch: int = 0, pitch_span: int = 128,
+                       from_time: float = 0.0,
+                       time_span: Optional[float] = None) -> Future:
+        """Read notes from a session-view clip via Live 11+ get_notes_extended.
+
+        Returned dicts include note_id, pitch, start_time, duration, velocity,
+        mute, probability, velocity_deviation. note_id round-trips for
+        future per-note targeting if/when we add it.
+        """
+        params: dict[str, Any] = {
+            "track_index": track_index, "clip_index": clip_index,
+            "from_pitch": from_pitch, "pitch_span": pitch_span,
+            "from_time": from_time,
+        }
+        if time_span is not None:
+            params["time_span"] = time_span
+        return self._enqueue("get_clip_notes", params)
+
+    def remove_clip_notes(self, track_index: int, clip_index: int,
+                          from_pitch: int = 0, pitch_span: int = 128,
+                          from_time: float = 0.0,
+                          time_span: Optional[float] = None) -> Future:
+        """Remove notes in a pitch+time region. Pair with add_notes_to_clip
+        to perform surgical edits (transpose, humanize, regenerate phrase)
+        without rewriting the whole clip."""
+        params: dict[str, Any] = {
+            "track_index": track_index, "clip_index": clip_index,
+            "from_pitch": from_pitch, "pitch_span": pitch_span,
+            "from_time": from_time,
+        }
+        if time_span is not None:
+            params["time_span"] = time_span
+        return self._enqueue("remove_clip_notes", params)
+
+    # ------------------------------------------------------------------
+    # Follow actions
+    # ------------------------------------------------------------------
+
+    def set_clip_follow_action(self, track_index: int, clip_index: int,
+                               action_a: Optional[int] = None,
+                               action_b: Optional[int] = None,
+                               chance_a: Optional[int] = None,
+                               chance_b: Optional[int] = None,
+                               time_beats: Optional[float] = None,
+                               enabled: Optional[bool] = None) -> Future:
+        """Configure a clip's follow action.
+
+        action_a/_b: 0=none, 1=stop, 2=play_again, 3=previous, 4=next,
+        5=first, 6=last, 7=any, 8=other, 9=jump (Live 11; Live 12 expands).
+        chance_a/_b: integer weights (Live picks proportionally).
+        time_beats: dwell before evaluating.
+        """
+        return self._enqueue("set_clip_follow_action", {
+            "track_index": track_index, "clip_index": clip_index,
+            "action_a": action_a, "action_b": action_b,
+            "chance_a": chance_a, "chance_b": chance_b,
+            "time_beats": time_beats, "enabled": enabled,
+        })
+
+    def get_clip_follow_action(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue("get_clip_follow_action", {
+            "track_index": track_index, "clip_index": clip_index,
+        })
+
+    # ------------------------------------------------------------------
+    # View / selection
+    # ------------------------------------------------------------------
+
+    def select_track(self, track_index: int) -> Future:
+        return self._enqueue("select_track", {"track_index": track_index})
+
+    def select_scene(self, scene_index: int) -> Future:
+        return self._enqueue("select_scene", {"scene_index": scene_index})
+
+    def show_view(self, view: str) -> Future:
+        """view ∈ {Browser, Detail, Detail/Clip, Detail/DeviceChain,
+        Session, Arranger}."""
+        return self._enqueue("show_view", {"view": view})
+
+    # ------------------------------------------------------------------
+    # Capture, grooves, listener snapshot
+    # ------------------------------------------------------------------
+
+    def capture_midi(self) -> Future:
+        """Capture recently played MIDI on the armed track into a clip
+        (same as the Capture button in Live)."""
+        return self._enqueue("capture_midi", {})
+
+    def get_grooves(self) -> Future:
+        return self._enqueue("get_grooves", {})
+
+    def set_clip_groove(self, track_index: int, clip_index: int, groove_index: int) -> Future:
+        return self._enqueue("set_clip_groove", {
+            "track_index": track_index, "clip_index": clip_index,
+            "groove_index": groove_index,
+        })
+
+    def clear_clip_groove(self, track_index: int, clip_index: int) -> Future:
+        return self._enqueue("clear_clip_groove", {
+            "track_index": track_index, "clip_index": clip_index,
+        })
+
+    def get_listener_snapshot(self) -> Future:
+        """Polling shim for the LOM observer pattern: one read returns
+        is_playing, song_time, tempo, signature, metronome, session_record,
+        and per-track playing/fired slot indices. Cheaper than wiring true
+        push listeners until the protocol grows a server->client channel.
+        """
+        return self._enqueue("get_listener_snapshot", {})
+
     def submit_bulk(self, cmd_type: str, params: dict) -> Future:
         """Escape hatch: enqueue any command on the bulk lane.
 
