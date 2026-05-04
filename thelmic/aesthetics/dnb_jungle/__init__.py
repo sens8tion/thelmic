@@ -82,6 +82,54 @@ from .lifecycle  import (
 from thelmic.meta import MetaLayout, ChannelSpec, SceneSpec, ChannelKind
 
 from .compose_8x4 import SCENE_PLAN, CLIP_LENGTH_BEATS
+from thelmic.meta import (
+    FreqRegion, LevelTarget, ChannelAudio, StageCheckpoint,
+)
+
+# Per-role audio meta — frequency territory + level discipline.
+# Reads as an intent declaration: this is what each channel SHOULD do
+# at the EQ and gain-staging layers. Mix pass + audit pass consult this.
+CHANNEL_AUDIO: dict[str, ChannelAudio] = {
+    "drums": ChannelAudio(
+        freq=FreqRegion(hp_hz=40, lp_hz=None, peak_band_hz=(50, 120), exclusive=True),
+        level=LevelTarget(
+            peak_db=-3.0, rms_db=-12.0, headroom_db=3.0,
+            chain_caps=[
+                StageCheckpoint("input", peak_db=-3.0),       # cap pre-saturator
+                StageCheckpoint("Saturator", peak_db=-3.0),   # cap pre-EQ8
+                StageCheckpoint("output", peak_db=-3.0),
+            ],
+        ),
+    ),
+    "break": ChannelAudio(
+        freq=FreqRegion(hp_hz=80, lp_hz=12000, peak_band_hz=(200, 4000)),
+        level=LevelTarget(peak_db=-6.0, rms_db=-15.0, sidechain_source="perc_bus"),
+    ),
+    "sub": ChannelAudio(
+        freq=FreqRegion(hp_hz=30, lp_hz=700, peak_band_hz=(35, 80), exclusive=True),
+        level=LevelTarget(peak_db=-6.0, rms_db=-14.0, sidechain_source="perc_bus"),
+    ),
+    "bass": ChannelAudio(
+        freq=FreqRegion(hp_hz=50, lp_hz=400, peak_band_hz=(80, 200)),
+        level=LevelTarget(peak_db=-7.0, rms_db=-16.0, sidechain_source="perc_bus"),
+    ),
+    "stab": ChannelAudio(
+        freq=FreqRegion(hp_hz=200, lp_hz=None, peak_band_hz=(300, 1500)),
+        level=LevelTarget(peak_db=-8.0, rms_db=-18.0, sidechain_source="perc_bus"),
+    ),
+    "pad": ChannelAudio(
+        freq=FreqRegion(hp_hz=250, lp_hz=None, peak_band_hz=(400, 2000)),
+        level=LevelTarget(peak_db=-12.0, rms_db=-22.0, sidechain_source="perc_bus"),
+    ),
+    "vox": ChannelAudio(
+        freq=FreqRegion(hp_hz=150, lp_hz=8000, peak_band_hz=(300, 3500)),
+        level=LevelTarget(peak_db=-6.0, rms_db=-15.0),
+    ),
+    "fx": ChannelAudio(
+        freq=FreqRegion(hp_hz=180, lp_hz=None, peak_band_hz=(500, 6000)),
+        level=LevelTarget(peak_db=-10.0, rms_db=-20.0, sidechain_source="perc_bus"),
+    ),
+}
 
 LAYOUT = MetaLayout(
     channels=[
