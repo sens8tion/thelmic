@@ -15,6 +15,7 @@ from .discovery import find_track
 
 def ensure_layout(ch, layout: MetaLayout) -> dict[str, int]:
     roles: dict[str, int] = {}
+    _cleanup_default_tracks(ch)
     info = ch.get_session_info().result(timeout=5)
     track_count = int(info.get("track_count", 0))
 
@@ -58,9 +59,38 @@ def _load_default_device(ch, track_index: int, spec: ChannelSpec) -> None:
 
 def _ensure_scenes(ch, layout: MetaLayout) -> None:
     info = ch.get_scene_count().result(timeout=5)
-    have = int(info.get("scene_count", 0)) if isinstance(info, dict) else 0
+    if isinstance(info, dict):
+        have = int(info.get("scene_count") or info.get("count") or 0)
+    else:
+        have = 0
     need = layout.scene_count
     while have < need:
         ch.create_scene(-1).result(timeout=5)
         have += 1
         time.sleep(0.1)
+
+
+def _cleanup_default_tracks(ch) -> int:
+    """Delete Live's default empty tracks ('1 MIDI', '2 MIDI', '3 Audio', '4 Audio')
+    if untouched (no devices). Iterate from end so indices don't shift."""
+    import re
+    sess = ch.get_session_info().result(timeout=3)
+    n = int(sess.get("track_count", 0))
+    to_delete = []
+    for ti in range(n):
+        try:
+            info = ch.get_track_info(ti).result(timeout=3)
+        except Exception:
+            continue
+        name = (info.get("name") or "").strip()
+        if not re.match(r"^\d+\s*[-_ ]?\s*(MIDI|Audio)$", name, re.IGNORECASE):
+            continue
+        if info.get("devices"):
+            continue
+        to_delete.append((ti, name))
+    for ti, name in reversed(to_delete):
+        try:
+            ch.delete_track(ti).result(timeout=5)
+        except Exception as e:
+            print(f"  layout: delete default T{ti} {name!r}: {e}")
+    return len(to_delete)

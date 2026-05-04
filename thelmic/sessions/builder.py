@@ -2,14 +2,11 @@
 
 Build order (each step a no-op if the target state is already present):
   1. tempo
-  2. pack setup phase (16-track basis, devices)
-  3. drum-rack samples (per-pad hotswap)
-  4. role-track samples (audio clip / Simpler)
-  5. preset bindings (Operator etc per role)
-
-The pack lifecycle does the heavy lifting for (2)–(5); this module just
-parameterizes pack calls with intent + binding overrides and skips work
-already done.
+  2. layout setup (8x4 channels + scenes) via pack's MetaLayout, fallback to legacy setup_session
+  3. drum-rack pads — per-pad hotswap
+  4. role-track samples — kind-aware: AUDIO → load_audio_to_slot(slot 0),
+                                       SAMPLER → load_item_at_path (replaces Simpler sample)
+  5. preset bindings
 """
 from __future__ import annotations
 import time
@@ -34,8 +31,7 @@ def build_session(ch, sess: "Session") -> dict:
         else:
             counts["steps_skipped"] += 1
 
-    # 2. layout setup — prefer the pack's MetaLayout (8x4) when declared,
-    # fall back to legacy setup_session for older packs.
+    # 2. layout — prefer pack's MetaLayout, fallback to legacy
     pack_pkg = import_module(f"thelmic.aesthetics.{sess.intent.pack}")
     layout = getattr(pack_pkg, "LAYOUT", None)
     if layout is not None:
@@ -47,11 +43,12 @@ def build_session(ch, sess: "Session") -> dict:
         if hasattr(pack_lifecycle, "setup_session"):
             roles = pack_lifecycle.setup_session(ch, bootstrap=True)
             counts["steps_run"] += 1
+            layout = None
         else:
             roles = {}
             counts["steps_skipped"] += 1
 
-    # 3. drum-rack samples — per-pad hotswap, idempotent
+    # 3. drum-rack pads
     drum_track = roles.get("drums")
     drum_pads = sess.bindings.drum_pad_bindings()
     if drum_track is not None and drum_pads:
@@ -69,19 +66,24 @@ def build_session(ch, sess: "Session") -> dict:
             except Exception as e:
                 print(f"  drum pad {sb.pad_note} ({sb.item_name}): {e}")
 
-    # 4. role-track samples (audio + Simpler)
+    # 4. role-track samples — kind-aware
     for sb in sess.bindings.samples:
         if sb.role.startswith("drums."):
-            continue                     # handled in step 3
+            continue
         ti = roles.get(sb.role)
         if ti is None:
             continue
-        # Heuristic: if track has any audio clip in slot 0 OR a Simpler with a sample, skip.
-        if _track_has_sample_loaded(ch, ti):
+        kind = _channel_kind(layout, sb.role)
+        loaded = _channel_already_has_sample(ch, ti, kind, sb.item_name)
+        if loaded:
             counts["steps_skipped"] += 1
             continue
         try:
-            ch.load_item_at_path(ti, sb.browser_path, sb.item_name).result(timeout=20)
+            if kind == "audio":
+                ch.load_audio_to_slot(ti, 0, sb.browser_path, sb.item_name).result(timeout=20)
+            else:
+                # sampler / synth — let Live replace the device or load into selected
+                ch.load_item_at_path(ti, sb.browser_path, sb.item_name).result(timeout=20)
             counts["samples_loaded"] += 1
             time.sleep(0.3)
         except Exception as e:
@@ -105,7 +107,40 @@ def build_session(ch, sess: "Session") -> dict:
     return counts
 
 
-# ---- inspection helpers (used to make build idempotent) ----------------
+# ---- inspection helpers ----------------
+
+def _channel_kind(layout, role: str) -> str:
+    """Return 'audio' / 'sampler' / 'synth' / 'drum_rack' for a role."""
+    if layout is None:
+        return "audio"
+    spec = layout.channel_by_role(role)
+    return spec.kind.value if spec else "audio"
+
+
+def _channel_already_has_sample(ch, track_index: int, kind: str, item_name: str) -> bool:
+    """Idempotent check: would loading item_name on this track be a no-op?"""
+    needle = item_name.rsplit(".", 1)[0].lower()  # strip extension for matching
+    if kind == "audio":
+        try:
+            clips = ch.get_track_clips(track_index).result(timeout=3)
+            for c in clips.get("clips", []):
+                if c.get("slot") == 0 and needle in c.get("name", "").lower():
+                    return True
+        except Exception: pass
+        return False
+    if kind == "sampler":
+        try:
+            info = ch.get_track_info(track_index).result(timeout=3)
+            for d in info.get("devices", []):
+                if d.get("class_name") == "OriginalSimpler":
+                    name = d.get("name", "").strip()
+                    # Default Simpler name is "Simpler"; loaded sample renames the device.
+                    if name and name.lower() != "simpler":
+                        return True
+        except Exception: pass
+        return False
+    return False
+
 
 def _ensure_drum_rack(ch, track_index: int) -> None:
     info = ch.get_track_info(track_index).result(timeout=3)
@@ -122,23 +157,6 @@ def _populated_pad_notes(ch, track_index: int) -> set[int]:
     except Exception:
         return set()
     return {p["note"] for p in pads.get("pads", []) if p.get("chain_count", 0) > 0}
-
-
-def _track_has_sample_loaded(ch, track_index: int) -> bool:
-    try:
-        clips = ch.get_track_clips(track_index).result(timeout=3)
-        if any(c.get("slot") == 0 for c in clips.get("clips", [])):
-            return True
-    except Exception:
-        pass
-    try:
-        info = ch.get_track_info(track_index).result(timeout=3)
-    except Exception:
-        return False
-    for d in info.get("devices", []):
-        if d.get("class_name") == "OriginalSimpler" and d.get("name", "").strip():
-            return True
-    return False
 
 
 def _track_has_named_device(ch, track_index: int, name: str) -> bool:
