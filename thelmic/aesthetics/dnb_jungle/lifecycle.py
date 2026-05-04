@@ -43,17 +43,19 @@ DRUM_RACK_URI = "query:Synths#Drum%20Rack"
 SIMPLER_URI   = "query:Synths#Simpler"
 
 
-# 16-track instrument basis. Track names are ROLE-DESCRIPTIVE — not tied to
-# any specific historical musical intent (no "HARDKIT" / "TECTONIC" / "COLD
-# MIST" baggage). The pack assumes whatever character emerges from the
-# instrument + content; the names just say what musical function the track
-# serves.
+# 16-track instrument basis. DRUMS is a single Drum Rack — `bulk_load_drum_pads`
+# does load samples per-pad correctly, but only when the rack is FRESH.
+# A pad already populated causes Live's load_item to redirect into the
+# active chain. Pull therefore deletes + recreates the Drum Rack device
+# before each bulk load to guarantee an empty starting state.
 TRACK_TEMPLATE = [
-    # Drums
+    # Drums (single rack, multi-pad)
     ("DRUMS",      "midi",  DRUM_RACK_URI),
+    # Drum rack for breakcore / amen variation
     ("AMEN",       "midi",  DRUM_RACK_URI),
+    # Additional percussion drum rack
     ("PERC",       "midi",  DRUM_RACK_URI),
-    # Audio sample tracks (content loaded by pull_samples or user)
+    # Audio sample tracks
     ("BREAK",      "audio", None),
     ("SUB",        "audio", None),
     ("ORGAN",      "audio", None),
@@ -64,7 +66,7 @@ TRACK_TEMPLATE = [
     ("REESE",      "midi",  OPERATOR_URI),
     ("LEAD",       "midi",  OPERATOR_URI),
     ("SHIMMER",    "midi",  OPERATOR_URI),
-    # Vocal Simplers (samples loaded separately)
+    # Vocal Simplers
     ("VOX_CALL",   "midi",  SIMPLER_URI),
     ("VOX_RESP",   "midi",  SIMPLER_URI),
     ("VOX_CHOR",   "midi",  SIMPLER_URI),
@@ -241,12 +243,11 @@ def setup_session(ch, bootstrap: bool = True) -> dict:
         ensure_scenes(ch)
         cleanup_default_tracks(ch)         # remove Live's default 4 stub tracks
 
-    # Role lookup tries new role-named tracks first, falls back to legacy
-    # session names for compatibility with the old jung-rehearsal.als.
     roles = {}
     for role_name, hints in [
         ("drums",        ["DRUMS",     "HARDKIT"]),
         ("amen",         ["AMEN",      "AMEN CHOPPED"]),
+        ("perc",         ["PERC"]),
         ("break",        ["BREAK",     "BREAKBEAST"]),
         ("sub",          ["SUB",       "SUBBONK"]),
         ("mid_bass",     ["MID_BASS",  "TECTONIC"]),
@@ -256,7 +257,6 @@ def setup_session(ch, bootstrap: bool = True) -> dict:
         ("reese",        ["REESE"]),
         ("lead",         ["LEAD"]),
         ("shimmer",      ["SHIMMER"]),
-        ("perc",         ["PERC"]),
         ("fx",           ["FX"]),
         ("vox_call",     ["VOX_CALL",  "VOX YO", "VOX"]),
         ("vox_response", ["VOX_RESP",  "VOX BIG"]),
@@ -385,25 +385,36 @@ def pull_samples(ch, splice_root=None, library_assignments=None) -> dict:
     roles = setup_session(ch, bootstrap=False)
     counts = {"loaded": 0, "skipped": 0}
 
-    # Drum rack: kick, snare, hat_c, hat_o, crash → DRUMS pads
+    # Drum Rack: load a factory drum-kit preset. Live's Browser.load_item
+    # redirects every drum-pad load to pad 36 regardless of selected_drum_pad
+    # (the per-pad-load API is broken). Working around this with a factory
+    # kit that ships pre-stocked.
+    DRUM_KITS = {
+        "24_7":             "drums:24_7 Kit.adg",                        # general
+        "64_pads_dub":      "drums:64 Pads Dub Techno Kit.adg",
+        "64_pads_penelope": "drums:64 Pads Penelope Kit.adg",
+        "106_typhoon":      "drums:106 Typhoon Kit.adg",
+    }
+    DRUM_KIT_CHOICE = "24_7"      # most idiomatic for jungle/dnb
+
     if "drums" in roles:
-        from .constants import KICK, SNARE, HAT_C, HAT_O, CRASH
-        drum_pad_map = {
-            KICK:   library_assignments.get("kick"),
-            SNARE:  library_assignments.get("snare"),
-            HAT_C:  library_assignments.get("hat_c"),
-            HAT_O:  library_assignments.get("hat_o"),
-            CRASH:  library_assignments.get("crash"),
-        }
-        drum_pad_map = {k: v for k, v in drum_pad_map.items() if v is not None}
-        if drum_pad_map:
-            drum_dev = find_device(ch, roles["drums"], "DrumGroupDevice")
-            if drum_dev is not None:
-                n_loaded = load_drum_pad_samples(ch, roles["drums"], drum_dev, drum_pad_map)
-                print(f"  drums: loaded {n_loaded}/{len(drum_pad_map)} pads")
-                counts["loaded"] += n_loaded
-            else:
-                print("  drums: no Drum Rack device found")
+        t_drums = roles["drums"]
+        # Clear any existing rack/instrument-group device first
+        info = ch.get_track_info(t_drums).result(timeout=3)
+        for di in reversed(range(len(info.get("devices", [])))):
+            cls = info["devices"][di].get("class_name", "")
+            if cls in ("DrumGroupDevice", "InstrumentGroupDevice"):
+                try: ch.delete_device(t_drums, di).result(timeout=5)
+                except Exception: pass
+        # Load factory kit
+        kit_path, kit_name = DRUM_KITS[DRUM_KIT_CHOICE].split(":", 1)
+        try:
+            ch.load_item_at_path(t_drums, kit_path, kit_name).result(timeout=30)
+            time.sleep(2.0)
+            print(f"  drums: loaded factory {kit_name}")
+            counts["loaded"] += 1
+        except Exception as e:
+            print(f"  drums: factory kit load fail: {e}")
 
     # Audio tracks: break, sub, organ, pad — load into slot 0 of each
     for role_name, track_role in [("break", "break"), ("sub", "sub"),
@@ -496,6 +507,27 @@ def _is_midi(ch, t):
     return bool(info.get("is_midi_track"))
 
 
+def _split_drum_notes_by_track(notes: list, roles: dict) -> dict:
+    """Take a unified GM-pitched drum pattern and split into per-track clips.
+
+    Drum hit pitches (KICK=36, SNARE=38, HAT_C=42, HAT_O=46, CRASH=49) get
+    routed to their respective per-instrument Simpler tracks. The pitch
+    on each track is normalized to 60 (C5) since Simpler plays its sample
+    on any note.
+
+    Returns: {role: [(60, t, dur, vel), ...]}
+    """
+    from .constants import KICK, SNARE, HAT_C, HAT_O, CRASH
+    PITCH_TO_ROLE = {KICK: "kick", SNARE: "snare", HAT_C: "hat_c",
+                      HAT_O: "hat_o", CRASH: "crash"}
+    by_role: dict = {}
+    for p, t, dur, vel in notes:
+        role = PITCH_TO_ROLE.get(p)
+        if role and role in roles:
+            by_role.setdefault(role, []).append((60, t, dur, vel))
+    return by_role
+
+
 def _write_clip(ch, track, slot, length_beats, name, notes, breathe=False, pull_back=True):
     if not _is_midi(ch, track):
         return -1
@@ -523,8 +555,9 @@ def compose_clips(ch, roles: dict | None = None) -> dict:
 
     counts = {}
 
-    # HARDKIT slot 4 — ragga jungle drop
+    # Drum patterns write to the single DRUMS rack at GM pitches.
     if "drums" in roles:
+        # Slot 4 — ragga jungle drop
         notes = []
         for r in range(6):
             notes.extend(_ragga_jungle_4bar(r * 4, hat_density="16th"))
@@ -534,11 +567,10 @@ def compose_clips(ch, roles: dict | None = None) -> dict:
         notes.append((SNARE, impact_t, 0.20, 127))
         notes.append((CRASH, impact_t, 4.00, 127))
         n = _write_clip(ch, roles["drums"], 4, 32.0, "drop_ragga", notes, breathe=True)
-        counts["drums S4 (ragga drop)"] = n
-        print(f"  drums S4: {n} notes (ragga jungle drop)")
+        counts["drums S4"] = n
+        print(f"  drums S4: {n} notes (ragga drop)")
 
-    # HARDKIT slot 7 — Rotterdam gabber
-    if "drums" in roles:
+        # Slot 7 — Rotterdam gabber
         notes = []
         notes.extend(_rotterdam_gabber_4bar(0,  hat_density="16th"))
         notes.extend(_rotterdam_gabber_4bar(16, hat_density="32nd"))
@@ -547,34 +579,30 @@ def compose_clips(ch, roles: dict | None = None) -> dict:
         notes.append((KICK,  impact_t, 0.20, 127))
         notes.append((CRASH, impact_t, 4.00, 127))
         n = _write_clip(ch, roles["drums"], 7, 32.0, "drop_rotterdam", notes)
-        counts["drums S7 (Rotterdam)"] = n
-        print(f"  drums S7: {n} notes (Rotterdam gabber)")
+        counts["drums S7"] = n
+        print(f"  drums S7: {n} notes (Rotterdam)")
 
-    # HARDKIT slot 9 — breakcore peak
-    if "drums" in roles:
+        # Slot 9 — breakcore peak
         notes = []
         for r in range(8):
             notes.extend(breakcore_4bar(r * 4))
         n = _write_clip(ch, roles["drums"], 9, 32.0, "breakcore_peak", notes,
                           pull_back=False)
-        counts["drums S9 (breakcore)"] = n
-        print(f"  drums S9: {n} notes (breakcore peak)")
+        counts["drums S9"] = n
+        print(f"  drums S9: {n} notes (breakcore)")
 
-    # HARDKIT slot 11 — quiet outro
-    if "drums" in roles:
+        # Slot 11 — quiet outro
         notes = []
-        RIDE = 51
         for bar in range(16):
             bs = bar * 4
             kvel = max(35, 95 - bar)
             notes.append((KICK, bs, 0.40, kvel))
-            notes.append((RIDE, bs, 4.0,  max(40, 70 - bar)))
             if bar % 4 in (1, 3):
                 notes.append((SNARE, bs + 2.5, 0.20, max(30, 50 - bar)))
         n = _write_clip(ch, roles["drums"], 11, 64.0, "outro_quiet", notes,
                           pull_back=False)
-        counts["drums S11 (outro)"] = n
-        print(f"  drums S11: {n} notes (quiet outro)")
+        counts["drums S11"] = n
+        print(f"  drums S11: {n} notes (outro)")
 
     # AMEN — parallel breakcore
     if "amen" in roles:
@@ -842,7 +870,7 @@ def prepare_clips(ch, roles: dict | None = None) -> dict:
 
     print("\n[prepare] writing anticipation fills on pre-drop slots...")
     if "drums" not in roles:
-        return {"anticipation_slots": 0}
+        return {}
     hk = roles["drums"]
     counts = {}
     for slot in (3, 6, 13):
@@ -867,7 +895,7 @@ def prepare_clips(ch, roles: dict | None = None) -> dict:
         ch.set_clip_name(hk, slot, f"anticipation_S{slot}").result(timeout=3)
         ch.add_notes_to_clip(hk, slot, n_dicts).result(timeout=10)
         counts[f"S{slot}"] = len(n_dicts)
-        print(f"  drums S{slot}: anticipation fill ({len(n_dicts)} notes)")
+        print(f"  drums S{slot}: {len(n_dicts)} notes")
     return counts
 
 

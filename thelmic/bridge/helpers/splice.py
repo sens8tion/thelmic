@@ -173,8 +173,13 @@ def load_simpler_sample(ch, track_index: int, sample_path: Path) -> bool:
 
 def load_drum_pad_samples(ch, track_index: int, drum_device_idx: int,
                            pad_assignments: dict[int, Path]) -> int:
-    """Bulk-load samples onto Drum Rack pads via the proper RPC.
-    Mirrors into Ableton User Library Splice folder first."""
+    """Bulk-load samples onto Drum Rack pads via the dedicated RPC.
+
+    `bulk_load_drum_pads` works correctly when the rack is FRESH (no
+    existing chains). Caller must reset the rack first if it already
+    has pads populated — otherwise load_item redirects into the active
+    chain and only the last item lands.
+    """
     items = []
     for note, path in pad_assignments.items():
         mirrored = _ensure_in_user_library(path)
