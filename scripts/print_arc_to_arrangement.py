@@ -1,13 +1,15 @@
-"""Print all 15 scenes consecutively into the arrangement view, 4 bars
-each, respecting their per-scene tempos. Includes a couple of fuck-about
-flourishes at key transitions:
-  • Vinyl scratch flourish on the bar-end of scene 5 (wurly_remix)
-    bridging the hard 87→140 tempo jump into SKA_PIVOT
-  • Reverse-crash-style guitar flourish on the bar-end of scene 11
-    bridging into the AMEN_BREAKDOWN at 180
+"""Print all 15 scenes consecutively into the arrangement, 4 bars each
+at their baked per-scene tempos.
 
-Uses session_record + arrangement_record so Live captures the live
-session-view scene fires straight into the arrangement timeline.
+v2: aligns scene fires to song_time (project beat counter) instead of
+wall-clock. Each scene is fired when song_time crosses the expected
+beat boundary, which immunises against quantization slippage between
+scenes. Plus an 8-bar tail at the end so the last scene's clips
+record fully before stop_playback.
+
+Two flourishes preserved:
+  • vinyl scratch on the &-of-4 of scene 5 (the dub→ska tempo jump)
+  • vinyl scratch on the &-of-4 of scene 11 (into AMEN_BREAKDOWN)
 """
 from __future__ import annotations
 import os, time
@@ -15,13 +17,12 @@ os.environ.setdefault('LIVE_CHANNEL_ENABLED', '1')
 
 from thelmic.live_channel import LiveChannel
 
-# Per-scene tempo (matches what's baked via set_scene_tempo)
 SCENE_TEMPOS = [
-    87, 87, 87, 87, 87, 87,    # 0-5 dub + breakdown
-    140, 150,                  # 6-7 ska/punk
-    174, 174,                  # 8-9 hardcore_drop / dnb_full
-    180, 180,                  # 10-11 KICK_4OTF lanes
-    180, 180, 180,             # 12-14 amen breakdown / rebuild / hardcore_full
+    87, 87, 87, 87, 87, 87,
+    140, 150,
+    174, 174,
+    180, 180,
+    180, 180, 180,
 ]
 SCENE_NAMES = [
     'DUB_IN', 'STEPPER', 'RAGGAJUNGLE', 'DUBOUT', 'RAGGA_FILL', 'WURLY_REMIX',
@@ -31,15 +32,26 @@ SCENE_NAMES = [
     'AMEN_BREAKDOWN', 'AMEN_REBUILD', 'HARDCORE_FULL',
 ]
 BARS_PER_SCENE = 4
-T_FX = 8     # for vinyl-scratch flourish
+BEATS_PER_SCENE = BARS_PER_SCENE * 4   # 16
+TAIL_BARS = 8         # generous tail so last scene records fully
+POLL_INTERVAL = 0.05  # 50ms — fine enough at 180 bpm
+T_FX = 8
 
 
-def beats_for_bars(bars: int) -> float:
-    return float(bars * 4)
+def get_song_time(ch) -> float:
+    """Project beat counter via get_listener_snapshot."""
+    s = ch.get_listener_snapshot().result(timeout=2)
+    return float(s.get('current_song_time', 0.0) or 0.0)
 
 
-def seconds_for_bars(bars: int, bpm: float) -> float:
-    return beats_for_bars(bars) * 60.0 / bpm
+def wait_until_song_time(ch, target_beat: float, deadline: float) -> bool:
+    while True:
+        st = get_song_time(ch)
+        if st >= target_beat:
+            return True
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(POLL_INTERVAL)
 
 
 def main():
@@ -51,56 +63,56 @@ def main():
         ch.set_song_time(0.0).result(timeout=3); time.sleep(0.1)
         ch.set_tempo(float(SCENE_TEMPOS[0])).result(timeout=3); time.sleep(0.1)
 
-        # arm session_record so session firing captures into arrangement.
-        # set_record_mode is the global arrangement-record arm; both needed.
         ch.set_session_record(True).result(timeout=3)
         ch.set_record_mode(True).result(timeout=3)
         time.sleep(0.2)
 
         ch.start_playback().result(timeout=3)
-        time.sleep(0.1)
-        print('=== printing arc 0..14 → arrangement ===')
+        time.sleep(0.15)
+        print('=== printing arc 0..14 (song-time aligned) ===')
 
-        # walk scenes
+        wall_start = time.monotonic()
         for scene, (bpm, name) in enumerate(zip(SCENE_TEMPOS, SCENE_NAMES)):
-            print(f'  fire {scene:2d} {name:18s} @ {bpm} bpm  ({BARS_PER_SCENE} bars = {seconds_for_bars(BARS_PER_SCENE, bpm):.2f}s)')
+            target_beat = scene * BEATS_PER_SCENE
+            # generous wall-clock cap = 2× the expected scene length
+            cap = wall_start + (scene + 2) * BEATS_PER_SCENE * 60.0 / 87.0 * 2
+            if scene > 0:
+                ok = wait_until_song_time(ch, float(target_beat), cap)
+                if not ok:
+                    print(f'  WARN: scene {scene} fire delayed past wall-clock cap')
+            info = ch.get_session_info().result(timeout=2)
+            st = info.get('song_time', '?')
+            print(f'  fire {scene:2d} {name:18s} @ {bpm} bpm  song_time={st}')
             ch.fire_scene(scene).result(timeout=3)
-            dwell = seconds_for_bars(BARS_PER_SCENE, bpm)
-            # ---- fuck-about flourish: vinyl scratch on the &-of-4 of last
-            # bar of scene 5 (87 bpm), heralding the ska pivot ----
-            if scene == 5:
-                # 3.5 bars in, fire FX clip 4 (vinyl scratch one-shot)
-                early = seconds_for_bars(BARS_PER_SCENE, bpm) - (60.0 / bpm) * 0.5
-                time.sleep(early)
+            # flourishes — fire on bar-3.5 of scenes 5 and 11
+            if scene in (5, 11):
+                # wait until 3.5 bars into the scene = target_beat + 14 beats
+                flourish_at = target_beat + 14.0
+                wait_until_song_time(ch, flourish_at, cap)
                 try:
                     ch.fire_clip(T_FX, 4).result(timeout=2)
-                    print(f'    + vinyl scratch flourish (FX slot 4)')
+                    print(f'    + vinyl scratch flourish at song_time≈{flourish_at}')
                 except Exception as e:
                     print(f'    flourish fail: {e}')
-                time.sleep(dwell - early)
-            elif scene == 11:
-                # bar-end flourish before AMEN_BREAKDOWN
-                early = seconds_for_bars(BARS_PER_SCENE, bpm) - (60.0 / bpm) * 0.5
-                time.sleep(early)
-                try:
-                    ch.fire_clip(T_FX, 4).result(timeout=2)
-                    print(f'    + vinyl scratch flourish (FX slot 4)')
-                except Exception as e:
-                    print(f'    flourish fail: {e}')
-                time.sleep(dwell - early)
-            else:
-                time.sleep(dwell)
+
+        # ---- tail: let the last scene complete then keep recording 8 more bars ----
+        last_scene_end = len(SCENE_TEMPOS) * BEATS_PER_SCENE
+        tail_target = last_scene_end + TAIL_BARS * 4
+        print(f'\n  recording tail to beat {tail_target} ({TAIL_BARS} bars at 180 bpm = {TAIL_BARS * 4 * 60 / 180:.1f}s)')
+        # generous cap
+        cap = time.monotonic() + 30.0
+        wait_until_song_time(ch, float(tail_target), cap)
 
         # ---- finalise ----
-        time.sleep(0.5)   # brief tail to capture last scene's resonance
-        ch.stop_playback().result(timeout=3); time.sleep(0.2)
+        ch.stop_playback().result(timeout=3); time.sleep(0.3)
         ch.set_session_record(False).result(timeout=3)
         ch.set_record_mode(False).result(timeout=3)
         ch.stop_all_clips().result(timeout=3); time.sleep(0.2)
         ch.back_to_arrangement().result(timeout=3); time.sleep(0.1)
         ch.set_song_time(0.0).result(timeout=3)
         ch.set_tempo(87.0).result(timeout=3)
-        print('\n=== arrangement printed; transport reset ===')
+        info = ch.get_session_info().result(timeout=2)
+        print(f'\n=== printed; final song_time={info.get("song_time")}, tempo back to 87 ===')
     finally:
         ch.stop()
 
