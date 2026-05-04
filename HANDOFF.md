@@ -1,133 +1,197 @@
-# Handoff — current state for fresh-start agent
+# Handoff — fresh-start agent brief
 
-This branch: `refactor/bridge-aesthetic-split` (pushed to origin).
-Last commit: `fdbed68 fix: drum content via factory 24_7 Kit`.
+You're picking up an in-flight project cold. The previous agent's context
+got too big. This doc is the single source of truth — read it end to end,
+then proceed with the user's next instruction. Don't try to reconstruct
+history beyond what's here.
 
-## Architecture
+**Branch:** `refactor/bridge-aesthetic-split`
+**Last commit:** `3b8dbab docs: HANDOFF.md — single-source state doc`
+**Repo:** `git@github.com:sens8tion/thelmic.git`
+
+---
+
+## The user's IMMEDIATE next ask (when they're ready)
+
+> *"Fully load a drum kit with samples / default percussion instruments."*
+
+You should:
+
+1. Test if Live's per-pad Drum Rack load is now working (user just updated Live).
+   ```python
+   # Test path: bulk_load_drum_pads on a fresh DRUMS rack with these 5 hits
+   items = [
+     {"name": "tp_nh_cjb_kick_one_shot_low_punchy.wav",     "note": 36},
+     {"name": "BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav","note": 38},
+     {"name": "ZEN_PDB_hi_hat_closed_one_shot_tight.wav",   "note": 42},
+     {"name": "shs_ins_hat_open_one_shot_Fit.wav",          "note": 46},
+     {"name": "cj_cymbal_one_shot_live_ahman.wav",          "note": 49},
+   ]
+   ```
+   These 5 are already in `~/Documents/Splice/Samples/` and mirrored to
+   `~/Documents/Ableton/User Library/Samples/Splice/`. Code path is
+   `thelmic.aesthetics.dnb_jungle.lifecycle.pull_samples` — already wired.
+
+2. **If the load succeeds** (5 distinct pads populated): the user gets curated jungle drum hits per pad. Done.
+
+3. **If it fails** (Live API still puts everything on pad 36): fall back to loading factory `24_7 Kit.adg` from `query:Drums#FileId_10800` via `load_item_at_path("drums", "24_7 Kit.adg")` — this preset ships fully populated. Wraps as `InstrumentGroupDevice` but MIDI routes through to the inner Drum Rack.
+
+The user previously rejected the factory-kit fallback as "giving up", so try (1) first and only fall back to (2) if Live's API genuinely still has the bug.
+
+---
+
+## Possible Control-Surface confusion right after Live update
+
+User noted Live didn't have ThelmicLive set as the input port after the
+update, BUT RPCs were still working. Possible causes:
+- Previous Live instance still running in background
+- Remote Script still loaded from cache
+
+If RPCs hang / fail when you start, ask user to verify in Live:
+**Preferences → Link/Tempo/MIDI → Control Surface slot → ThelmicLive selected**.
+Status bar should briefly show "ThelmicLive listening on 9878".
+
+---
+
+## Architecture (one-screen version)
 
 ```
 thelmic/
-  bridge/                    ← genre-neutral substrate (no aesthetic choices)
-    helpers/                 — discovery / eq / transport / params / sidechain / midi / splice
-    tonality/                — Key / Scale / Chord / Voicing
-    grammars/                — BuildDropRelease / StaticDrone / IsoRhythm / ThroughComposed / Rotational
-    timeline/                — generic event-walker engine + ramp scheduling
+  bridge/                       ← genre-neutral, never modify for genre reasons
+    helpers/   discovery / eq / transport / params / sidechain / midi / splice
+    tonality/  Key / Scale / Chord / Voicing
+    grammars/  BuildDropRelease / StaticDrone / IsoRhythm / ThroughComposed / Rotational
+    timeline/  Timeline + RampSpec + fire_arrangement engine
   aesthetics/
-    manifest.py              — pack.yaml loader
-    dnb_jungle/              — fleshed-out, ragga → Rotterdam arc
+    manifest.py  pack.yaml loader
+    dnb_jungle/  fleshed-out: ragga → Rotterdam arc, BuildDropRelease grammar
       pack.yaml + constants.py + patterns.py + transforms.py
-      arrangement.py         — Timeline of bridge events
-      lifecycle.py           — setup / pull / compose / mix / prepare / preview phases
-    ambient_drone/           — stub (manifest + arrangement only)
-    idm_glitch/              — stub (manifest + arrangement only)
-  agent_helpers.py           — DEPRECATED back-compat shim
-  live_channel.py / live_remote_script/ / mediated_session.py / session_log.py
-                             — unchanged (LOM bridge mechanism)
+      arrangement.py   ← Timeline build via bridge events
+      lifecycle.py     ← setup / pull / compose / mix / prepare / preview hooks
+    ambient_drone/  stub
+    idm_glitch/     stub
+  live_channel.py            LOM TCP client (port 9878, async, priority+bulk queues)
+  live_remote_script/        Live MIDI Remote Script — REQUIRES LIVE RESTART after edit
+  mediated_session.py        open_session() — canonical entry, auto-logs
+  session_log.py             SessionLog — chat/action/snapshot/feedback capture
+  agent_helpers.py           DEPRECATED — back-compat shim only
 ```
 
-## Lifecycle phases
+**Bridge knows nothing about any genre.** Aesthetic packs declare BPM, key,
+grammar, expected track roles, mix recipes. Multiple packs share the same
+bridge engine.
+
+---
+
+## Lifecycle (the only entry point you should use)
 
 ```bash
-python scripts/run_pack.py dnb_jungle [--phases p1,p2,...]
+python scripts/run_pack.py dnb_jungle [--phases p1,p2,...] [--skip-drops]
 ```
 
-Phases run in this order:
+| Phase | Function | What it does | State |
+|-------|----------|--------------|-------|
+| `setup` | `setup_session(ch)` | Bootstrap 16 named tracks, ensure 17+ scenes, add Saturator on drums + EQ8 on every track | working |
+| `pull` | `pull_samples(ch)` | Scan local Splice library, load matched samples into role tracks | working except Drum Rack per-pad load (above) |
+| `compose` | `compose_clips(ch)` | Write ~30+ MIDI clips across 16 tracks | working |
+| `mix` | `configure_mix(ch)` | Frequency separation HP/LP per role + audio fade-ins + SUBBONK loop=False | working |
+| `prepare` | `prepare_clips(ch)` | Anticipation fills on slots 3, 6, 13 (thinned + sacred impact + breathing + pull-back) | working |
+| `preview` | `preview_session(ch)` | Fire scenes in session view, NO record (audition) | working |
+| `print` | (engine) | Arm session_record + walk timeline, capture into arrangement automation | working |
 
-| Phase | What it does | State |
-|-------|--------------|-------|
-| `setup` | Bootstrap 16 named tracks (deletes Live's defaults), ensure Saturator on drums + EQ8 on every role-track, ensure 17+ scenes | works |
-| `pull` | Scan local Splice library, load matched samples into role tracks (audio clips, Simplers, Drum Rack) | works for audio clips + Simplers; Drum Rack uses factory 24_7 Kit fallback (per-pad load broken in Live) |
-| `compose` | Write MIDI patterns into ~30+ session-view clips across all 16 tracks | works |
-| `mix` | Frequency separation HP/LP per role + audio clip fade-ins + SUBBONK loop=False | works |
-| `prepare` | Anticipation fills on pre-drop slots (3, 6, 13) — thinned + sacred impact + breathing | works |
-| `preview` | Fire scenes in session view, no record (audition) | works |
-| `print` | Arm session_record + walk timeline, capture into arrangement automation lanes | works (verified earlier on the legacy session: 32 ramps + 2 tempo modulations + false drop printed at ±1.4 bar drift) |
+**Default invocation runs all 7 phases in order.** User can pass `--phases preview` to just audition existing content, `--phases print` to commit to arrangement without rebuilding, etc.
 
-## What's working confidently
+---
 
-- **Bridge / aesthetic split** — `verify_packs.py` confirms 3 packs build valid Timelines
-- **Track creation, naming, instrument loading, scene creation** — bootstrap from a fresh empty project produces 16 named role-tracks
-- **Operator preset loading per role** — MID_BASS / STAB / REESE / LEAD / SHIMMER / FX get distinct factory presets (Anarchy Reese, Atom Lead, etc.)
-- **Splice MCP fetch** — `describe_a_sound`, `download_asset` workflow proven (5 drum hits + 7 misc samples already downloaded for this session)
-- **User Library mirroring** — samples copied from `~/Documents/Splice/Samples/` into `~/Documents/Ableton/User Library/Samples/Splice/` for Live's path resolver
-- **Audio clip loading** — `load_item_at_path` works for audio sample tracks (BREAK, SUB, ORGAN, PAD)
-- **Simpler sample loading** — VOX_CALL / RESP / CHOR all load their respective vocal one-shots
-- **Realtime parameter ramps during session_record** — `set_device_param` calls during arrangement playback get captured as automation lanes (proven on legacy session: 32 ramps survived to print)
-- **Tempo modulation events** — `set_tempo` mid-arrangement works
-- **Wall-clock-calibrated scene firing** — drift held under ~1.4 bars across 18+ scene fires
-- **Master-bus targeting** — ramps with `track="MASTER"` route via `set_master_device_param` (tidx=-1)
-- **Anticipation transforms** — `breathe_velocity`, `pull_back_before_drop`, `anticipation_fill` (impact at clip_length-0.125 stays sacred)
+## What's confidently working
+
+- **Bootstrap from a fresh empty Live project** — creates 16 named role-tracks, deletes Live's defaults
+- **Operator preset loading** per synth role (Anarchy Reese, Atom Lead, Chord Minor to Major, Basic FM Bells, Boinky Saw Riser, Amp Bass)
+- **Splice MCP fetch** — `describe_a_sound` + `download_asset` workflow proven
+- **User Library mirroring** — auto-copies samples from `~/Documents/Splice/Samples/` to `~/Documents/Ableton/User Library/Samples/Splice/` for Live's path resolver
+- **Audio clip loading** (BREAK / SUB / ORGAN / PAD)
+- **Simpler sample loading** (VOX_CALL / VOX_RESP / VOX_CHOR)
+- **Realtime parameter ramps captured into arrangement automation** during `session_record` (proven on legacy session: 32 ramps + 2 tempo modulations + false-drop survived to print, drift held under ±1.5 bars)
+- **Master-bus targeting** — `track="MASTER"` routes to `set_master_device_param`
+- **Wall-clock-calibrated scene firing** — `fire_arrangement` calibrates once against `song_time` then schedules everything on monotonic wall clock
+- **Anticipation transforms** — `breathe_velocity`, `pull_back_before_drop` (impact at clip_length-0.125 stays sacred), `anticipation_fill`
 
 ## What's known broken
 
-- **Live's `bulk_load_drum_pads` / per-pad sample loading** — `selected_drum_pad = X; b.load_item(item)` is an async race where `load_item` always lands on pad 36 regardless of which pad we selected. **Verified empirically across multiple workarounds**: fresh rack, delete+recreate device, delete+recreate track, sleeps between loads, per-pad RPC calls. Every approach yields "5/5 loaded" RPC reports but only ONE pad sticks (always 36, with the LAST sample). User is updating Live now to test if the new version fixes this.
+- **Live's per-pad Drum Rack sample load** — `selected_drum_pad = X; b.load_item(item)` is async; the load lands on pad 36 regardless of which pad we pre-selected. Verified across multiple workarounds (fresh rack, delete+recreate device, delete+recreate track, sleeps, per-pad RPC, bulk RPC). User just updated Live to test if it's fixed.
+- **Live's clip-envelope playback** — `clip.create_automation_envelope(param)` + `add_breakpoint(time, value)` succeed at the API but Live's playback engine ignores them. We pivoted to **realtime `set_device_param` during `session_record`** which works.
 
-  **Current workaround**: load `Drums/24_7 Kit.adg` factory preset which ships fully populated. Wrapped in an InstrumentGroupDevice; MIDI on the track still routes to the inner Drum Rack normally.
+## What requires a Live restart
 
-- **Clip envelopes silently dropped** — `clip.create_automation_envelope(param)` + `add_breakpoint(time, value)` succeed at the API layer but Live's playback engine ignores them. Pivoted to **realtime `set_device_param` during `session_record`** which Live captures into arrangement automation. This is the proven path for ramps.
+ANY change to `thelmic/live_remote_script/__init__.py` requires a full Live restart (closing the project isn't enough — Live caches at the Python interpreter level). Deploy via:
 
-## Required Live restarts
-
-After ANY change to `thelmic/live_remote_script/__init__.py`, deploy via:
 ```bash
 cp thelmic/live_remote_script/__init__.py "/c/ProgramData/Ableton/Live 12 Suite/Resources/MIDI Remote Scripts/ThelmicLive/__init__.py"
 rm -rf "/c/ProgramData/Ableton/Live 12 Suite/Resources/MIDI Remote Scripts/ThelmicLive/__pycache__"
 ```
-Then **fully quit and restart Live** (closing the project isn't enough). Live caches MIDI Remote Scripts at the Python interpreter level.
 
-## Memory files (legacy session feedback that still applies)
+Then **fully quit and reopen Live**.
 
-- `feedback_audio_gain_staging.md` — every stage's input must stay below clip
-- `feedback_irreverent_naming.md` — name with character (3RDEYEZ vibe) — *contradicts the current role-named scheme; resolve which the user wants*
-- `feedback_render_from_arrangement.md` — `stop_all_clips + back_to_arrangement + song_time=0` before Export
-- `project_obviating_thelmic_engine.md` — the original probe: can hand-built LLM compositions through the LOM channel replace the rule-based engine?
+## Live session state right now
 
-## State of the user's Live session right now
-
-Tracks present (from before user updates Live):
+Tracks (subject to whatever the user did during the Live update):
 ```
-T0  DRUMS         InstrumentGroupDevice (24_7 Kit), Saturator, EQ8
+T0  DRUMS         InstrumentGroupDevice (24_7 Kit, fully populated), Saturator, EQ8
 T1  AMEN          DrumGroupDevice (empty), EQ8
 T2  PERC          DrumGroupDevice (empty), EQ8
 T3  BREAK         EQ8 + audio clip on slot 0
 T4  SUB           EQ8 + audio clip on slot 0
 T5  ORGAN         EQ8 + audio clip on slot 0
 T6  PAD           EQ8 + audio clip on slot 0
-T7  MID_BASS      Operator (default sine), EQ8       — needs Operator preset loaded
-T8  STAB          Operator (default sine), EQ8       — needs preset
-T9  REESE         Operator (default sine), EQ8       — needs preset
-T10 LEAD          Operator (default sine), EQ8       — needs preset
-T11 SHIMMER       Operator (default sine), EQ8       — needs preset
+T7  MID_BASS      Operator (default sine), EQ8       — needs preset loaded for character
+T8  STAB          Operator (default sine), EQ8
+T9  REESE         Operator (default sine), EQ8
+T10 LEAD          Operator (default sine), EQ8
+T11 SHIMMER       Operator (default sine), EQ8
 T12 VOX_CALL      Simpler (yo chargie), EQ8
 T13 VOX_RESP      Simpler (big up), EQ8
 T14 VOX_CHOR      Simpler (selassie i), EQ8
-T15 FX            Operator (default sine), EQ8       — needs preset
-T16-T20 KICK/SNARE/HAT_C/HAT_O/CRASH (orphan from per-track Simpler experiment, can be deleted)
+T15 FX            Operator (default sine), EQ8
+T16-T20 KICK/SNARE/HAT_C/HAT_O/CRASH (orphan from a failed multi-track Simpler experiment)
 ```
 
-Splice samples downloaded (5 credits spent + 7 already-existing):
-- tp_nh_cjb_kick_one_shot_low_punchy.wav
-- BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav
-- ZEN_PDB_hi_hat_closed_one_shot_tight.wav
-- shs_ins_hat_open_one_shot_Fit.wav
-- cj_cymbal_one_shot_live_ahman.wav
-(All in `~/Documents/Splice/Samples/` and mirrored to `~/Documents/Ableton/User Library/Samples/Splice/`)
+Splice samples downloaded (in `~/Documents/Splice/Samples/` AND `~/Documents/Ableton/User Library/Samples/Splice/`):
+- `tp_nh_cjb_kick_one_shot_low_punchy.wav`
+- `BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav`
+- `ZEN_PDB_hi_hat_closed_one_shot_tight.wav`
+- `shs_ins_hat_open_one_shot_Fit.wav`
+- `cj_cymbal_one_shot_live_ahman.wav`
+- `TSP_IHD_160_drum_break_amen_chop_4bar.wav`
+- `ZEN_RETR_175_bass_sub_bonk_Emin.wav`
+- `AFP_SDRL_156_organ_bubble_cutchie_Am.wav`
+- `100_-_Em_-_Guitar_Pad_Texture.wav`
+- `X10_PDH_100_vocal_yo_chargie.wav`, `_big_up.wav`, `_selassie_i.wav`
 
-## Open user-flagged issues
+5 Splice credits already spent on the drum hits.
 
-1. **"check the percussion"** → currently 24_7 factory kit (whole kit). User dislikes this approach; wanted curated Splice drum hits per-pad which the Live API can't deliver.
-2. **"don't tie tracks to old musical intents"** → done (renamed to DRUMS/MID_BASS/PAD/etc.)
-3. **"clean up Live's default 4 stub tracks"** → done (`cleanup_default_tracks`)
-4. **Outstanding: orphan KICK/SNARE/HAT_C/HAT_O/CRASH tracks from a failed experiment** — remove on next setup or by hand
+## User's standing preferences (from prior sessions)
 
-## Best-bet starting point for fresh agent
+- **Track names should be role-named, not historical** ("DRUMS" not "HARDKIT", "MID_BASS" not "TECTONIC", "PAD" not "COLD MIST"). Already done.
+- **Don't leave Live's default 4 stub tracks lying around** after bootstrap. Already handled by `cleanup_default_tracks`.
+- **Be sarcastic / sardonic when things don't work, swearing OK.** Audio-engineer voice.
+- **Sacred impact** — the kick+snare+crash unison at clip_length-0.125 never gets velocity-attenuated by transforms.
+- **Render from arrangement, not session view** — before any Export Audio/Video, do `stop_all_clips + back_to_arrangement + song_time=0`. (See `feedback_render_from_arrangement.md`.)
+- **Mediated session capture is mandatory** — every session goes through `open_session()` which logs every chat turn / RPC / state snapshot to `sessions/<id>/log.jsonl` for the self-training corpus. Don't bypass it.
 
-If the user wants to **start from scratch architecturally**: revert to `claude/practical-jackson-c96170` (the legacy branch where the actual jungle session is fully fleshed out and printable end-to-end).
+## Memory files
 
-If the user wants to **continue this branch**: focus on
-- Re-test per-pad drum loading after Live update (5 minutes of work — `load_drum_pad_samples` already in place)
-- Wire factory Operator presets into setup (so MID_BASS sounds like a bass not a sine)
-- Flesh out ambient_drone and idm_glitch packs
-- Implement the persona feedback loop (v0.next+1)
+In `~/.claude/projects/C--Users-eric-github-sens8tion-thelmic/memory/`:
+- `MEMORY.md` — index
+- `feedback_audio_gain_staging.md` — every stage's input must stay below clip
+- `feedback_irreverent_naming.md` — name with character (3RDEYEZ vibe). **NB: contradicts the new role-named scheme; defer to role-named for tracks, irreverent for clip names + patches**
+- `feedback_render_from_arrangement.md` — back_to_arrangement before export
+- `project_obviating_thelmic_engine.md` — the original probe
 
-Whatever direction: read `bridge/README.md` and `thelmic/aesthetics/dnb_jungle/lifecycle.py` first.
+## How to start the conversation cleanly
+
+1. Read this file end to end (you've now done that).
+2. Confirm Live is running with `ThelmicLive` selected as the Control Surface.
+3. Ask if the user wants you to attempt step (1) of the immediate ask above (Splice per-pad drum load test).
+4. From there: `python scripts/run_pack.py dnb_jungle --phases pull` is the one-line invocation that exercises the drum-load path.
+
+If the user wants something different from the immediate ask, follow them. The lifecycle phases are independently runnable; you can re-enter any phase any time.
