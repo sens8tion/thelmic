@@ -949,9 +949,9 @@ class ThelmicLive(ControlSurface):
             raise IndexError("from_index out of range")
         if to_index < 0 or to_index >= n:
             raise IndexError("to_index out of range")
-        # Live API: Track.move_device(insert_index, device_index)
-        # Using the wider Live.Song.move_device path through track for safety.
-        track.move_device(from_index, to_index)
+        # Live's API for reordering: Song.move_device(device, dest_track, insert_pos)
+        device = track.devices[from_index]
+        self._song.move_device(device, track, to_index)
         return {"moved": True, "from_index": from_index, "to_index": to_index}
 
     # ---- mixer ------------------------------------------------------
