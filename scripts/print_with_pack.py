@@ -32,16 +32,24 @@ def main(pack_name: str = "dnb_jungle"):
 
     ch = LiveChannel(lower_priority=False); ch.start()
     try:
-        ok, detail = health_check(ch)
+        # If the pack declares EXPECTED_TRACKS, use them to validate the
+        # right session is loaded (not just any 4-track fresh project).
+        expected = getattr(pack, "EXPECTED_TRACKS", None)
+        ok, detail = health_check(ch,
+                                    expected_track_names=list(expected) if expected else None,
+                                    min_tracks=len(expected) if expected else 4)
         if not ok:
             print(f"HEALTH CHECK FAILED: {detail}")
             return
-        print(f"  health OK ({len(detail)} tracks)")
+        if isinstance(detail, dict):
+            print(f"  health OK — {len(detail)} expected tracks present: {list(detail.keys())}")
+        else:
+            print(f"  health OK")
 
         sess = ch.get_session_info().result(timeout=5)
         bpm = sess["tempo"]
         bar_seconds = 60.0 / bpm * 4
-        from thelmic.aesthetics.dnb_jungle import OUTRO_LET_REVERB_RING_MS
+        OUTRO_LET_REVERB_RING_MS = getattr(pack, "OUTRO_LET_REVERB_RING_MS", 800)
 
         # Build the pack's timeline
         timeline = pack.build_timeline()
