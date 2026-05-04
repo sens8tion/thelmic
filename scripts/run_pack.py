@@ -52,19 +52,25 @@ def run(pack_name: str, phases: list[str], skip_drops: bool = False):
 
     ch = LiveChannel(lower_priority=False); ch.start()
     try:
-        # Validate session — pack must declare EXPECTED_TRACKS
+        # Validate session. If "setup" is in phases, bootstrap will
+        # create missing tracks — so we ONLY enforce track-name presence
+        # for non-setup runs (where the pack assumes content already
+        # exists and is just printing / previewing).
         expected = getattr(pack, "EXPECTED_TRACKS", None)
-        ok, detail = health_check(ch,
-                                    expected_track_names=list(expected) if expected else None,
-                                    min_tracks=len(expected) if expected else 4)
-        if not ok:
-            print(f"\nHEALTH CHECK FAILED: {detail}")
-            print("\nLoad the pack's expected session in Live, then re-run.")
-            return
-        if isinstance(detail, dict):
-            print(f"  health OK — {len(detail)} expected tracks present")
+        if "setup" in phases:
+            print(f"  [health] skipped — setup will bootstrap missing tracks")
         else:
-            print(f"  health OK")
+            ok, detail = health_check(ch,
+                                        expected_track_names=list(expected) if expected else None,
+                                        min_tracks=len(expected) if expected else 4)
+            if not ok:
+                print(f"\nHEALTH CHECK FAILED: {detail}")
+                print("\nEither load the pack's expected session, or re-run with --phases setup,...")
+                return
+            if isinstance(detail, dict):
+                print(f"  health OK — {len(detail)} expected tracks present")
+            else:
+                print(f"  health OK")
 
         roles = None
 

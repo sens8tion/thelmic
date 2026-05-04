@@ -31,20 +31,125 @@ from .transforms import (
 )
 
 
-SAT_URI = "query:AudioFx#Saturator"
+SAT_URI       = "query:AudioFx#Saturator"
+EQ8_URI       = "query:AudioFx#EQ%20Eight"
+OPERATOR_URI  = "query:Synths#Operator"
+DRUM_RACK_URI = "query:Synths#Drum%20Rack"
+SIMPLER_URI   = "query:Synths#Simpler"
+
+
+# 16-track instrument basis. Each entry: (name, type, instrument_uri)
+# instrument_uri is None for audio tracks (no instrument; clips loaded separately).
+TRACK_TEMPLATE = [
+    # Drums
+    ("HARDKIT",       "midi",  DRUM_RACK_URI),
+    ("AMEN CHOPPED",  "midi",  DRUM_RACK_URI),
+    ("PERC",          "midi",  DRUM_RACK_URI),
+    # Audio — break + sub + harmonic samples (loaded separately, audio clips)
+    ("BREAKBEAST",    "audio", None),
+    ("SUBBONK",       "audio", None),
+    ("ORGAN",         "audio", None),
+    ("COLD MIST",     "audio", None),
+    # MIDI synths
+    ("TECTONIC",      "midi",  OPERATOR_URI),
+    ("STAB",          "midi",  OPERATOR_URI),
+    ("REESE",         "midi",  OPERATOR_URI),
+    ("LEAD",          "midi",  OPERATOR_URI),
+    ("SHIMMER",       "midi",  OPERATOR_URI),
+    # Vocal Simplers (samples loaded separately)
+    ("VOX YO",        "midi",  SIMPLER_URI),
+    ("VOX BIG",       "midi",  SIMPLER_URI),
+    ("VOX SEL",       "midi",  SIMPLER_URI),
+    # FX
+    ("FX",            "midi",  OPERATOR_URI),
+]
 
 
 # ----------------------------------------------------------------------
 # Phase: setup_session
 # ----------------------------------------------------------------------
 
-def setup_session(ch) -> dict:
-    """Phase: setup. Ensure devices required by the pack are present.
-    Idempotent — adds Saturator to HARDKIT if missing, etc.
+def _track_exists(ch, name: str) -> bool:
+    return find_track(ch, name) is not None
 
-    Returns a dict of {role: track_index} for the lifecycle's downstream use.
+
+def bootstrap_tracks(ch) -> int:
+    """Create the 16-track instrument basis from scratch.
+
+    For each entry in TRACK_TEMPLATE that doesn't already exist as a
+    track in the session, creates a track of the right type, names it,
+    and (for MIDI tracks) loads the configured instrument.
+
+    Returns count of tracks newly created.
     """
-    print("\n[setup] ensuring required devices on each role-track...")
+    print("[setup] bootstrapping 16-track basis from scratch...")
+    n_created = 0
+    for tname, ttype, instr_uri in TRACK_TEMPLATE:
+        if _track_exists(ch, tname):
+            continue
+        try:
+            if ttype == "midi":
+                r = ch.create_midi_track(-1).result(timeout=10)
+            else:
+                r = ch.create_audio_track(-1).result(timeout=10)
+        except Exception as e:
+            print(f"  ! create_{ttype}_track({tname}) fail: {e}")
+            continue
+        ti = r.get("index", r.get("track_index"))
+        if ti is None:
+            print(f"  ! created {tname} but couldn't read index from {r}")
+            continue
+        try: ch.set_track_name(ti, tname).result(timeout=3)
+        except Exception as e: print(f"    rename fail: {e}")
+        if instr_uri is not None:
+            try:
+                ch.load_device(ti, instr_uri).result(timeout=15)
+            except Exception as e:
+                print(f"    instrument load fail ({instr_uri}): {e}")
+        n_created += 1
+        print(f"  + T{ti} {tname:<14} ({ttype}{', ' + instr_uri.split('#')[-1] if instr_uri else ''})")
+    print(f"  bootstrap complete — {n_created} new tracks created")
+    return n_created
+
+
+REQUIRED_SCENES = 17        # the pack uses slots 0..13; round up for safety
+
+
+def ensure_scenes(ch, n_required: int = REQUIRED_SCENES) -> int:
+    """Ensure the session has at least n_required scenes (clip slots per track).
+    Newly-bootstrapped sessions usually start with only 8."""
+    try:
+        info = ch.get_scene_count().result(timeout=3)
+        n_scenes = info if isinstance(info, int) else info.get("count", info.get("scene_count", 0))
+    except Exception:
+        n_scenes = 0
+    n_create = max(0, n_required - n_scenes)
+    if n_create == 0:
+        return 0
+    for _ in range(n_create):
+        try: ch.create_scene(-1).result(timeout=3)
+        except Exception as e:
+            print(f"  ! create_scene fail: {e}")
+            break
+    print(f"  + ensured {n_required} scenes (created {n_create})")
+    return n_create
+
+
+def setup_session(ch, bootstrap: bool = True) -> dict:
+    """Phase: setup. Ensure required tracks + scenes + devices are present.
+    Idempotent — bootstraps missing tracks if `bootstrap=True`, ensures
+    enough scenes, adds device shape (Saturator on drums for drive ramps).
+
+    Returns dict of {role_name: track_index}."""
+    print("\n[setup] ensuring 16-track basis + scenes + required devices...")
+    sess = ch.get_session_info().result(timeout=3)
+    n = sess["track_count"]
+    print(f"  session has {n} tracks before setup")
+
+    if bootstrap:
+        bootstrap_tracks(ch)
+        ensure_scenes(ch)
+
     roles = {}
     for role_name, hints in [
         ("drums",        ["HARDKIT"]),
@@ -55,6 +160,11 @@ def setup_session(ch) -> dict:
         ("stab",         ["STAB"]),
         ("organ",        ["ORGAN"]),
         ("pad",          ["COLD MIST"]),
+        ("reese",        ["REESE"]),
+        ("lead",         ["LEAD"]),
+        ("shimmer",      ["SHIMMER"]),
+        ("perc",         ["PERC"]),
+        ("fx",           ["FX"]),
         ("vox_call",     ["VOX YO", "VOX"]),
         ("vox_response", ["VOX BIG"]),
         ("vox_chorus",   ["VOX SEL"]),
@@ -64,8 +174,6 @@ def setup_session(ch) -> dict:
             if ti is not None:
                 roles[role_name] = ti
                 break
-        else:
-            print(f"  - {role_name}: MISSING (hints {hints})")
 
     # Ensure HARDKIT has a Saturator (drive ramps target it)
     if "drums" in roles:
@@ -78,10 +186,15 @@ def setup_session(ch) -> dict:
                 ch.set_device_param(roles["drums"], sat,
                                       drive["index"], 0.20).result(timeout=2)
             print(f"  + drums Saturator added at device {sat}, drive=0.20")
-        else:
-            print(f"  - drums Saturator already present at device {sat}")
 
-    print(f"  resolved {len(roles)} role-tracks: {list(roles.keys())}")
+    # Ensure each MIDI track has an EQ8 (so freq separation has something to work with)
+    for role, ti in roles.items():
+        try:
+            ensure_device(ch, ti, "Eq8", EQ8_URI)
+        except Exception as e:
+            print(f"    {role}: EQ8 ensure fail {e}")
+
+    print(f"  resolved {len(roles)} roles: {list(roles.keys())}")
     return roles
 
 
