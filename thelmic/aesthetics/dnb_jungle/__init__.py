@@ -191,3 +191,22 @@ def get_arrangement(name: str | None = None) -> dict:
     if not name:
         return ARRANGEMENTS[DEFAULT_ARRANGEMENT_NAME]
     return ARRANGEMENTS.get(name, ARRANGEMENTS[DEFAULT_ARRANGEMENT_NAME])
+
+
+# ---- break-rack patterns + transition techniques ----------------------
+#
+# Native MIDI break patterns, designed for full drum-rack kits like
+# Riddim Rager Kit (16+ pads). Use these as substrate when composing
+# the BREAK_RACK track or as alternates to the audio amen break.
+#
+# Transitions are 1-4 bar gestures that go BETWEEN scenes to create
+# anticipation: vox_pitched_riser, hat_acceleration, reverse_crash_pickup.
+from .breaks_ragga import (
+    BREAK_PATTERNS,
+    BREAK_DESCRIPTIONS,
+    CLIP_LENGTH_BEATS as BREAKS_CLIP_LENGTH,
+)
+from .transitions import (
+    TRANSITIONS,
+    TRANSITION_NOTES,
+)
