@@ -15,7 +15,6 @@ from .discovery import find_track
 
 def ensure_layout(ch, layout: MetaLayout) -> dict[str, int]:
     roles: dict[str, int] = {}
-    _cleanup_default_tracks(ch)
     info = ch.get_session_info().result(timeout=5)
     track_count = int(info.get("track_count", 0))
 
@@ -34,6 +33,16 @@ def ensure_layout(ch, layout: MetaLayout) -> dict[str, int]:
         roles[spec.role] = ti
 
     _ensure_scenes(ch, layout)
+    # Clean up Live's default empty tracks AFTER layout exists, otherwise
+    # Live refuses to delete what is momentarily the only MIDI/audio track.
+    # Shift role indices if a deletion occurred before them.
+    deleted = _cleanup_default_tracks(ch)
+    if deleted:
+        # Re-resolve roles by name since indices may have shifted.
+        for spec in layout.channels:
+            ti = find_track(ch, spec.role.upper())
+            if ti is not None:
+                roles[spec.role] = ti
     return roles
 
 
@@ -88,9 +97,11 @@ def _cleanup_default_tracks(ch) -> int:
         if info.get("devices"):
             continue
         to_delete.append((ti, name))
+    deleted = 0
     for ti, name in reversed(to_delete):
         try:
             ch.delete_track(ti).result(timeout=5)
+            deleted += 1
         except Exception as e:
             print(f"  layout: delete default T{ti} {name!r}: {e}")
-    return len(to_delete)
+    return deleted

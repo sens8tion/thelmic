@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 
 def build_session(ch, sess: "Session") -> dict:
     counts = {"steps_run": 0, "steps_skipped": 0, "samples_loaded": 0,
-              "presets_loaded": 0, "drum_pads_loaded": 0}
+              "presets_loaded": 0, "drum_pads_loaded": 0,
+              "midi_clips": 0, "audio_clip_dupes": 0}
 
     # 1. tempo
     bpm = sess.intent.bpm
@@ -89,6 +90,12 @@ def build_session(ch, sess: "Session") -> dict:
         except Exception as e:
             print(f"  role {sb.role} ({sb.item_name}): {e}")
 
+    # 6. compose — fill scene clips per SCENE_PLAN
+    scene_plan = getattr(pack_pkg, "SCENE_PLAN", None)
+    clip_len = float(getattr(pack_pkg, "CLIP_LENGTH_BEATS", 16.0))
+    if scene_plan and layout is not None:
+        _compose_scenes(ch, scene_plan, layout, roles, clip_len, counts)
+
     # 5. preset bindings
     for pb in sess.bindings.presets:
         ti = roles.get(pb.role)
@@ -105,6 +112,55 @@ def build_session(ch, sess: "Session") -> dict:
             print(f"  preset {pb.role} ({pb.item_name}): {e}")
 
     return counts
+
+
+# ---- compose phase ----------------
+
+def _compose_scenes(ch, scene_plan, layout, roles, clip_len, counts) -> None:
+    """For each (scene, channel) cell in the plan: ensure a clip exists.
+
+    - "audio" entries duplicate slot 0 of the audio track to scene slot.
+    - Callable entries create a MIDI clip and write notes.
+    """
+    scene_index_by_name = {s.name: i for i, s in enumerate(layout.scenes)}
+    for scene_name, channel_map in scene_plan.items():
+        slot = scene_index_by_name.get(scene_name)
+        if slot is None:
+            continue
+        for role, action in channel_map.items():
+            ti = roles.get(role)
+            if ti is None:
+                continue
+            try:
+                existing = ch.get_track_clips(ti).result(timeout=3).get("clips", [])
+            except Exception:
+                existing = []
+            if any(c.get("slot") == slot for c in existing):
+                counts["steps_skipped"] += 1
+                continue
+
+            if action == "audio":
+                src = next((c for c in existing if c.get("slot") == 0), None)
+                if src is None:
+                    continue   # no source clip to duplicate
+                try:
+                    ch.duplicate_clip(ti, 0, slot).result(timeout=10)
+                    counts["audio_clip_dupes"] += 1
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"  compose {scene_name}/{role} dupe fail: {e}")
+            elif callable(action):
+                try:
+                    notes = action()
+                    ch.create_clip(ti, slot, clip_len).result(timeout=10)
+                    time.sleep(0.1)
+                    if notes:
+                        ch.add_notes_to_clip(ti, slot, notes).result(timeout=10)
+                    ch.set_clip_name(ti, slot, scene_name).result(timeout=5)
+                    counts["midi_clips"] += 1
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"  compose {scene_name}/{role} midi fail: {e}")
 
 
 # ---- inspection helpers ----------------

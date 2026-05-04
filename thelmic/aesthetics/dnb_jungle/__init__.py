@@ -81,6 +81,8 @@ from .lifecycle  import (
 # back-compat with already-built sessions.
 from thelmic.meta import MetaLayout, ChannelSpec, SceneSpec, ChannelKind
 
+from .compose_8x4 import SCENE_PLAN, CLIP_LENGTH_BEATS
+
 LAYOUT = MetaLayout(
     channels=[
         ChannelSpec(role="drums", kind=ChannelKind.DRUM_RACK,
