@@ -61,6 +61,22 @@ class Session:
 
     # ---- build -----------------------------------------------------------
 
+    def audit(self, ch) -> list:
+        """Read current Live state vs declared CHANNEL_AUDIO; return drift."""
+        from importlib import import_module
+        from thelmic.meta import audit_session
+        from thelmic.bridge.helpers.discovery import find_track
+        pack_pkg = import_module(f"thelmic.aesthetics.{self.intent.pack}")
+        channel_audio = getattr(pack_pkg, "CHANNEL_AUDIO", {}) or {}
+        layout = getattr(pack_pkg, "LAYOUT", None)
+        roles = {}
+        if layout is not None:
+            for spec in layout.channels:
+                ti = find_track(ch, spec.role.upper())
+                if ti is not None:
+                    roles[spec.role] = ti
+        return audit_session(ch, roles, channel_audio)
+
     def build(self, ch) -> dict:
         """Idempotently reconstruct the session in Live.
 

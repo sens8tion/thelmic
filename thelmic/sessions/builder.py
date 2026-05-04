@@ -90,7 +90,17 @@ def build_session(ch, sess: "Session") -> dict:
         except Exception as e:
             print(f"  role {sb.role} ({sb.item_name}): {e}")
 
-    # 6. compose — fill scene clips per SCENE_PLAN
+    # 6. mix — apply CHANNEL_AUDIO (HP/LP per role)
+    channel_audio = getattr(pack_pkg, "CHANNEL_AUDIO", None)
+    if channel_audio:
+        from thelmic.bridge.helpers.mix_apply import apply_channel_audio
+        try:
+            res = apply_channel_audio(ch, roles, channel_audio)
+            counts["eq_set"] = res.get("eq_set", 0)
+        except Exception as e:
+            print(f"  mix_apply: {e}")
+
+    # 7. compose — fill scene clips per SCENE_PLAN
     scene_plan = getattr(pack_pkg, "SCENE_PLAN", None)
     clip_len = float(getattr(pack_pkg, "CLIP_LENGTH_BEATS", 16.0))
     if scene_plan and layout is not None:

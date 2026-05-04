@@ -6,8 +6,10 @@ per-role spectral territory and gain-staging discipline.
 """
 from .layout import MetaLayout, ChannelSpec, SceneSpec, META_8x4, ChannelKind
 from .audio import FreqRegion, LevelTarget, ChannelAudio, StageCheckpoint
+from .audit import audit_session, format_report, DriftRecord
 
 __all__ = [
     "MetaLayout", "ChannelSpec", "SceneSpec", "META_8x4", "ChannelKind",
     "FreqRegion", "LevelTarget", "ChannelAudio", "StageCheckpoint",
+    "audit_session", "format_report", "DriftRecord",
 ]
