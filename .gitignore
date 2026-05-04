@@ -4,3 +4,10 @@ __pycache__/
 
 sessions/*/
 !sessions/.gitkeep
+
+# sample cache from thelmic.sources adapters — belongs in Ableton User Library
+.thelmic/samples/
+
+# credentials — never commit
+.env
+.thelmic/.env
