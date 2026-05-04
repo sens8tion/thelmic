@@ -114,6 +114,7 @@ _UI_THREAD_COMMANDS = {
     "set_drum_pad_chain_send",
     "set_drum_pad_chain_volume",
     "load_into_drum_pad_chain",
+    "load_sample_to_pad",
     "set_selected_clip_slot",
     "set_device_property",
     "load_audio_to_slot",
@@ -545,6 +546,11 @@ class ThelmicLive(ControlSurface):
             return self._load_into_drum_pad_chain(
                 params["track_index"], params["device_index"], params["note"],
                 params.get("uri"), params.get("path"), params.get("item_name"),
+            )
+        if cmd_type == "load_sample_to_pad":
+            return self._load_sample_to_pad(
+                params["track_index"], params["device_index"], params["note"],
+                params.get("path"), params.get("item_name"),
             )
         if cmd_type == "set_selected_clip_slot":
             return self._set_selected_clip_slot(params["track_index"], params["slot"])
@@ -2058,6 +2064,74 @@ class ThelmicLive(ControlSurface):
             "landed_in_chain": landed_in_chain,
             "chain_devices_after": [d.name for d in after],
             "warning": None if landed_in_chain else "Live API likely loaded onto track main chain instead — use send/output routing alternative",
+        }
+
+    def _load_sample_to_pad(self, track_index, device_index, note, path=None, item_name=None):
+        """Per-pad sample load via Browser.hotswap_target — Live 12 path
+        that respects pad targeting where selected_drum_pad does not.
+        """
+        track = self._track(track_index)
+        if device_index >= len(track.devices):
+            raise ValueError("device_index out of range")
+        rack = track.devices[device_index]
+        if not hasattr(rack, "drum_pads"):
+            raise ValueError("device " + rack.name + " is not a Drum Rack")
+        pad = rack.drum_pads[int(note)]
+        b = self._browser()
+
+        if not path:
+            raise ValueError("path required")
+        parts = [p for p in path.split("/") if p]
+        head = parts[0].lower()
+        cur = None
+        for attr in dir(b):
+            if attr.startswith("_"): continue
+            if attr.lower() == head:
+                try: cur = getattr(b, attr)
+                except Exception: cur = None
+                break
+        if cur is None:
+            raise ValueError("unknown root: " + parts[0])
+        for p in parts[1:]:
+            children = list(getattr(cur, "children", []) or [])
+            nxt = None
+            for c in children:
+                if getattr(c, "name", "").lower() == p.lower():
+                    nxt = c; break
+            if nxt is None:
+                raise ValueError("path part not found: " + p)
+            cur = nxt
+        if item_name:
+            children = list(getattr(cur, "children", []) or [])
+            target = None
+            for c in children:
+                if getattr(c, "name", "").lower() == item_name.lower():
+                    target = c; break
+            if target is None:
+                raise ValueError("item '" + item_name + "' not in path")
+            cur = target
+        if not getattr(cur, "is_loadable", False):
+            raise ValueError("item not loadable: " + getattr(cur, "name", "?"))
+
+        before_chains = len(list(pad.chains))
+        # Set hotswap target to the pad, then load — Live's documented per-pad swap path
+        try:
+            b.hotswap_target = pad
+        except Exception as e:
+            raise ValueError("could not set hotswap_target: " + str(e))
+        try:
+            b.load_item(cur)
+        finally:
+            try: b.hotswap_target = None
+            except Exception: pass
+        after_chains = list(pad.chains)
+        return {
+            "loaded": True,
+            "note": int(note),
+            "item_name": getattr(cur, "name", "?"),
+            "chain_count_before": before_chains,
+            "chain_count_after": len(after_chains),
+            "chain_names": [getattr(c, "name", "?") for c in after_chains],
         }
 
     def _create_scene(self, index):

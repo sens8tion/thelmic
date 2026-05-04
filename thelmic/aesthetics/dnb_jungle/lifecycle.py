@@ -385,36 +385,39 @@ def pull_samples(ch, splice_root=None, library_assignments=None) -> dict:
     roles = setup_session(ch, bootstrap=False)
     counts = {"loaded": 0, "skipped": 0}
 
-    # Drum Rack: load a factory drum-kit preset. Live's Browser.load_item
-    # redirects every drum-pad load to pad 36 regardless of selected_drum_pad
-    # (the per-pad-load API is broken). Working around this with a factory
-    # kit that ships pre-stocked.
-    DRUM_KITS = {
-        "24_7":             "drums:24_7 Kit.adg",                        # general
-        "64_pads_dub":      "drums:64 Pads Dub Techno Kit.adg",
-        "64_pads_penelope": "drums:64 Pads Penelope Kit.adg",
-        "106_typhoon":      "drums:106 Typhoon Kit.adg",
-    }
-    DRUM_KIT_CHOICE = "24_7"      # most idiomatic for jungle/dnb
+    # Drum Rack: empty rack + per-pad hotswap loads. selected_drum_pad path
+    # routes every load to pad 36, but Browser.hotswap_target = pad works.
+    DRUM_PADS = [
+        (36, "tp_nh_cjb_kick_one_shot_low_punchy.wav"),
+        (38, "BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav"),
+        (42, "ZEN_PDB_hi_hat_closed_one_shot_tight.wav"),
+        (46, "shs_ins_hat_open_one_shot_Fit.wav"),
+        (49, "cj_cymbal_one_shot_live_ahman.wav"),
+    ]
+    SPLICE_USER_LIB = "user_library/Samples/Splice"
 
     if "drums" in roles:
         t_drums = roles["drums"]
-        # Clear any existing rack/instrument-group device first
         info = ch.get_track_info(t_drums).result(timeout=3)
         for di in reversed(range(len(info.get("devices", [])))):
             cls = info["devices"][di].get("class_name", "")
             if cls in ("DrumGroupDevice", "InstrumentGroupDevice"):
                 try: ch.delete_device(t_drums, di).result(timeout=5)
                 except Exception: pass
-        # Load factory kit
-        kit_path, kit_name = DRUM_KITS[DRUM_KIT_CHOICE].split(":", 1)
         try:
-            ch.load_item_at_path(t_drums, kit_path, kit_name).result(timeout=30)
-            time.sleep(2.0)
-            print(f"  drums: loaded factory {kit_name}")
-            counts["loaded"] += 1
+            ch.load_item_at_path(t_drums, "instruments", "Drum Rack").result(timeout=15)
+            time.sleep(1.2)
+            for note, fname in DRUM_PADS:
+                try:
+                    ch.load_sample_to_pad(t_drums, 0, note, SPLICE_USER_LIB, fname).result(timeout=15)
+                    counts["loaded"] += 1
+                except Exception as e:
+                    print(f"  drums: pad {note} ({fname}) fail: {e}")
+                    counts["skipped"] += 1
+                time.sleep(0.3)
+            print(f"  drums: per-pad hotswap loaded {counts['loaded']} hits")
         except Exception as e:
-            print(f"  drums: factory kit load fail: {e}")
+            print(f"  drums: rack load fail: {e}")
 
     # Audio tracks: break, sub, organ, pad — load into slot 0 of each
     for role_name, track_role in [("break", "break"), ("sub", "sub"),

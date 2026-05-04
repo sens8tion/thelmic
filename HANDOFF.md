@@ -17,26 +17,26 @@ history beyond what's here.
 
 You should:
 
-1. Test if Live's per-pad Drum Rack load is now working (user just updated Live).
-   ```python
-   # Test path: bulk_load_drum_pads on a fresh DRUMS rack with these 5 hits
-   items = [
-     {"name": "tp_nh_cjb_kick_one_shot_low_punchy.wav",     "note": 36},
-     {"name": "BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav","note": 38},
-     {"name": "ZEN_PDB_hi_hat_closed_one_shot_tight.wav",   "note": 42},
-     {"name": "shs_ins_hat_open_one_shot_Fit.wav",          "note": 46},
-     {"name": "cj_cymbal_one_shot_live_ahman.wav",          "note": 49},
-   ]
-   ```
-   These 5 are already in `~/Documents/Splice/Samples/` and mirrored to
-   `~/Documents/Ableton/User Library/Samples/Splice/`. Code path is
-   `thelmic.aesthetics.dnb_jungle.lifecycle.pull_samples` — already wired.
+**Per-pad Drum Rack load now works** via `Browser.hotswap_target = pad`.
+Use `ch.load_sample_to_pad(track, device, note, path, item_name)`.
 
-2. **If the load succeeds** (5 distinct pads populated): the user gets curated jungle drum hits per pad. Done.
+The old `selected_drum_pad = X; load_item` path is still broken (everything
+lands on pad 36) — do not use `bulk_load_drum_pads` going forward. Update
+`pull_samples` to use the hotswap path instead of the factory-kit fallback.
 
-3. **If it fails** (Live API still puts everything on pad 36): fall back to loading factory `24_7 Kit.adg` from `query:Drums#FileId_10800` via `load_item_at_path("drums", "24_7 Kit.adg")` — this preset ships fully populated. Wraps as `InstrumentGroupDevice` but MIDI routes through to the inner Drum Rack.
-
-The user previously rejected the factory-kit fallback as "giving up", so try (1) first and only fall back to (2) if Live's API genuinely still has the bug.
+Standard mapping for jungle/dnb hits:
+```python
+PADS = [
+  (36, "tp_nh_cjb_kick_one_shot_low_punchy.wav"),
+  (38, "BOS_AJ_Drum_Snare_One_Shot_Press_A_sharp.wav"),
+  (42, "ZEN_PDB_hi_hat_closed_one_shot_tight.wav"),
+  (46, "shs_ins_hat_open_one_shot_Fit.wav"),
+  (49, "cj_cymbal_one_shot_live_ahman.wav"),
+]
+for note, fname in PADS:
+    ch.load_sample_to_pad(track_idx, 0, note,
+        "user_library/Samples/Splice", fname).result(timeout=15)
+```
 
 ---
 
@@ -118,7 +118,7 @@ python scripts/run_pack.py dnb_jungle [--phases p1,p2,...] [--skip-drops]
 
 ## What's known broken
 
-- **Live's per-pad Drum Rack sample load** — `selected_drum_pad = X; b.load_item(item)` is async; the load lands on pad 36 regardless of which pad we pre-selected. Verified across multiple workarounds (fresh rack, delete+recreate device, delete+recreate track, sleeps, per-pad RPC, bulk RPC). User just updated Live to test if it's fixed.
+- **`selected_drum_pad` per-pad sample load** — `selected_drum_pad = X; b.load_item(item)` still routes every load to pad 36 in Live 12 (verified after Live update). **Workaround in place**: use `Browser.hotswap_target = pad` (`load_sample_to_pad` RPC) — proven on 5 pads simultaneously.
 - **Live's clip-envelope playback** — `clip.create_automation_envelope(param)` + `add_breakpoint(time, value)` succeed at the API but Live's playback engine ignores them. We pivoted to **realtime `set_device_param` during `session_record`** which works.
 
 ## What requires a Live restart

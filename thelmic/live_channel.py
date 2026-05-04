@@ -620,6 +620,14 @@ class LiveChannel:
             "uri": uri, "path": path, "item_name": item_name,
         })
 
+    def load_sample_to_pad(self, track_index: int, device_index: int, note: int,
+                           path: str, item_name: str) -> Future:
+        """Per-pad sample load via Browser.hotswap_target."""
+        return self._enqueue("load_sample_to_pad", {
+            "track_index": track_index, "device_index": device_index, "note": int(note),
+            "path": path, "item_name": item_name,
+        })
+
     def set_selected_clip_slot(self, track_index: int, slot: int) -> Future:
         return self._enqueue("set_selected_clip_slot", {
             "track_index": track_index, "slot": slot,
