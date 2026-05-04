@@ -1,0 +1,30 @@
+name: idm_glitch
+description: IDM in the Autechre / Squarepusher tradition — broken-time drums, granular textures, rotational form.
+
+default_bpm: 138
+bpm_range: [120, 160]
+meter: [4, 4]                    # nominal — frequently displaced
+
+key:
+  root_midi: 38                  # D2
+  scale: phrygian                # off-centre tonality
+  scale_intervals: [0, 1, 3, 5, 7, 8, 10]
+
+narrative_grammar: rotational
+
+required_track_roles:
+  - broken_drums                 # MIDI drum rack with custom mappings
+  - granular_lead                # melodic content with time-stretching
+  - modulating_bass              # synth bass with frequent param changes
+  - atmospheric                  # pad / texture
+  - click_layer                  # very high-frequency clicks / glitches
+
+section_palette:
+  - head                         # state the cell
+  - variation                    # one rotation
+  - interlude                    # transitional passage
+  - outhead                      # closing return
+
+anticipation:
+  no_climax: true
+  cell_drift: true               # parameter drift across rotations

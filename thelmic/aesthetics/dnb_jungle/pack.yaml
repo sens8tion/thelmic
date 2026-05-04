@@ -1,0 +1,82 @@
+name: dnb_jungle
+description: Ragga jungle / DnB / breakcore / gabber arc — the dance-music aesthetic this codebase was built around.
+
+# Tempo and meter
+default_bpm: 165
+bpm_range: [160, 175]
+meter: [4, 4]
+
+# Tonality
+key:
+  root_midi: 36           # C2
+  scale: natural_minor
+  scale_intervals: [0, 2, 3, 5, 7, 8, 10]
+
+# Grammar
+narrative_grammar: build_drop_release
+
+# Required track roles (by-role inspection, not by hardcoded names)
+required_track_roles:
+  - drums                 # MIDI track with Drum Rack
+  - sub                   # audio track with sub bass sample
+  - mid_bass              # MIDI synth (Operator preferred for octave flexibility)
+  - stab                  # MIDI synth for chord stabs
+  - pad                   # audio sustained pad
+  - organ                 # audio organ sample (with chopper effects optional)
+  - vocal_one_shot        # MIDI Simpler with single-hit vocal sample (optional, can have multiple)
+
+# Section palette
+section_palette:
+  - intro
+  - stirring
+  - build
+  - riser              # anticipation slot (thinned + impact)
+  - drop               # ⚡ ragga jungle slam
+  - breakdown
+  - footwork           # pivot rhythm
+  - jungle_return      # half-anticipation
+  - rebuild            # second anticipation, leads to drop2
+  - second_drop        # ⚡⚡ Rotterdam gabber
+  - chaos_peak         # breakcore peak
+  - sustained_peak     # full-on max-density gabber
+  - descent
+  - reprise            # callback to stirring
+  - outro              # quiet close
+
+# Anticipation behaviour
+anticipation:
+  pre_drop_pattern: tightening_hats_then_silence_then_impact
+  void_beats: 4
+  sacred_impact: true        # impact note at end of clip never gets velocity-attenuated
+  pull_back_window_beats: 4
+  pull_back_min_factor: 0.6
+
+# Mix aesthetic
+mix:
+  hp_lp_per_role:
+    drums:     [40, null]
+    sub:       [30, 700]
+    mid_bass:  [50, 400]
+    stab:      [200, null]
+    pad:       [250, null]
+    organ:     [180, null]
+    vocal:     [150, null]
+  gain_levels:
+    kick:      0.85
+    snare:     0.80
+    hat:       0.65
+    sub:       0.55
+    mid_bass:  0.72
+    stab:      0.78
+    pad:       0.55
+    vocal:     0.78
+  sidechain_style: pump_into_drop
+  master_chain: [GlueCompressor, Eq8, Saturator]
+
+# Vocabulary
+vocabulary:
+  language: en
+  irreverent: true                        # name clips with character (3RDEYEZ vibe)
+  drop_synonyms: [drop, slam, hit, impact]
+  build_synonyms: [build, rise, push, anticipation]
+  outro_synonyms: [outro, close, fade, descent]

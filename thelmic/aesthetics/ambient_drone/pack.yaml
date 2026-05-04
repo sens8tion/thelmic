@@ -1,0 +1,59 @@
+name: ambient_drone
+description: Slow-evolving drones with no climaxes, only continuous textural transformation.
+
+default_bpm: 60
+bpm_range: [40, 90]
+meter: [4, 4]                     # nominal — in drone, meter is mostly irrelevant
+
+key:
+  root_midi: 36                   # C2
+  scale: natural_minor            # mode is just a starting reference
+  scale_intervals: [0, 2, 3, 5, 7, 8, 10]
+
+narrative_grammar: static_drone
+
+required_track_roles:
+  - drone_fundamental             # held bass note, can be a sub bass / synth
+  - drone_mid                     # the harmonic body
+  - shimmer                       # high partials, granular textures
+  - noise_layer                   # field recordings or processed noise
+  - field_recording               # optional, for narrative texture
+
+section_palette:
+  - ground
+  - warming
+  - darkening
+  - shimmering
+  - thickening
+  - thinning
+  - phasing
+  - stillness
+  - dissolution
+
+anticipation:
+  pre_section_pattern: continuous_swell
+  no_impacts: true
+  no_climax: true
+
+mix:
+  hp_lp_per_role:
+    drone_fundamental:    [25, null]
+    drone_mid:            [60, 2200]
+    shimmer:              [1500, null]
+    noise_layer:          [200, 6000]
+    field_recording:      [50, null]
+  gain_levels:
+    drone_fundamental:    0.62
+    drone_mid:            0.68
+    shimmer:              0.55
+    noise_layer:          0.50
+    field_recording:      0.45
+  sidechain_style: none
+  master_chain: [Reverb, Eq8]      # heavy reverb, gentle EQ — no comp glue
+
+vocabulary:
+  language: en
+  vocabulary_register: contemplative
+  drop_synonyms: []                # no drops
+  build_synonyms: [swell, bloom, evolve]
+  outro_synonyms: [dissolve, fade, resolve, return]

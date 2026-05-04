@@ -2,12 +2,16 @@
 
 > An instrument you ride, not configure.
 
-Two things live in this branch:
+Three things live in this branch:
 
-1. **The original thelmic engine** — a generative music engine producing MIDI directly. Rule-based: voices, archetypes, dimensions, anticipation curves, transformers. See [ARCHITECTURE.md](ARCHITECTURE.md).
-2. **An LLM-driven Ableton control surface** built on top — a Live Remote Script + Python async client that gives an agent (Claude, in our testing) full programmatic control of Ableton Live: tracks, devices, clips, audio routing, sidechain, automation, drum-rack pads, master bus, Splice samples, the lot.
+1. **The original thelmic engine** — rule-based generative MIDI engine. See [ARCHITECTURE.md](ARCHITECTURE.md).
+2. **A genre-neutral Live-control bridge** in `thelmic.bridge` — Live Remote Script + Python async client + helpers + tonality + narrative grammars + event-timeline engine. **Knows nothing about any specific genre.**
+3. **Pluggable aesthetic packs** in `thelmic.aesthetics.{pack}` — each pack encodes one musical form (drum patterns, anticipation grammar, mix recipes, section palette, vocabulary). Today's packs:
+   - `dnb_jungle` — ragga → Rotterdam arc (BuildDropRelease grammar)
+   - `ambient_drone` — slow textural transformation (StaticDrone grammar)
+   - `idm_glitch` — rotational variations (Rotational grammar)
 
-This README focuses on (2). The original engine docs are unchanged.
+The bridge is the substrate; packs are interchangeable. A future Claude prompt can compose in any registered form by switching pack — without modifying the bridge.
 
 ---
 
