@@ -1,5 +1,16 @@
 """Apply CHANNEL_AUDIO meta — gain-stage every processing element.
 
+Two modes:
+- apply_channel_audio(metered=False): static unity. Sets every device's
+  output param to 0 dB and pad volumes to unity. Fast, approximate —
+  doesn't account for Drive / Saturator harmonics / Compressor makeup
+  that change a device's actual output level.
+- apply_channel_audio(metered=True): true unity. For each device, bypass
+  everything downstream, fire a representative clip, sample the track
+  output meter (= this device's output), correct the device's gain param
+  so peaks land at 0 dB, then re-enable downstream. Slow but accurate.
+
+
 For each role:
   1. Walk the device chain. For every device whose class is in
      DEVICE_GAIN_RULE, attenuate its own gain/output/volume param so that
@@ -13,10 +24,17 @@ For each role:
 No metering — meta is the source of truth. One-shot, fast.
 """
 from __future__ import annotations
+import math, time
 
 from thelmic.meta import ChannelAudio
 from .discovery import ensure_device
 from .eq import set_eq_band, EQ8_HP_48_GUESS, EQ8_LP_48_GUESS
+
+# Live's per-track meter — 0.85 ≈ 0 dBFS (unity), 1.0 ≈ +6 dBFS.
+UNITY_METER = 0.85
+SAMPLE_INTERVAL_S = 0.05
+SAMPLE_WINDOW_S   = 1.2
+WARMUP_S          = 0.6
 
 
 EQ8_URI = "query:AudioFx#EQ%20Eight"
@@ -63,6 +81,128 @@ def _convert(db: float, unit: str) -> float:
     raise ValueError("unknown gain unit: " + unit)
 
 
+def _gainstage_chain_metered(ch, ti: int, role: str) -> int:
+    """For each gain-bearing device on this track, bypass everything
+    downstream, fire a clip, sample track output meter (= this device's
+    output), correct the device's gain param so peaks land at unity.
+    Restore original device-on states afterward.
+
+    Returns count of devices corrected.
+    """
+    info = ch.get_track_info(ti).result(timeout=3)
+    devs = info.get("devices", [])
+    gain_devs = [(i, d.get("class_name")) for i, d in enumerate(devs)
+                 if DEVICE_GAIN_RULE.get(d.get("class_name")) is not None]
+    if not gain_devs:
+        return 0
+
+    # Find a clip to fire — prefer a populated audio clip on slot 0,
+    # else any clip the track has.
+    clips = ch.get_track_clips(ti).result(timeout=3).get("clips", [])
+    if not clips:
+        return 0
+    play_slot = clips[0]["slot"]
+
+    # Snapshot Device On state for every device so we can restore.
+    on_state: list[tuple[int, int, float]] = []   # (di, on_param_idx, was_on)
+    for di in range(len(devs)):
+        try:
+            pinfo = ch.get_device_info(ti, di).result(timeout=3)
+            on_param = next((p for p in pinfo["parameters"]
+                             if p["name"] == "Device On"), None)
+            if on_param is None:
+                continue
+            on_state.append((di, on_param["index"], on_param["value"]))
+        except Exception:
+            continue
+
+    corrected = 0
+    try:
+        for gain_di, cls in gain_devs:
+            # Bypass every device strictly after gain_di
+            for di, on_idx, _ in on_state:
+                want = 1.0 if di <= gain_di else 0.0
+                ch.set_device_param(ti, di, on_idx, want).result(timeout=3)
+
+            # Read current gain param value
+            param_name, unit = DEVICE_GAIN_RULE[cls]
+            pinfo = ch.get_device_info(ti, gain_di).result(timeout=3)
+            gp = next((p for p in pinfo["parameters"]
+                       if p["name"] == param_name), None)
+            if gp is None:
+                continue
+
+            # Fire + sample
+            peak = _measure_track_peak(ch, ti, play_slot)
+            if peak <= 0:
+                continue
+
+            # Compute correction in dB so peak → UNITY_METER
+            correction_db = 20 * math.log10(UNITY_METER / peak)
+
+            # Apply correction in the param's native unit
+            new_value = _apply_correction(unit, gp["value"], correction_db)
+            new_value = max(gp.get("min", 0.0), min(gp.get("max", 1.0), new_value))
+            ch.set_device_param(ti, gain_di, gp["index"], new_value).result(timeout=3)
+            corrected += 1
+    finally:
+        # Stop playback + restore device-on states
+        try:
+            ch.stop_clip(ti, play_slot).result(timeout=3)
+        except Exception:
+            pass
+        for di, on_idx, was_on in on_state:
+            try:
+                ch.set_device_param(ti, di, on_idx, was_on).result(timeout=3)
+            except Exception:
+                pass
+
+    return corrected
+
+
+def _measure_track_peak(ch, ti: int, play_slot: int) -> float:
+    ch.fire_clip(ti, play_slot).result(timeout=3)
+    time.sleep(WARMUP_S)
+    peak = 0.0
+    steps = int(SAMPLE_WINDOW_S / SAMPLE_INTERVAL_S)
+    for _ in range(steps):
+        meters = ch.get_all_meters().result(timeout=2).get("meters", [])
+        m = next((mm for mm in meters if mm.get("track_index") == ti), None)
+        if m:
+            p = max(float(m.get("left", 0)), float(m.get("right", 0)))
+            if p > peak:
+                peak = p
+        time.sleep(SAMPLE_INTERVAL_S)
+    return peak
+
+
+def _apply_correction(unit: str, current_value: float, correction_db: float) -> float:
+    """Translate a dB correction into the param's native value space."""
+    if unit == "db_direct":
+        return current_value + correction_db
+    if unit == "live_norm":
+        # Convert current normalized → dB, add correction, convert back.
+        # Inverse of _db_to_live_norm (approximate).
+        cur_db = _live_norm_to_db(current_value)
+        return _db_to_live_norm(cur_db + correction_db)
+    if unit == "utility":
+        cur_db = (current_value - 0.5) * 70.0
+        new_db = max(-35.0, min(35.0, cur_db + correction_db))
+        return 0.5 + (new_db / 70.0)
+    raise ValueError("unknown gain unit: " + unit)
+
+
+def _live_norm_to_db(v: float) -> float:
+    """Inverse of _db_to_live_norm (approximate)."""
+    if v >= 1.0:  return 6.0
+    if v >= 0.85: return ((v - 0.85) / 0.15) * 6.0
+    if v >= 0.70: return -6 + ((v - 0.70) / 0.15) * 6.0
+    if v >= 0.55: return -12 + ((v - 0.55) / 0.15) * 6.0
+    if v >= 0.35: return -24 + ((v - 0.35) / 0.20) * 12.0
+    if v >= 0.13: return -48 + ((v - 0.13) / 0.22) * 24.0
+    return -70 + (v / 0.13) * 22.0 if v > 0 else float("-inf")
+
+
 def remove_utilities(ch, roles: dict[str, int]) -> int:
     """Delete every StereoGain (Utility) device on the role tracks."""
     deleted = 0
@@ -80,9 +220,10 @@ def remove_utilities(ch, roles: dict[str, int]) -> int:
 
 
 def apply_channel_audio(ch, roles: dict[str, int],
-                        channel_audio: dict[str, ChannelAudio]) -> dict:
+                        channel_audio: dict[str, ChannelAudio],
+                        metered: bool = False) -> dict:
     counts = {"device_gain_set": 0, "clip_gain_set": 0, "eq_set": 0,
-              "missing_role": 0, "no_gain_target": 0}
+              "missing_role": 0, "no_gain_target": 0, "metered_corrections": 0}
     for role, ca in channel_audio.items():
         ti = roles.get(role)
         if ti is None:
@@ -123,6 +264,14 @@ def apply_channel_audio(ch, roles: dict[str, int],
                 counts["device_gain_set"] += 1
             except Exception as e:
                 print(f"  {role} {cls}.{param_name}: {e}")
+
+        # 2b. Metered correction: drive each device's actual output to unity
+        if metered:
+            try:
+                corrected = _gainstage_chain_metered(ch, ti, role)
+                counts["metered_corrections"] += corrected
+            except Exception as e:
+                print(f"  {role} metered: {e}")
 
         # 3. Drum Rack — every populated pad and its inner chain at unity
         for di, d in enumerate(info.get("devices", [])):
