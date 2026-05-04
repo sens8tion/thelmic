@@ -157,3 +157,37 @@ LAYOUT = MetaLayout(
                   description="Rotterdam/gabber variant — distorted, faster pulse"),
     ],
 )
+
+# ---- arrangement registry ---------------------------------------------
+#
+# An arrangement = (LAYOUT, SCENE_PLAN, CLIP_LENGTH_BEATS). The pack ships
+# one or more named arrangements; the session picks one via
+# Intent.overrides["arrangement"] = "<name>". Default is "jungle".
+#
+# Adding a new arrangement = adding a new submodule that exports
+# LAYOUT, SCENE_PLAN, CLIP_LENGTH_BEATS, and a key in this dict.
+from . import compose_ragga as _ragga
+
+ARRANGEMENTS: dict[str, dict] = {
+    "jungle": {
+        "layout":       LAYOUT,
+        "scene_plan":   SCENE_PLAN,
+        "clip_length":  CLIP_LENGTH_BEATS,
+        "description":  "BUILD → DROP → BREAK → DROP2 (junglist arc)",
+    },
+    "ragga": {
+        "layout":       _ragga.LAYOUT,
+        "scene_plan":   _ragga.SCENE_PLAN,
+        "clip_length":  _ragga.CLIP_LENGTH_BEATS,
+        "description":  "DUB_IN → STEPPER → RAGGAJUNGLE → DUBOUT (ragga arc)",
+    },
+}
+
+DEFAULT_ARRANGEMENT_NAME = "jungle"
+
+
+def get_arrangement(name: str | None = None) -> dict:
+    """Resolve an arrangement by name. None / unknown → default (jungle)."""
+    if not name:
+        return ARRANGEMENTS[DEFAULT_ARRANGEMENT_NAME]
+    return ARRANGEMENTS.get(name, ARRANGEMENTS[DEFAULT_ARRANGEMENT_NAME])

@@ -32,9 +32,24 @@ def build_session(ch, sess: "Session") -> dict:
         else:
             counts["steps_skipped"] += 1
 
-    # 2. layout — prefer pack's MetaLayout, fallback to legacy
+    # 2. layout — prefer pack's MetaLayout, fallback to legacy.
+    # If intent.overrides["arrangement"] selects a named arrangement and the
+    # pack has an ARRANGEMENTS registry, use that arrangement's layout +
+    # scene_plan + clip_length instead of the pack-level defaults.
     pack_pkg = import_module(f"thelmic.aesthetics.{sess.intent.pack}")
-    layout = getattr(pack_pkg, "LAYOUT", None)
+    arr_name = sess.intent.overrides.get("arrangement") if sess.intent.overrides else None
+    arrangements = getattr(pack_pkg, "ARRANGEMENTS", None)
+    arrangement = None
+    if arrangements and arr_name in arrangements:
+        arrangement = arrangements[arr_name]
+        layout = arrangement["layout"]
+    elif arrangements:
+        # honour pack-declared default if the registry exists
+        default_name = getattr(pack_pkg, "DEFAULT_ARRANGEMENT_NAME", None)
+        arrangement = arrangements.get(default_name) if default_name else None
+        layout = arrangement["layout"] if arrangement else getattr(pack_pkg, "LAYOUT", None)
+    else:
+        layout = getattr(pack_pkg, "LAYOUT", None)
     if layout is not None:
         from thelmic.bridge.helpers.layout import ensure_layout
         roles = ensure_layout(ch, layout)
@@ -100,9 +115,14 @@ def build_session(ch, sess: "Session") -> dict:
         except Exception as e:
             print(f"  mix_apply: {e}")
 
-    # 7. compose — fill scene clips per SCENE_PLAN
-    scene_plan = getattr(pack_pkg, "SCENE_PLAN", None)
-    clip_len = float(getattr(pack_pkg, "CLIP_LENGTH_BEATS", 16.0))
+    # 7. compose — fill scene clips per SCENE_PLAN. Arrangement-aware:
+    # if a named arrangement was resolved, use ITS scene_plan + clip_length.
+    if arrangement is not None:
+        scene_plan = arrangement["scene_plan"]
+        clip_len   = float(arrangement["clip_length"])
+    else:
+        scene_plan = getattr(pack_pkg, "SCENE_PLAN", None)
+        clip_len   = float(getattr(pack_pkg, "CLIP_LENGTH_BEATS", 16.0))
     if scene_plan and layout is not None:
         _compose_scenes(ch, scene_plan, layout, roles, clip_len, counts)
 
