@@ -17,6 +17,11 @@ import time
 from thelmic.bridge.helpers import (
     find_track, find_device, ensure_device, hard_reset, ms_to_beats,
 )
+from thelmic.bridge.helpers.splice import (
+    RoleSampleSpec, scan_library, find_best_matches,
+    load_audio_clip_into_slot, load_simpler_sample, load_drum_pad_samples,
+    DEFAULT_SPLICE_ROOT,
+)
 from .constants  import (
     KICK, SNARE, HAT_C, CRASH, FREQ_SEPARATION, TRACK_LEVELS,
     OUTRO_LET_REVERB_RING_MS,
@@ -290,14 +295,143 @@ def setup_session(ch, bootstrap: bool = True) -> dict:
 # Phase: pull_samples (Splice integration)
 # ----------------------------------------------------------------------
 
-def pull_samples(ch, splice_mcp=None) -> list:
-    """Phase: pull. Optional — pull Splice content via MCP.
-    Returns list of pulled asset filenames. Skipped if no MCP supplied."""
-    if splice_mcp is None:
-        print("\n[pull] skipped — no Splice MCP provided")
-        return []
-    print("\n[pull] (Splice integration not yet wired into lifecycle hook)")
-    return []
+# Role → sample-search spec for the dnb_jungle pack
+DNB_JUNGLE_SAMPLE_SPECS = {
+    # Drum-rack pads — match individual hits
+    "kick":   RoleSampleSpec("kick",
+                              should_match=["kick", "808", "909", "boom"],
+                              must_not_match=["loop", "fill", "reverse"],
+                              one_shot_preferred=True),
+    "snare":  RoleSampleSpec("snare",
+                              should_match=["snare", "snr", "rim", "clap"],
+                              must_not_match=["loop", "reverse"],
+                              one_shot_preferred=True),
+    "hat_c":  RoleSampleSpec("hat_c",
+                              should_match=["hat_c", "closed", "hihat", "hh_c", "ch_"],
+                              must_not_match=["open", "loop", "reverse"],
+                              one_shot_preferred=True),
+    "hat_o":  RoleSampleSpec("hat_o",
+                              should_match=["hat_o", "open", "hh_o", "oh_"],
+                              must_not_match=["closed", "loop"],
+                              one_shot_preferred=True),
+    "crash":  RoleSampleSpec("crash",
+                              should_match=["crash", "cymbal", "cym"],
+                              must_not_match=["loop", "ride"],
+                              one_shot_preferred=True),
+    # Audio sample tracks
+    "break":  RoleSampleSpec("break",
+                              should_match=["break", "amen", "drum_break", "loop"],
+                              bpm_range=(160, 180),
+                              loop_preferred=True),
+    "sub":    RoleSampleSpec("sub",
+                              should_match=["sub", "808", "bass_sub", "bonk"],
+                              must_not_match=["mid", "high"],
+                              loop_preferred=False),
+    "organ":  RoleSampleSpec("organ",
+                              should_match=["organ", "rhodes", "wurli"],
+                              loop_preferred=True),
+    "pad":    RoleSampleSpec("pad",
+                              should_match=["pad", "texture", "ambient", "drone"],
+                              loop_preferred=True),
+    # Vocal one-shots — using historical character markers (bigup, yo, selassie)
+    "vox_call":      RoleSampleSpec("vox_call",
+                                     should_match=["yo", "ay", "oi", "intro", "vocal_chop"],
+                                     must_match=["vocal"]),
+    "vox_response":  RoleSampleSpec("vox_response",
+                                     should_match=["big_up", "bigup", "shout"],
+                                     must_match=["vocal"]),
+    "vox_chorus":    RoleSampleSpec("vox_chorus",
+                                     should_match=["selassie", "chorus", "hook"],
+                                     must_match=["vocal"]),
+}
+
+
+def pull_samples(ch, splice_root=None, library_assignments=None) -> dict:
+    """Phase: pull. Scan local Splice library + load matched samples
+    into role tracks.
+
+    splice_root:         Path to Splice library (default ~/Documents/Splice/Samples)
+    library_assignments: optional pre-resolved {role: Path} override; if given,
+                          skips the local scan and loads exactly these.
+
+    For agent-driven Splice MCP fetching: call prompt_to_stack +
+    download_asset upstream of this, save to ~/Documents/Splice/Samples/,
+    then this function picks up the new content automatically.
+    """
+    print("\n[pull] scanning Splice library + loading matched samples...")
+    if splice_root is None:
+        splice_root = DEFAULT_SPLICE_ROOT
+
+    library = scan_library(splice_root)
+    if not library:
+        print(f"  no samples found at {splice_root}")
+        return {}
+    print(f"  scanned {len(library)} samples")
+
+    # Resolve which sample to use for each role
+    if library_assignments is None:
+        library_assignments = {}
+        for role, spec in DNB_JUNGLE_SAMPLE_SPECS.items():
+            matches = find_best_matches(library, spec, top_n=1)
+            if matches:
+                _, entry = matches[0]
+                library_assignments[role] = entry.path
+
+    if not library_assignments:
+        print("  no role matches in library; skipping")
+        return {}
+
+    # Map sample roles to track roles + load
+    roles = setup_session(ch, bootstrap=False)
+    counts = {"loaded": 0, "skipped": 0}
+
+    # Drum rack: kick, snare, hat_c, hat_o, crash → DRUMS pads
+    if "drums" in roles:
+        from .constants import KICK, SNARE, HAT_C, HAT_O, CRASH
+        drum_pad_map = {
+            KICK:   library_assignments.get("kick"),
+            SNARE:  library_assignments.get("snare"),
+            HAT_C:  library_assignments.get("hat_c"),
+            HAT_O:  library_assignments.get("hat_o"),
+            CRASH:  library_assignments.get("crash"),
+        }
+        drum_pad_map = {k: v for k, v in drum_pad_map.items() if v is not None}
+        if drum_pad_map:
+            drum_dev = find_device(ch, roles["drums"], "DrumGroupDevice")
+            if drum_dev is not None:
+                n_loaded = load_drum_pad_samples(ch, roles["drums"], drum_dev, drum_pad_map)
+                print(f"  drums: loaded {n_loaded}/{len(drum_pad_map)} pads")
+                counts["loaded"] += n_loaded
+            else:
+                print("  drums: no Drum Rack device found")
+
+    # Audio tracks: break, sub, organ, pad — load into slot 0 of each
+    for role_name, track_role in [("break", "break"), ("sub", "sub"),
+                                    ("organ", "organ"), ("pad", "pad")]:
+        path = library_assignments.get(role_name)
+        ti = roles.get(track_role)
+        if path is None or ti is None: continue
+        if load_audio_clip_into_slot(ch, ti, 0, path):
+            print(f"  {track_role}: loaded {path.name}")
+            counts["loaded"] += 1
+        else:
+            counts["skipped"] += 1
+
+    # Simpler tracks: vox_call, vox_response, vox_chorus
+    for role_name, track_role in [("vox_call", "vox_call"),
+                                    ("vox_response", "vox_response"),
+                                    ("vox_chorus", "vox_chorus")]:
+        path = library_assignments.get(role_name)
+        ti = roles.get(track_role)
+        if path is None or ti is None: continue
+        if load_simpler_sample(ch, ti, path):
+            print(f"  {track_role}: loaded {path.name}")
+            counts["loaded"] += 1
+        else:
+            counts["skipped"] += 1
+
+    print(f"\n  pull complete: {counts['loaded']} loaded, {counts['skipped']} skipped")
+    return counts
 
 
 # ----------------------------------------------------------------------
