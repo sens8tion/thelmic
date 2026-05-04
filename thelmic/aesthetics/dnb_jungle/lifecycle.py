@@ -38,30 +38,33 @@ DRUM_RACK_URI = "query:Synths#Drum%20Rack"
 SIMPLER_URI   = "query:Synths#Simpler"
 
 
-# 16-track instrument basis. Each entry: (name, type, instrument_uri)
-# instrument_uri is None for audio tracks (no instrument; clips loaded separately).
+# 16-track instrument basis. Track names are ROLE-DESCRIPTIVE — not tied to
+# any specific historical musical intent (no "HARDKIT" / "TECTONIC" / "COLD
+# MIST" baggage). The pack assumes whatever character emerges from the
+# instrument + content; the names just say what musical function the track
+# serves.
 TRACK_TEMPLATE = [
     # Drums
-    ("HARDKIT",       "midi",  DRUM_RACK_URI),
-    ("AMEN CHOPPED",  "midi",  DRUM_RACK_URI),
-    ("PERC",          "midi",  DRUM_RACK_URI),
-    # Audio — break + sub + harmonic samples (loaded separately, audio clips)
-    ("BREAKBEAST",    "audio", None),
-    ("SUBBONK",       "audio", None),
-    ("ORGAN",         "audio", None),
-    ("COLD MIST",     "audio", None),
+    ("DRUMS",      "midi",  DRUM_RACK_URI),
+    ("AMEN",       "midi",  DRUM_RACK_URI),
+    ("PERC",       "midi",  DRUM_RACK_URI),
+    # Audio sample tracks (content loaded by pull_samples or user)
+    ("BREAK",      "audio", None),
+    ("SUB",        "audio", None),
+    ("ORGAN",      "audio", None),
+    ("PAD",        "audio", None),
     # MIDI synths
-    ("TECTONIC",      "midi",  OPERATOR_URI),
-    ("STAB",          "midi",  OPERATOR_URI),
-    ("REESE",         "midi",  OPERATOR_URI),
-    ("LEAD",          "midi",  OPERATOR_URI),
-    ("SHIMMER",       "midi",  OPERATOR_URI),
+    ("MID_BASS",   "midi",  OPERATOR_URI),
+    ("STAB",       "midi",  OPERATOR_URI),
+    ("REESE",      "midi",  OPERATOR_URI),
+    ("LEAD",       "midi",  OPERATOR_URI),
+    ("SHIMMER",    "midi",  OPERATOR_URI),
     # Vocal Simplers (samples loaded separately)
-    ("VOX YO",        "midi",  SIMPLER_URI),
-    ("VOX BIG",       "midi",  SIMPLER_URI),
-    ("VOX SEL",       "midi",  SIMPLER_URI),
+    ("VOX_CALL",   "midi",  SIMPLER_URI),
+    ("VOX_RESP",   "midi",  SIMPLER_URI),
+    ("VOX_CHOR",   "midi",  SIMPLER_URI),
     # FX
-    ("FX",            "midi",  OPERATOR_URI),
+    ("FX",         "midi",  OPERATOR_URI),
 ]
 
 
@@ -73,6 +76,81 @@ def _track_exists(ch, name: str) -> bool:
     return find_track(ch, name) is not None
 
 
+def _is_default_empty_track(info) -> bool:
+    """Live's default-fresh tracks (1 MIDI / 2 MIDI / 3 Audio / 4 Audio)
+    have a recognisable name pattern AND no devices beyond the mixer."""
+    import re
+    name = (info.get("name") or "").strip()
+    if not re.match(r"^\d+\s*[-_ ]?\s*(MIDI|Audio)$", name, re.IGNORECASE):
+        return False
+    # Default tracks have only their type-default device chain
+    devs = info.get("devices") or []
+    # Any user-loaded device disqualifies; an audio track default has 0 devices,
+    # MIDI default has 0 (no instrument). Either way, devs is empty.
+    if devs:
+        return False
+    return True
+
+
+def cleanup_default_tracks(ch) -> int:
+    """Delete Live's default empty tracks (1 MIDI, 2 MIDI, 3 Audio, 4 Audio)
+    if they're still present and untouched. Iterates from the end so indices
+    don't shift mid-iteration."""
+    sess = ch.get_session_info().result(timeout=3)
+    n = sess["track_count"]
+    to_delete = []
+    for ti in range(n):
+        try: info = ch.get_track_info(ti).result(timeout=3)
+        except Exception: continue
+        if _is_default_empty_track(info):
+            to_delete.append((ti, info.get("name", "")))
+    if not to_delete:
+        return 0
+    for ti, name in reversed(to_delete):
+        try:
+            ch.delete_track(ti).result(timeout=5)
+            print(f"  - removed default track T{ti} {name!r}")
+        except Exception as e:
+            print(f"  - delete T{ti} {name!r} fail: {e}")
+    return len(to_delete)
+
+
+# Legacy → role-name renames applied during bootstrap if a legacy-named
+# track is found. Lets us migrate old sessions to the role-named scheme.
+LEGACY_RENAMES = {
+    "HARDKIT":      "DRUMS",
+    "AMEN CHOPPED": "AMEN",
+    "BREAKBEAST":   "BREAK",
+    "SUBBONK":      "SUB",
+    "TECTONIC":     "MID_BASS",
+    "COLD MIST":    "PAD",
+    "VOX YO":       "VOX_CALL",
+    "VOX BIG":      "VOX_RESP",
+    "VOX SEL":      "VOX_CHOR",
+}
+
+
+def rename_legacy_tracks(ch) -> int:
+    """Rename any legacy-named tracks to the role-based scheme.
+    Idempotent — skips tracks already named per role."""
+    n_renamed = 0
+    sess = ch.get_session_info().result(timeout=3)
+    n = sess["track_count"]
+    for ti in range(n):
+        try: info = ch.get_track_info(ti).result(timeout=3)
+        except Exception: continue
+        name = (info.get("name") or "").strip()
+        if name in LEGACY_RENAMES:
+            new_name = LEGACY_RENAMES[name]
+            try:
+                ch.set_track_name(ti, new_name).result(timeout=3)
+                print(f"  ↻ renamed T{ti} {name!r} → {new_name!r}")
+                n_renamed += 1
+            except Exception as e:
+                print(f"  ! rename T{ti} {name!r} fail: {e}")
+    return n_renamed
+
+
 def bootstrap_tracks(ch) -> int:
     """Create the 16-track instrument basis from scratch.
 
@@ -80,8 +158,15 @@ def bootstrap_tracks(ch) -> int:
     track in the session, creates a track of the right type, names it,
     and (for MIDI tracks) loads the configured instrument.
 
+    Idempotent — also renames any legacy-named tracks (HARDKIT → DRUMS,
+    etc.) before creating, so re-running on a legacy session migrates it.
+
     Returns count of tracks newly created.
     """
+    # Pass 0: migrate legacy names so the existence check below matches
+    print("[setup] migrating any legacy track names to role-based scheme...")
+    rename_legacy_tracks(ch)
+
     print("[setup] bootstrapping 16-track basis from scratch...")
     n_created = 0
     for tname, ttype, instr_uri in TRACK_TEMPLATE:
@@ -149,25 +234,28 @@ def setup_session(ch, bootstrap: bool = True) -> dict:
     if bootstrap:
         bootstrap_tracks(ch)
         ensure_scenes(ch)
+        cleanup_default_tracks(ch)         # remove Live's default 4 stub tracks
 
+    # Role lookup tries new role-named tracks first, falls back to legacy
+    # session names for compatibility with the old jung-rehearsal.als.
     roles = {}
     for role_name, hints in [
-        ("drums",        ["HARDKIT"]),
-        ("amen",         ["AMEN"]),
-        ("break",        ["BREAKBEAST"]),
-        ("sub",          ["SUBBONK"]),
-        ("mid_bass",     ["TECTONIC"]),
+        ("drums",        ["DRUMS",     "HARDKIT"]),
+        ("amen",         ["AMEN",      "AMEN CHOPPED"]),
+        ("break",        ["BREAK",     "BREAKBEAST"]),
+        ("sub",          ["SUB",       "SUBBONK"]),
+        ("mid_bass",     ["MID_BASS",  "TECTONIC"]),
         ("stab",         ["STAB"]),
         ("organ",        ["ORGAN"]),
-        ("pad",          ["COLD MIST"]),
+        ("pad",          ["PAD",       "COLD MIST"]),
         ("reese",        ["REESE"]),
         ("lead",         ["LEAD"]),
         ("shimmer",      ["SHIMMER"]),
         ("perc",         ["PERC"]),
         ("fx",           ["FX"]),
-        ("vox_call",     ["VOX YO", "VOX"]),
-        ("vox_response", ["VOX BIG"]),
-        ("vox_chorus",   ["VOX SEL"]),
+        ("vox_call",     ["VOX_CALL",  "VOX YO", "VOX"]),
+        ("vox_response", ["VOX_RESP",  "VOX BIG"]),
+        ("vox_chorus",   ["VOX_CHOR",  "VOX SEL"]),
     ]:
         for h in hints:
             ti = find_track(ch, h)

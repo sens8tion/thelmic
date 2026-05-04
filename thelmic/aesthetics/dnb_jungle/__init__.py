@@ -34,39 +34,40 @@ PACK_GRAMMAR = BuildDropRelease()
 PACK_BPM = 165.0
 PACK_KEY_ROOT = 36                # C2 MIDI
 
-# 16-track instrument basis for compositional surface area.
-# health_check uses these as substring matches against actual track names —
-# the session can have additional tracks beyond these.
+# 16-track instrument basis. ROLE-NAMED — the names communicate musical
+# function, not historical content. Setup creates tracks with these names;
+# legacy session names (HARDKIT / TECTONIC / etc.) still resolve via the
+# fallback hints in lifecycle.setup_session.
 EXPECTED_TRACKS = (
     # Drums
-    "HARDKIT",          # main drum rack (kicks/snares/hats)
-    "AMEN",             # chopped amen break rack (or any percussion-2)
-    "BREAKBEAST",       # break sample track
+    "DRUMS",            # main drum rack (or HARDKIT for legacy)
+    "AMEN",             # chopped amen break rack
+    "BREAK",            # audio break sample (or BREAKBEAST for legacy)
     # Bass
-    "SUBBONK",          # sub bass sample
-    "TECTONIC",         # mid-bass synth (Operator)
+    "SUB",              # sub bass (or SUBBONK)
+    "MID_BASS",         # mid-bass synth (or TECTONIC)
     # Harmonic
     "STAB",             # chord stabs
     "ORGAN",            # ragga organ
-    "COLD MIST",        # pad
+    "PAD",              # pad (or COLD MIST)
     # Vocal one-shots
-    "VOX",              # at least one VOX (matches VOX YO / VOX BIG / VOX SEL)
+    "VOX_CALL",         # the call vocal (or VOX / VOX YO)
 )
 
-# Map of role → tracks that satisfy it (substring match). Lifecycle
-# hooks consult this to know "what to write to as kick" etc.
+# Logical role → list of acceptable track-name substrings (in priority order).
+# Lifecycle uses this to map session tracks to roles.
 ROLE_TRACK_HINTS = {
-    "drums":         ["HARDKIT"],
-    "drums_alt":     ["AMEN", "AMEN CHOPPED"],
-    "break":         ["BREAKBEAST"],
-    "sub":           ["SUBBONK"],
-    "mid_bass":      ["TECTONIC"],
+    "drums":         ["DRUMS",     "HARDKIT"],
+    "drums_alt":     ["AMEN",      "AMEN CHOPPED"],
+    "break":         ["BREAK",     "BREAKBEAST"],
+    "sub":           ["SUB",       "SUBBONK"],
+    "mid_bass":      ["MID_BASS",  "TECTONIC"],
     "stab":          ["STAB"],
     "organ":         ["ORGAN"],
-    "pad":           ["COLD MIST"],
-    "vox_call":      ["VOX YO"],
-    "vox_response":  ["VOX BIG"],
-    "vox_chorus":    ["VOX SEL"],
+    "pad":           ["PAD",       "COLD MIST"],
+    "vox_call":      ["VOX_CALL",  "VOX YO", "VOX"],
+    "vox_response":  ["VOX_RESP",  "VOX BIG"],
+    "vox_chorus":    ["VOX_CHOR",  "VOX SEL"],
 }
 
 from .arrangement import build_timeline
