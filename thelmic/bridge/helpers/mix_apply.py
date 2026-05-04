@@ -89,10 +89,24 @@ def apply_channel_audio(ch, roles: dict[str, int],
             counts["missing_role"] += 1
             continue
 
-        # 1. Walk chain — attenuate each gain-bearing element to peak_db
-        peak_db = ca.level.peak_db
+        # Rule: every device aims for UNITY (0 dB) at its output, and the
+        # chain as a whole lands at unity. We don't rely on the master
+        # slider to clean up. No stacking attenuation, no per-channel
+        # peak_db cap at the device layer — peak_db is descriptive
+        # metadata, not where staging is enforced.
+
+        # 1. EQ8 — ensure + HP/LP bands; Output Gain held at 0 dB
+        eq_idx = ensure_device(ch, ti, "Eq8", EQ8_URI)
+        if ca.freq.hp_hz is not None:
+            set_eq_band(ch, ti, eq_idx, band=1,
+                        ftype=EQ8_HP_48_GUESS, hz=ca.freq.hp_hz, on=True)
+        if ca.freq.lp_hz is not None:
+            set_eq_band(ch, ti, eq_idx, band=8,
+                        ftype=EQ8_LP_48_GUESS, hz=ca.freq.lp_hz, on=True)
+        counts["eq_set"] += 1
+
+        # 2. Every gain-bearing device → output at unity (0 dB)
         info = ch.get_track_info(ti).result(timeout=3)
-        gain_targets_found = 0
         for di, d in enumerate(info.get("devices", [])):
             cls = d.get("class_name")
             rule = DEVICE_GAIN_RULE.get(cls)
@@ -104,56 +118,25 @@ def apply_channel_audio(ch, roles: dict[str, int],
                 idx_map = {p["name"]: p["index"] for p in pinfo["parameters"]}
                 if param_name not in idx_map:
                     continue
-                value = _convert(_per_stage_cap(ca, cls, peak_db), unit)
-                ch.set_device_param(ti, di, idx_map[param_name], value).result(timeout=3)
+                ch.set_device_param(ti, di, idx_map[param_name],
+                                     _convert(0.0, unit)).result(timeout=3)
                 counts["device_gain_set"] += 1
-                gain_targets_found += 1
             except Exception as e:
                 print(f"  {role} {cls}.{param_name}: {e}")
 
-        # 2. EQ8 — ensure + HP/LP bands
-        eq_idx = ensure_device(ch, ti, "Eq8", EQ8_URI)
-        if ca.freq.hp_hz is not None:
-            set_eq_band(ch, ti, eq_idx, band=1,
-                        ftype=EQ8_HP_48_GUESS, hz=ca.freq.hp_hz, on=True)
-        if ca.freq.lp_hz is not None:
-            set_eq_band(ch, ti, eq_idx, band=8,
-                        ftype=EQ8_LP_48_GUESS, hz=ca.freq.lp_hz, on=True)
-        # Also cap EQ8's overall output gain
-        try:
-            pinfo = ch.get_device_info(ti, eq_idx).result(timeout=3)
-            idx_map = {p["name"]: p["index"] for p in pinfo["parameters"]}
-            if "Output Gain" in idx_map:
-                ch.set_device_param(ti, eq_idx, idx_map["Output Gain"],
-                                     peak_db).result(timeout=3)
-                counts["device_gain_set"] += 1
-                gain_targets_found += 1
-        except Exception:
-            pass
-        counts["eq_set"] += 1
-
-        # 3. Drum Rack — set each populated pad's volume to peak_db
+        # 3. Drum Rack — every populated pad and its inner chain at unity
         for di, d in enumerate(info.get("devices", [])):
             if d.get("class_name") != "DrumGroupDevice":
                 continue
             try:
                 pads = ch.get_drum_pads(ti, di).result(timeout=3).get("pads", [])
-                pad_vol = _db_to_live_norm(peak_db)
+                unity_norm = _db_to_live_norm(0.0)
                 for p in pads:
                     if p.get("chain_count", 0) > 0:
-                        ch.set_drum_pad_volume(ti, di, p["note"], pad_vol).result(timeout=3)
+                        ch.set_drum_pad_volume(ti, di, p["note"], unity_norm).result(timeout=3)
                         counts["device_gain_set"] += 1
             except Exception as e:
                 print(f"  {role} drum-pad-volume: {e}")
-
-        # 4. Pure-audio tracks: also attenuate clip-gain on slot 0 source
-        if gain_targets_found == 0:
-            try:
-                ch.set_clip_gain(ti, 0, peak_db).result(timeout=3)
-                counts["clip_gain_set"] += 1
-            except Exception as e:
-                counts["no_gain_target"] += 1
-                print(f"  {role}: no gain target (no rule-matched device, no slot-0 clip): {e}")
 
     return counts
 
