@@ -650,6 +650,103 @@ def compose_clips(ch, roles: dict | None = None) -> dict:
             counts[f"stab S{slot}"] = n
             print(f"  stab S{slot}: {n} notes (root_shift={root_shift})")
 
+    # PERC — additional percussion alongside DRUMS (toms / claps / ghost hits)
+    if "perc" in roles:
+        for slot, length in [(2, 16), (3, 16), (4, 32), (6, 16), (7, 32), (9, 32)]:
+            notes = []
+            for bar in range(int(length / 4)):
+                bs = bar * 4
+                # Tom hit on bar boundary every 4th bar
+                if bar % 4 == 3:
+                    notes.append((41, bs + 3.5, 0.18, 100))   # low tom
+                    notes.append((50, bs + 3.75, 0.15, 95))    # high tom
+                # Hand-claps doubling snares
+                notes.append((39, bs + 1.0, 0.20, 80))
+                notes.append((39, bs + 3.0, 0.20, 90))
+                # Ghost shaker on offbeats (closed hat alt)
+                for off in (0.5, 2.5):
+                    notes.append((44, bs + off, 0.10, 55))    # pedal hi-hat MIDI 44
+            n = _write_clip(ch, roles["perc"], slot, length, f"perc_S{slot}", notes,
+                              pull_back=False, breathe=True)
+            counts[f"perc S{slot}"] = n
+            print(f"  perc S{slot}: {n} notes (parallel percussion)")
+
+    # REESE — classic mid-bass reese pattern (sustained notes, harmonic motion)
+    if "reese" in roles:
+        # Reese is long sustained notes that move with the chord progression
+        for slot, length, root in [(4, 32, 36), (7, 32, 36), (9, 32, 35)]:
+            notes = []
+            # Root note held 1 bar at a time, varying octave
+            for bar in range(int(length / 4)):
+                bs = bar * 4
+                pitch = root + (12 if bar % 4 == 2 else 0)
+                notes.append((pitch, bs, 4.0, 105))
+            n = _write_clip(ch, roles["reese"], slot, length, f"reese_S{slot}", notes,
+                              pull_back=False, breathe=False)
+            counts[f"reese S{slot}"] = n
+            print(f"  reese S{slot}: {n} notes (sustained reese bass)")
+
+    # LEAD — melodic motif on drops
+    if "lead" in roles:
+        # Simple ascending motif: Cm pentatonic-ish
+        MOTIF = [0, 3, 5, 7, 10, 7, 5, 3]    # semitones from root
+        ROOT = 60                             # middle C
+        for slot, length, octave_offset in [(4, 32, 0), (7, 32, 12), (9, 32, 0)]:
+            notes = []
+            for bar in range(int(length / 4)):
+                bs = bar * 4
+                # Play motif over 2 beats, rest 2 beats, repeat
+                if bar % 2 == 0:
+                    for i, iv in enumerate(MOTIF):
+                        t = bs + i * 0.25
+                        notes.append((ROOT + iv + octave_offset, t, 0.20, 95))
+            n = _write_clip(ch, roles["lead"], slot, length, f"lead_S{slot}", notes,
+                              pull_back=True, breathe=False)
+            counts[f"lead S{slot}"] = n
+            print(f"  lead S{slot}: {n} notes (melodic motif)")
+
+    # SHIMMER — high-pitched arpeggios for peak/breakcore
+    if "shimmer" in roles:
+        # High Cm triad arpeggio at 16ths
+        TRIAD = [72, 75, 79, 84]    # Cm spread across two octaves
+        for slot, length in [(7, 32), (9, 32)]:
+            notes = []
+            n_per_bar = 16
+            for bar in range(int(length / 4)):
+                bs = bar * 4
+                for i in range(n_per_bar):
+                    t = bs + i * 0.25
+                    pitch = TRIAD[i % len(TRIAD)]
+                    vel = 80 if i % 4 == 0 else 60
+                    notes.append((pitch, t, 0.15, vel))
+            n = _write_clip(ch, roles["shimmer"], slot, length, f"shimmer_S{slot}",
+                              notes, pull_back=False, breathe=True)
+            counts[f"shimmer S{slot}"] = n
+            print(f"  shimmer S{slot}: {n} notes (high arp)")
+
+    # FX — risers / transition moments at scene boundaries
+    if "fx" in roles:
+        # Long sustained low note that rises in pitch as a riser
+        # Operator's Volume modulation on a long note creates the swell
+        for slot, length, fx_type in [(3, 16, "riser"), (6, 16, "riser"),
+                                        (13, 16, "riser"), (10, 8, "drop_fx")]:
+            notes = []
+            if fx_type == "riser":
+                # Single long note, increasing velocity steps create build feel
+                for bar in range(int(length / 4)):
+                    bs = bar * 4
+                    vel = min(127, 50 + bar * 20)
+                    notes.append((48, bs, 4.0, vel))
+            elif fx_type == "drop_fx":
+                # FX hit at bar boundary
+                notes.append((48, 0, 1.0, 100))
+                notes.append((60, 4, 1.0, 90))
+            n = _write_clip(ch, roles["fx"], slot, length, f"fx_S{slot}_{fx_type}",
+                              notes, pull_back=(fx_type == "riser"),
+                              breathe=False)
+            counts[f"fx S{slot}"] = n
+            print(f"  fx S{slot}: {n} notes ({fx_type})")
+
     # VOX triggers (pulse single MIDI note 60 to fire the Simpler)
     for vox_role, slot_hits in [
         ("vox_call",      [(1, 16.0, [0.0, 8.0]),
