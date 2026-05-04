@@ -75,3 +75,35 @@ from .lifecycle  import (
     setup_session, pull_samples, compose_clips,
     configure_mix, prepare_clips, preview_session,
 )
+
+# 8x4 meta-layout for jungle. Sessions targeting this pack use this for
+# bootstrap; the legacy 16-track basis (EXPECTED_TRACKS above) stays for
+# back-compat with already-built sessions.
+from thelmic.meta import MetaLayout, ChannelSpec, SceneSpec, ChannelKind
+
+LAYOUT = MetaLayout(
+    channels=[
+        ChannelSpec(role="drums", kind=ChannelKind.DRUM_RACK,
+                    default_device="Drum Rack", default_browser_path="instruments"),
+        ChannelSpec(role="break", kind=ChannelKind.AUDIO),
+        ChannelSpec(role="sub",   kind=ChannelKind.AUDIO),
+        ChannelSpec(role="bass",  kind=ChannelKind.SYNTH,
+                    default_device="Operator", default_browser_path="instruments"),
+        ChannelSpec(role="stab",  kind=ChannelKind.SYNTH,
+                    default_device="Operator", default_browser_path="instruments"),
+        ChannelSpec(role="pad",   kind=ChannelKind.AUDIO),
+        ChannelSpec(role="vox",   kind=ChannelKind.SAMPLER,
+                    default_device="Simpler", default_browser_path="instruments"),
+        ChannelSpec(role="fx",    kind=ChannelKind.AUDIO),
+    ],
+    scenes=[
+        SceneSpec(name="BUILD",  archetype="build",
+                  description="tension rising, no drop drums yet"),
+        SceneSpec(name="DROP",   archetype="drop",
+                  description="full slam — drums + sub + bass + vox"),
+        SceneSpec(name="BREAK",  archetype="break",
+                  description="rhythmic flip, drums thinned, vox foreground"),
+        SceneSpec(name="DROP2",  archetype="drop2",
+                  description="Rotterdam/gabber variant — distorted, faster pulse"),
+    ],
+)

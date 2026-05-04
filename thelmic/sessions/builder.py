@@ -34,14 +34,22 @@ def build_session(ch, sess: "Session") -> dict:
         else:
             counts["steps_skipped"] += 1
 
-    # 2. pack setup phase — 16-track basis. Idempotent (creates only missing).
-    pack_module = import_module(f"thelmic.aesthetics.{sess.intent.pack}.lifecycle")
-    if hasattr(pack_module, "setup_session"):
-        roles = pack_module.setup_session(ch, bootstrap=True)
+    # 2. layout setup — prefer the pack's MetaLayout (8x4) when declared,
+    # fall back to legacy setup_session for older packs.
+    pack_pkg = import_module(f"thelmic.aesthetics.{sess.intent.pack}")
+    layout = getattr(pack_pkg, "LAYOUT", None)
+    if layout is not None:
+        from thelmic.bridge.helpers.layout import ensure_layout
+        roles = ensure_layout(ch, layout)
         counts["steps_run"] += 1
     else:
-        roles = {}
-        counts["steps_skipped"] += 1
+        pack_lifecycle = import_module(f"thelmic.aesthetics.{sess.intent.pack}.lifecycle")
+        if hasattr(pack_lifecycle, "setup_session"):
+            roles = pack_lifecycle.setup_session(ch, bootstrap=True)
+            counts["steps_run"] += 1
+        else:
+            roles = {}
+            counts["steps_skipped"] += 1
 
     # 3. drum-rack samples — per-pad hotswap, idempotent
     drum_track = roles.get("drums")

@@ -18,11 +18,7 @@ def define_jungle_v1() -> Session:
     sess.intent.bpm = 174.0
     sess.intent.key_root = "Em"
     sess.intent.mood = "menacing, sub-heavy"
-    sess.intent.arc = [
-        "intro", "stirring", "build", "riser", "drop",
-        "breakdown", "footwork", "rebuild", "second_drop",
-        "chaos_peak", "sustained_peak", "descent", "outro",
-    ]
+    sess.intent.arc = ["BUILD", "DROP", "BREAK", "DROP2"]
 
     SPLICE = "user_library/Samples/Splice"
     # drum-pad bindings (per-pad hotswap path)
@@ -37,23 +33,17 @@ def define_jungle_v1() -> Session:
     sess.bindings.set_sample("drums.crash", SPLICE,
         "cj_cymbal_one_shot_live_ahman.wav", pad_note=49)
 
-    # role-track samples
+    # role-track samples (8 channels: drums, break, sub, bass, stab, pad, vox, fx)
     sess.bindings.set_sample("break", SPLICE,
         "TSP_IHD_160_drum_break_amen_chop_4bar.wav")
-    sess.bindings.set_sample("sub", SPLICE,
+    sess.bindings.set_sample("sub",   SPLICE,
         "ZEN_RETR_175_bass_sub_bonk_Emin.wav")
-    sess.bindings.set_sample("organ", SPLICE,
-        "AFP_SDRL_156_organ_bubble_cutchie_Am.wav")
-    sess.bindings.set_sample("pad", SPLICE,
+    sess.bindings.set_sample("pad",   SPLICE,
         "100_-_Em_-_Guitar_Pad_Texture.wav")
-
-    # vocal Simpler tracks
-    sess.bindings.set_sample("vox_call",     SPLICE,
+    sess.bindings.set_sample("vox",   SPLICE,
         "X10_PDH_100_vocal_yo_chargie.wav")
-    sess.bindings.set_sample("vox_response", SPLICE,
-        "X10_PDH_100_vocal_big_up.wav")
-    sess.bindings.set_sample("vox_chorus",   SPLICE,
-        "X10_PDH_100_vocal_selassie_i.wav")
+    sess.bindings.set_sample("fx",    SPLICE,
+        "AFP_SDRL_156_organ_bubble_cutchie_Am.wav")
 
     sess.notes = (
         "Hand-set bindings for the canonical jungle session. Drum pads use\n"
