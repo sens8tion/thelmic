@@ -150,6 +150,9 @@ _UI_THREAD_COMMANDS = {
     "set_clip_groove",
     "clear_clip_groove",
     "get_listener_snapshot",
+    "set_drum_pad_chain_device_property",
+    "set_drum_pad_chain_device_param",
+    "get_drum_pad_chain_device_info",
 }
 
 
@@ -568,6 +571,24 @@ class ThelmicLive(ControlSurface):
             return self._load_into_drum_pad_chain(
                 params["track_index"], params["device_index"], params["note"],
                 params.get("uri"), params.get("path"), params.get("item_name"),
+            )
+        if cmd_type == "set_drum_pad_chain_device_property":
+            return self._set_drum_pad_chain_device_property(
+                params["track_index"], params["device_index"], params["note"],
+                params.get("chain_device_index", 0),
+                params["property_name"], params["value"],
+            )
+        if cmd_type == "set_drum_pad_chain_device_param":
+            return self._set_drum_pad_chain_device_param(
+                params["track_index"], params["device_index"], params["note"],
+                params.get("chain_device_index", 0),
+                params.get("param_index"), params.get("param_name"),
+                params["value"],
+            )
+        if cmd_type == "get_drum_pad_chain_device_info":
+            return self._get_drum_pad_chain_device_info(
+                params["track_index"], params["device_index"], params["note"],
+                params.get("chain_device_index", 0),
             )
         if cmd_type == "load_sample_to_pad":
             return self._load_sample_to_pad(
@@ -2001,6 +2022,78 @@ class ThelmicLive(ControlSurface):
         if not pad.chains:
             raise ValueError("pad note " + str(note) + " has no chain")
         return pad, pad.chains[0]
+
+    def _drum_pad_chain_device(self, track_index, device_index, note, chain_device_index):
+        _, chain = self._drum_pad_chain(track_index, device_index, note)
+        devs = list(chain.devices)
+        idx = int(chain_device_index)
+        if idx < 0 or idx >= len(devs):
+            raise IndexError("chain_device_index out of range (have " + str(len(devs)) + ")")
+        return devs[idx]
+
+    def _set_drum_pad_chain_device_property(self, track_index, device_index, note,
+                                              chain_device_index, property_name, value):
+        dev = self._drum_pad_chain_device(track_index, device_index, note, chain_device_index)
+        # Coerce primitives. playback_mode is int; loop flags are bool.
+        try:
+            v = value
+            if isinstance(value, bool):
+                v = bool(value)
+            elif isinstance(value, (int, float)):
+                # try int first
+                try:
+                    v = int(value)
+                except (TypeError, ValueError):
+                    v = float(value)
+            setattr(dev, property_name, v)
+        except Exception as e:
+            raise RuntimeError("setattr " + str(property_name) + " failed: " + str(e))
+        return {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+            "property_name": property_name,
+            "value": getattr(dev, property_name, None),
+        }
+
+    def _set_drum_pad_chain_device_param(self, track_index, device_index, note,
+                                           chain_device_index, param_index, param_name, value):
+        dev = self._drum_pad_chain_device(track_index, device_index, note, chain_device_index)
+        param, idx = self._resolve_param(dev, param_index, param_name)
+        v = float(value)
+        if v < param.min:
+            v = param.min
+        elif v > param.max:
+            v = param.max
+        param.value = v
+        return {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+            "param_index": idx, "param_name": param.name, "value": param.value,
+        }
+
+    def _get_drum_pad_chain_device_info(self, track_index, device_index, note, chain_device_index):
+        dev = self._drum_pad_chain_device(track_index, device_index, note, chain_device_index)
+        params = []
+        for i, p in enumerate(dev.parameters):
+            params.append({"index": i, "name": p.name, "value": p.value,
+                           "min": p.min, "max": p.max})
+        # Pull common known properties (best-effort, ignore missing)
+        props = {}
+        for pname in ("playback_mode", "playback_loop", "loop_on", "trigger_mode"):
+            if hasattr(dev, pname):
+                try:
+                    props[pname] = getattr(dev, pname)
+                except Exception:
+                    pass
+        return {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+            "name": getattr(dev, "name", ""),
+            "class_name": getattr(dev, "class_name", ""),
+            "param_count": len(params),
+            "parameters": params,
+            "properties": props,
+        }
 
     def _get_drum_pad_chain_info(self, track_index, device_index, note):
         pad, chain = self._drum_pad_chain(track_index, device_index, note)

@@ -1,7 +1,8 @@
-"""Lightweight env loader for ``<repo>/.thelmic/.env``.
+"""Lightweight env loader for ``<repo>/.thelmic/.env`` and ``~/.thelmic/.env``.
 
 Called once at import time. Only sets keys that aren't already in os.environ
-(real env vars always win). Format: ``KEY=value`` per line, ``#`` comments OK.
+(real env vars always win). Project file overrides home file. Format:
+``KEY=value`` per line, ``#`` comments OK.
 """
 
 from __future__ import annotations
@@ -22,8 +23,7 @@ def config_dir() -> Path:
     return _repo_root() / ".thelmic"
 
 
-def _load() -> None:
-    path = config_dir() / ".env"
+def _load_file(path: Path) -> None:
     if not path.is_file():
         return
     try:
@@ -37,6 +37,12 @@ def _load() -> None:
                 os.environ[k] = v
     except OSError:
         pass
+
+
+def _load() -> None:
+    # Project file wins; home file fills gaps. (`_load_file` skips already-set keys.)
+    _load_file(config_dir() / ".env")
+    _load_file(Path.home() / ".thelmic" / ".env")
 
 
 _load()

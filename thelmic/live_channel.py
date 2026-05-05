@@ -631,6 +631,33 @@ class LiveChannel:
             "uri": uri, "path": path, "item_name": item_name,
         })
 
+    def get_drum_pad_chain_device_info(self, track_index: int, device_index: int,
+                                          note: int, chain_device_index: int = 0) -> Future:
+        return self._enqueue("get_drum_pad_chain_device_info", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+        })
+
+    def set_drum_pad_chain_device_property(self, track_index: int, device_index: int,
+                                              note: int, property_name: str, value,
+                                              chain_device_index: int = 0) -> Future:
+        return self._enqueue("set_drum_pad_chain_device_property", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+            "property_name": property_name, "value": value,
+        })
+
+    def set_drum_pad_chain_device_param(self, track_index: int, device_index: int,
+                                           note: int, value: float,
+                                           param_index: int | None = None,
+                                           param_name: str | None = None,
+                                           chain_device_index: int = 0) -> Future:
+        return self._enqueue("set_drum_pad_chain_device_param", {
+            "track_index": track_index, "device_index": device_index,
+            "note": int(note), "chain_device_index": int(chain_device_index),
+            "param_index": param_index, "param_name": param_name, "value": float(value),
+        })
+
     def load_sample_to_pad(self, track_index: int, device_index: int, note: int,
                            path: str, item_name: str) -> Future:
         """Per-pad sample load via Browser.hotswap_target."""
