@@ -847,6 +847,37 @@ def find_track_by_name(ch: LiveChannel, name: str) -> int | None:
     return _scan_all_track_names(ch).get(name)
 
 
+def apply_safe_gain_staging(ch: LiveChannel, name_to_idx: dict[str, int]) -> None:
+    """Walk every track in our lane set, find any Saturator / Drum Buss,
+    and set its drive/output/threshold to safe defaults. Idempotent —
+    re-runs converge on the same values. Without this, repeated runs of
+    the gain-stacking script (or stray UI nudges) eventually push the
+    chain into clipping again."""
+    rpcs = 0
+    for name, t in name_to_idx.items():
+        try:
+            ti = ch.get_track_info(t).result(timeout=3)
+        except Exception:
+            continue
+        for di, d in enumerate(ti.get("devices") or []):
+            dn = d.get("name") or ""
+            if dn == "Saturator":
+                for pname, pval in SAFE_SATURATOR.items():
+                    try:
+                        ch.set_device_param(t, di, pname, pval).result(timeout=5)
+                        rpcs += 1
+                    except Exception:
+                        pass
+            elif dn == "Drum Buss":
+                for pname, pval in SAFE_DRUM_BUSS.items():
+                    try:
+                        ch.set_device_param(t, di, pname, pval).result(timeout=5)
+                        rpcs += 1
+                    except Exception:
+                        pass
+    print(f"  applied safe gain staging via {rpcs} param RPCs")
+
+
 def ensure_lanes(ch: LiveChannel) -> list[int]:
     """Create any missing lanes (by name). Returns ordered list of indices.
     Single-pass scan + only create what's missing."""
@@ -907,29 +938,37 @@ PATTERN_FNS = {
     "NOISE_OSSUARY":   noise_ossuary_pattern,
 }
 
-# Suggested per-track volumes (gabber mixing keeps kick HOT, everything else
-# below it). 0.85 ≈ 0 dB on Live's fader.
+# Suggested per-track volumes. Gabber mixing keeps the kick highest, but
+# every stage's INPUT must stay below clip (see [[feedback-audio-gain-staging]]).
+# Factory presets are mastered hot already — track fader sits well below
+# unity so the Saturator/Drum Buss after them doesn't push into clipping.
+# 0.85 ≈ 0 dB; these all sit at -2 to -8 dB.
 TRACK_VOLUMES = {
-    "KICK_ROTTERDAM":  0.90,
-    "PERC_INDUSTRIAL": 0.72,
+    "KICK_ROTTERDAM":  0.82,
+    "PERC_INDUSTRIAL": 0.66,
     "SUB_PUNCH":       0.78,
-    "HOOVER_LEAD":     0.74,
-    "STAB_HARDCORE":   0.70,
+    "HOOVER_LEAD":     0.68,
+    "STAB_HARDCORE":   0.65,
     "SIREN_FX":        0.65,
     "VOX_SHOUT":       0.72,
-    # depraved — pushed up to working levels after loading factory presets.
-    # (Operator default sine + low vol was inaudible; factory presets like
-    # 808 Pure / Acid Bass / Dark Whispers are properly mastered so we can
-    # sit closer to 0 dB.)
-    "KICK_VEIN":       0.88,   # matches main kick
-    "ACID_TONGUE":     0.78,
+    # depraved — factory presets in the chain are pre-mastered so headroom
+    # is at a premium. Pulled back from earlier hotter values.
+    "KICK_VEIN":       0.80,
+    "ACID_TONGUE":     0.72,
     "DRONE_CRYPT":     0.70,
     "REVERSE_VOID":    0.75,
     "CHOIR_NECRO":     0.75,
-    "SCREAM_BLEACH":   0.80,
-    "STAB_BWAAH":      0.82,   # punctuation, needs to cut
+    "SCREAM_BLEACH":   0.72,
+    "STAB_BWAAH":      0.74,
     "NOISE_OSSUARY":   0.68,
 }
+
+# Safe defaults for distortion stages when chained AFTER a hot factory
+# preset. Setting these on every Saturator/Drum Buss in the session is
+# the difference between gabber crunch and brick-walled clipping.
+# Apply via apply_safe_gain_staging() — auto-called when script runs full.
+SAFE_SATURATOR = {"Drive": 0.55, "Output": 0.70, "Threshold": 0.05}
+SAFE_DRUM_BUSS = {"Drive": 0.15, "Output": 0.70}
 
 
 # Factory preset paths per depraved lane — these REPLACE the default
@@ -1059,6 +1098,11 @@ def main():
                 except Exception as e:
                     if tag != "clear" and tag != "color":  # these can fail silently
                         print(f"    RPC failed [{tag} {name} S{s}]: {e}")
+
+        # 5a. Safe gain staging on distortion stages (only on full runs)
+        if not only_lanes and not only_scenes and not args.skip_volumes:
+            print("\n[5a] applying safe gain staging (Saturator/Drum Buss)")
+            apply_safe_gain_staging(ch, name_to_idx)
 
         # 5. Volumes
         if not args.skip_volumes:
