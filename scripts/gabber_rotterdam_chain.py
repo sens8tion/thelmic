@@ -385,27 +385,80 @@ def perc_pattern(s: int) -> list[dict]:
     notes: list[dict] = []
     if s in (0, 1):  # silent in BLACKOUT + KICK_ENTRY (austere intro)
         return []
-    if s == 5:       # BREAKDOWN — kick out, perc reduced to industrial pulse
+    if s == 5:       # BREAKDOWN — kick out, hats keep the pace ticking
+        # Metal pulse on every bar 1 + every bar 3 (twice per bar instead
+        # of once — feels like a slow industrial machine still grinding)
         for bar in range(8):
             notes.append({"pitch": METAL, "start_time": float(bar*4),
                           "duration": 0.5, "velocity": 95})
-        # Sparse claps to mark the bar — feels like the room is half-empty
+        # Sparse claps every other bar 3 — sense of space without silence
         for bar in range(0, 8, 2):
             notes.append({"pitch": CLAP, "start_time": float(bar*4 + 2),
                           "duration": 0.4, "velocity": 85})
+        # HATS KEEP PACE — 8th-note closed hats throughout, building density
+        # gradually so the scene has motion even with the kick out.
+        # Bars 0-3: light 8ths (vel 50-60). Bars 4-7: 8ths with accents (60-75).
+        for i in range(64):     # 64 × 8th notes across 8 bars
+            bar = i // 8
+            beat_in_bar = (i % 8) * 0.5
+            t = bar * 4 + beat_in_bar
+            # Velocity ramps with the bar number (slow build)
+            base_vel = 45 + bar * 4
+            # Accent on each beat's downbeat (every 2nd 8th)
+            vel = base_vel + 15 if i % 2 == 0 else base_vel
+            notes.append({"pitch": HATC, "start_time": t,
+                          "duration": 0.15, "velocity": min(95, vel)})
+        # Open hat on the offbeat &-of-2 of bars 4-7 (rising tension cue)
+        for bar in range(4, 8):
+            notes.append({"pitch": HATO, "start_time": float(bar*4 + 1.5),
+                          "duration": 0.3, "velocity": 65 + (bar - 4) * 6})
         return notes
     # Snare+clap stack on 2/4 — the signature gabber backbeat
     for bar in range(8):
         notes.extend(_snare_clap_stack(bar))
-    if s == 2:    # IRON_MARCH — 8th closed hats + offbeat OH (drive starts here)
+    if s == 2:    # IRON_MARCH — the build scene; more interesting accent layer
+        # 8th closed hats throughout, but with a 4-beat ACCENT PATTERN so
+        # the hat sits with momentum instead of flat: beats 1+3 hit
+        # harder, & of 1+3 medium, beats 2+4 + their &s ghosted. Reads
+        # as "MARCH-march-MARCH-march" instead of metronomic 8ths.
         for i in range(64):
+            beat_in_bar = (i // 2) % 4
+            is_on_beat = (i % 2 == 0)
+            if beat_in_bar in (0, 2):     # downbeats 1 + 3 (strong)
+                vel = 88 if is_on_beat else 64
+            else:                          # beats 2 + 4 (weak)
+                vel = 60 if is_on_beat else 48
             notes.append({"pitch": HATC, "start_time": i * 0.5,
-                          "duration": 0.18, "velocity": 75 if i % 2 == 0 else 58})
+                          "duration": 0.18, "velocity": vel})
+        # Offbeat open hats — keep the drive (existing pattern)
         for bar in range(8):
             notes.append({"pitch": HATO, "start_time": float(bar*4 + 1.5),
                           "duration": 0.4, "velocity": 88})
             notes.append({"pitch": HATO, "start_time": float(bar*4 + 3.5),
                           "duration": 0.4, "velocity": 88})
+        # METAL ACCENTS on structural bars — bar 1 (intro), bar 5 (midway
+        # push), bar 8 (cadence into HOOVER_DROP). Gives the iron its iron.
+        for bar in (0, 4, 7):
+            notes.append({"pitch": METAL, "start_time": float(bar*4),
+                          "duration": 0.4, "velocity": 100})
+        # SNARE GHOST notes between the 2/4 backbeat — adds shuffle motion.
+        # Place on the &-of-1 and &-of-3 of bars 1-3, then dense in bars 5-7.
+        for bar in range(1, 4):
+            notes.append({"pitch": SNARE, "start_time": float(bar*4 + 0.5),
+                          "duration": 0.15, "velocity": 55})
+            notes.append({"pitch": SNARE, "start_time": float(bar*4 + 2.5),
+                          "duration": 0.15, "velocity": 55})
+        # Mid-scene snare PUSH — bars 4-6 add ghost on &-of-2 + &-of-4
+        # (more density = tension cue building toward HOOVER_DROP)
+        for bar in range(4, 7):
+            for off in (0.5, 1.5, 2.5, 3.5):
+                notes.append({"pitch": SNARE, "start_time": float(bar*4 + off),
+                              "duration": 0.12, "velocity": 50 + (bar - 4) * 8})
+        # Bar 8 SNARE ROLL — 16th notes ramping vel, announcement of the
+        # next scene's drop. Iron march delivers you to the drop edge.
+        for i in range(16):
+            notes.append({"pitch": SNARE, "start_time": 28.0 + i * 0.25,
+                          "duration": 0.1, "velocity": 60 + i * 4})
     elif s == 3:  # HOOVER_DROP — 8th hats + offbeat OH everywhere
         for i in range(64):
             notes.append({"pitch": HATC, "start_time": i * 0.5,
