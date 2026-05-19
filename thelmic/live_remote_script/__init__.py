@@ -153,6 +153,10 @@ _UI_THREAD_COMMANDS = {
     "set_drum_pad_chain_device_property",
     "set_drum_pad_chain_device_param",
     "get_drum_pad_chain_device_info",
+    # Scene/clip color + scene name (visual shading of rows)
+    "set_scene_color",
+    "set_scene_name",
+    "set_clip_color",
 }
 
 
@@ -642,6 +646,25 @@ class ThelmicLive(ControlSurface):
             track = self._track(params["track_index"])
             track.color_index = int(params["color_index"])
             return {"color_index": track.color_index}
+        if cmd_type == "set_scene_color":
+            scene = self._song.scenes[int(params["scene_index"])]
+            scene.color_index = int(params["color_index"])
+            return {"scene_index": int(params["scene_index"]),
+                    "color_index": scene.color_index}
+        if cmd_type == "set_scene_name":
+            scene = self._song.scenes[int(params["scene_index"])]
+            scene.name = str(params["name"])
+            return {"scene_index": int(params["scene_index"]),
+                    "name": scene.name}
+        if cmd_type == "set_clip_color":
+            track = self._track(params["track_index"])
+            slot = track.clip_slots[int(params["clip_index"])]
+            if not slot.has_clip:
+                raise ValueError("No clip in slot")
+            slot.clip.color_index = int(params["color_index"])
+            return {"track_index": params["track_index"],
+                    "clip_index": int(params["clip_index"]),
+                    "color_index": slot.clip.color_index}
         if cmd_type == "move_track":
             self._song.move_track(params["track_index"], params["target_position"])
             return {"moved": True}
@@ -796,6 +819,43 @@ class ThelmicLive(ControlSurface):
         if not slot.has_clip:
             raise ValueError("No clip in slot")
         clip = slot.clip
+
+        # Detect whether any input note carries modern attrs (probability or
+        # velocity_deviation). If so, route through Live 11+ add_new_notes
+        # which accepts MidiNoteSpecification objects. Otherwise use the
+        # legacy 5-tuple set_notes path.
+        has_modern = any(
+            ("probability" in n and float(n["probability"]) != 1.0)
+            or ("velocity_deviation" in n and float(n["velocity_deviation"]) != 0.0)
+            for n in notes
+        )
+
+        if has_modern:
+            try:
+                import Live as _Live
+                Spec = _Live.Clip.MidiNoteSpecification
+                specs = []
+                for n in notes:
+                    specs.append(Spec(
+                        pitch=int(n.get("pitch", 60)),
+                        start_time=float(n.get("start_time", 0.0)),
+                        duration=float(n.get("duration", 0.25)),
+                        velocity=float(n.get("velocity", 100)),
+                        mute=bool(n.get("mute", False)),
+                        probability=float(n.get("probability", 1.0)),
+                        velocity_deviation=float(n.get("velocity_deviation", 0.0)),
+                    ))
+                if replace:
+                    try:
+                        clip.remove_notes_extended(0, 128, 0.0, clip.length)
+                    except Exception:
+                        pass
+                clip.add_new_notes(tuple(specs))
+                return {"note_count": len(specs), "replaced": replace, "modern": True}
+            except Exception as exc:
+                # Fall through to legacy path if modern API unavailable
+                pass
+
         live_notes = []
         for n in notes:
             live_notes.append((

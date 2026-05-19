@@ -58,7 +58,7 @@ Status bar should briefly show "ThelmicLive listening on 9878".
 ```
 thelmic/
   bridge/                       ← genre-neutral, never modify for genre reasons
-    helpers/   discovery / eq / transport / params / sidechain / midi / splice
+    helpers/   discovery / eq / transport / params / sidechain / midi / splice / shading
     tonality/  Key / Scale / Chord / Voicing
     grammars/  BuildDropRelease / StaticDrone / IsoRhythm / ThroughComposed / Rotational
     timeline/  Timeline + RampSpec + fire_arrangement engine
@@ -115,6 +115,7 @@ python scripts/run_pack.py dnb_jungle [--phases p1,p2,...] [--skip-drops]
 - **Master-bus targeting** — `track="MASTER"` routes to `set_master_device_param`
 - **Wall-clock-calibrated scene firing** — `fire_arrangement` calibrates once against `song_time` then schedules everything on monotonic wall clock
 - **Anticipation transforms** — `breathe_velocity`, `pull_back_before_drop` (impact at clip_length-0.125 stays sacred), `anticipation_fill`
+- **Session-view shading** — `thelmic.bridge.helpers.shading` (`SceneShading`, `ShadingConfig`, `apply_shading`). Three-axis encoding (scene impact / track strength / hit density) into Live's 14×5 palette. Encodes per-clip variation via *adjacent hue columns* on the same row so the Push 2 can actually distinguish per-clip shades (which it can't do for row-shade variations of the same hue). Each scene has an identity `(col, row)` and a `col_range` for clip-column spreads; `col_range=None` makes a uniform "peak" scene. Score formula uses `max(strength, density)` to avoid the strength/density anti-correlation collapsing variation. Empirical palette map documented in the module's docstring.
 
 ## What's known broken
 

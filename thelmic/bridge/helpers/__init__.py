@@ -12,6 +12,9 @@ from .transport   import hard_reset, arm_take, disarm_take, ms_to_beats
 from .params      import safe_set_param, SemanticParam, resolve_semantic_param
 from .sidechain   import sidechain_pump
 from .midi        import to_clip_notes, repeat_pattern
+from .shading     import (SceneShading, ShadingConfig, apply_shading,
+                          color_for_clip, density_score, score_to_col,
+                          PALETTE_COLS, PALETTE_ROWS, INTENSITY_ROW_ORDER)
 
 __all__ = [
     "find_track", "find_device", "ensure_device", "health_check",
@@ -22,4 +25,7 @@ __all__ = [
     "safe_set_param", "SemanticParam", "resolve_semantic_param",
     "sidechain_pump",
     "to_clip_notes", "repeat_pattern",
+    "SceneShading", "ShadingConfig", "apply_shading",
+    "color_for_clip", "density_score", "score_to_col",
+    "PALETTE_COLS", "PALETTE_ROWS", "INTENSITY_ROW_ORDER",
 ]

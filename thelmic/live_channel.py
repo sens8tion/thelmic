@@ -724,6 +724,23 @@ class LiveChannel:
             "track_index": track_index, "color_index": int(color_index),
         })
 
+    def set_scene_color(self, scene_index: int, color_index: int) -> Future:
+        return self._enqueue("set_scene_color", {
+            "scene_index": int(scene_index), "color_index": int(color_index),
+        })
+
+    def set_scene_name(self, scene_index: int, name: str) -> Future:
+        return self._enqueue("set_scene_name", {
+            "scene_index": int(scene_index), "name": str(name),
+        })
+
+    def set_clip_color(self, track_index: int, clip_index: int, color_index: int) -> Future:
+        return self._enqueue("set_clip_color", {
+            "track_index": int(track_index),
+            "clip_index": int(clip_index),
+            "color_index": int(color_index),
+        })
+
     def move_track(self, track_index: int, target_position: int) -> Future:
         return self._enqueue("move_track", {
             "track_index": track_index, "target_position": int(target_position),
