@@ -944,31 +944,33 @@ PATTERN_FNS = {
 # unity so the Saturator/Drum Buss after them doesn't push into clipping.
 # 0.85 ≈ 0 dB; these all sit at -2 to -8 dB.
 TRACK_VOLUMES = {
-    "KICK_ROTTERDAM":  0.88,
-    "PERC_INDUSTRIAL": 0.72,
-    "SUB_PUNCH":       0.85,   # bass needs presence — keep this hot
-    "HOOVER_LEAD":     0.72,
-    "STAB_HARDCORE":   0.70,
-    "SIREN_FX":        0.65,
-    "VOX_SHOUT":       0.72,
+    "KICK_ROTTERDAM":  0.92,
+    "PERC_INDUSTRIAL": 0.78,
+    "SUB_PUNCH":       0.90,
+    "HOOVER_LEAD":     0.78,
+    "STAB_HARDCORE":   0.76,
+    "SIREN_FX":        0.70,
+    "VOX_SHOUT":       0.78,
     # depraved layer
-    "KICK_VEIN":       0.85,
-    "ACID_TONGUE":     0.75,
-    "DRONE_CRYPT":     0.70,
-    "REVERSE_VOID":    0.75,
-    "CHOIR_NECRO":     0.75,
-    "SCREAM_BLEACH":   0.75,
-    "STAB_BWAAH":      0.78,
-    "NOISE_OSSUARY":   0.68,
+    "KICK_VEIN":       0.90,
+    "ACID_TONGUE":     0.80,
+    "DRONE_CRYPT":     0.75,
+    "REVERSE_VOID":    0.80,
+    "CHOIR_NECRO":     0.80,
+    "SCREAM_BLEACH":   0.80,
+    "STAB_BWAAH":      0.82,
+    "NOISE_OSSUARY":   0.74,
 }
 
-# Safe defaults for distortion stages — calibrated for gabber crunch
-# without losing bass body. Earlier (Output 0.70, Threshold 0.05) was
-# too conservative — gutted the low end. Drive 0.60 still pushes the
-# saturator into character, Output 0.85 keeps body, Threshold back to
-# default 0.0 lets the bass fundamentals through clean.
-SAFE_SATURATOR = {"Drive": 0.60, "Output": 0.85, "Threshold": 0.0}
-SAFE_DRUM_BUSS = {"Drive": 0.18, "Output": 0.85}
+# Safe defaults for distortion stages — calibrated for gabber loudness
+# with bass body intact. Iterations:
+#   v1 Drive 0.85, Output 1.00, Threshold 0.00 -> REDLINED
+#   v2 Drive 0.55, Output 0.70, Threshold 0.05 -> gutted bass
+#   v3 Drive 0.60, Output 0.85, Threshold 0.00 -> still a notch low
+#   v4 Drive 0.60, Output 0.92, Threshold 0.00 <- current
+# Track volumes were also pushed up alongside v4 — see TRACK_VOLUMES.
+SAFE_SATURATOR = {"Drive": 0.60, "Output": 0.92, "Threshold": 0.0}
+SAFE_DRUM_BUSS = {"Drive": 0.18, "Output": 0.92}
 
 
 # Factory preset paths per depraved lane — these REPLACE the default
