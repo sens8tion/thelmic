@@ -129,8 +129,8 @@ HATO   = 46
 # G#3 (56), Bb2 (46), Bb3 (58), Bb4 (70) added for the phrygian / harmonic-minor
 # pincer notes (per The Mover + Angerfist extraction analysis — both tracks
 # weight G# leading-tone and Bb flat-2 heavily around the A root).
-A1, E2, A2, Bb2, B2, C3, D3, E3, F3, G3, Gs3, A3, Bb3, B3, C4, D4, E4, F4, G4, Bb4 = (
-    33, 40, 45, 46, 47, 48, 50, 52, 53, 55, 56, 57, 58, 59, 60, 62, 64, 65, 67, 70
+A1, E2, A2, Bb2, B2, C3, D3, E3, F3, G3, Gs3, A3, Bb3, B3, C4, D4, E4, F4, G4, A4, Bb4 = (
+    33, 40, 45, 46, 47, 48, 50, 52, 53, 55, 56, 57, 58, 59, 60, 62, 64, 65, 67, 69, 70
 )
 # Sub bass root. Was A0 (21) but that's ~27 Hz fundamental — sub-audible
 # even through a Sub Boom Bass preset. A1 (33 = 55 Hz) is the bass sweet
@@ -152,24 +152,26 @@ EM_CHORD = [E3 - 12, B2, E3]
 CHORD_PROG = [AM_CHORD, AM_CHORD, F_CHORD, F_CHORD,
               G_CHORD,  G_CHORD,  EM_CHORD, EM_CHORD]
 
-# === HOOVER ANTHEM RIFF ==================================================
-# 4-bar rave riff in Am, classic call-answer-push-resolve shape.
-# Repeated 2× per scene (8 bars total). Inspired by Rotterdam Termination
-# Source / Charly-era gabber leads — simple, chantable, dotted-quarter +
-# eighth motif that lands hard on the 1.
+# === HOOVER PHRASE LIBRARY ===============================================
+# Three distinct 4-bar rave-anthem riffs in A phrygian. All share the
+# same harmonic skeleton (A root, G# leading tone, Bb phrygian flat-2,
+# F flat-6) so the depravity feels coherent across scenes — but each
+# has its own rhythmic + melodic signature.
 #
-# Bar 1: A3 dotted-quarter, A3 eighth, E4 half          (CALL low->peak)
-# Bar 2: A3 quarter, B3 eighth, A3 eighth, G3 half      (ANSWER)
-# Bar 3: A3 dotted-quarter, A3 eighth, F4 half          (PUSH higher)
-# Bar 4: G3 eighth, F3 eighth, E3 eighth, D3 eighth, A2 half  (DESCENT)
-HOOVER_4BAR = [
+# Each phrase is a list of (start_time, pitch, duration, velocity) tuples
+# expressed in beats relative to the start of the 4-bar phrase (0..16).
+
+# --- HOOVER_ENTRY (S3 HOOVER_DROP) -------------------------------------
+# Classic call-answer-push-descent — the first hoover statement.
+# Dotted-quarter motifs that land hard on each bar's 1.
+HOOVER_ENTRY = [
     # bar 1 — CALL   (G#3 leading-tone pickup pulls into E4 peak)
     (0.0,  A3,  1.5,  108),
-    (1.5,  Gs3, 0.5,   95),   # harmonic-minor pull
+    (1.5,  Gs3, 0.5,   95),
     (2.0,  E4,  2.0,  115),
     # bar 2 — ANSWER (Bb3 phrygian shadow before A3 + G3 resolution)
     (4.0,  A3,  1.0,  100),
-    (5.0,  Bb3, 0.5,   95),   # phrygian flat-2
+    (5.0,  Bb3, 0.5,   95),
     (5.5,  A3,  0.5,   95),
     (6.0,  G3,  2.0,  108),
     # bar 3 — PUSH   (G#3 pickup again, this time pulling up to F4 peak)
@@ -180,9 +182,87 @@ HOOVER_4BAR = [
     (12.0, G3,  0.5,  100),
     (12.5, F3,  0.5,  100),
     (13.0, E3,  0.5,  100),
-    (13.5, Bb2, 0.5,  102),   # phrygian descent step
+    (13.5, Bb2, 0.5,  102),
     (14.0, A2,  2.0,  105),
 ]
+
+# --- HOOVER_PEAK (S4 ANNIHILATION) -------------------------------------
+# Triumphant anthem — held high notes climbing across the bars, each peak
+# answered by a dotted-eighth pull back to A3. Less motion, more "soar".
+# Lands on a held A4 (octave up) for the final bar — the highest the
+# entry riff doesn't reach.
+HOOVER_PEAK = [
+    # bar 1 — held E4 with A3 pickup
+    (0.0,  A3,  0.5,  100),
+    (0.5,  E4,  3.5,  120),    # held 7 eighths — let the supersaw scream
+    # bar 2 — held F4 (climbing one step higher)
+    (4.0,  A3,  0.5,  102),
+    (4.5,  F4,  3.5,  122),
+    # bar 3 — held G4 (highest yet, breaking into upper octave)
+    (8.0,  A3,  0.5,  104),
+    (8.5,  G4,  3.5,  124),
+    # bar 4 — OCTAVE JUMP to A4, descent through G#4 / Bb4 / A4 pincer
+    (12.0, A4,    0.75, 125),
+    (12.75,Gs3+12,0.25, 110),  # G#4 — leading tone above
+    (13.0, A4,    0.5,  120),
+    (13.5, Bb4,   0.5,  115),  # phrygian flat-2 above
+    (14.0, A4,    1.0,  125),
+    (15.0, A3,    1.0,  110),  # land back on A3 — root cadence
+]
+
+# --- HOOVER_NUCLEAR (S7 NUCLEAR) ---------------------------------------
+# Frenzied 8th-note motion across the full pincer range. Octave jumps
+# between A3 and A4 — the most extreme statement, fast oscillation
+# instead of long-held peaks. Bar 4 ends on a Bb-major-flavoured
+# phrygian cadence before terminal A3.
+HOOVER_NUCLEAR = [
+    # bar 1 — pincer oscillation around A3, peaks at E4
+    (0.0,  A3,  0.5,  115),
+    (0.5,  Bb3, 0.5,  108),
+    (1.0,  A3,  0.5,  112),
+    (1.5,  Gs3, 0.5,  105),
+    (2.0,  A3,  0.5,  118),
+    (2.5,  E4,  0.5,  122),
+    (3.0,  A3,  0.5,  115),
+    (3.5,  E4,  0.5,  120),
+    # bar 2 — climb to octave above, full pincer descent
+    (4.0,  A3,  0.5,  118),
+    (4.5,  Bb3, 0.5,  108),
+    (5.0,  A4,  0.5,  125),  # OCTAVE jump up
+    (5.5,  G4,  0.5,  118),
+    (6.0,  F4,  0.5,  115),
+    (6.5,  E4,  0.5,  115),
+    (7.0,  D4,  0.5,  112),
+    (7.5,  C4,  0.5,  110),
+    # bar 3 — descent through bass register with pincer pull-back
+    (8.0,  Bb3, 0.5,  115),
+    (8.5,  A3,  0.5,  118),
+    (9.0,  Gs3, 0.5,  108),
+    (9.5,  A3,  0.5,  120),
+    (10.0, F4,  0.5,  122),
+    (10.5, E4,  0.5,  118),
+    (11.0, Bb3, 0.5,  115),
+    (11.5, A3,  0.5,  120),
+    # bar 4 — octave jump cadence with phrygian Bb-major colour
+    (12.0, A4,  0.5,  125),
+    (12.5, Gs3+12, 0.5, 115),  # G#4
+    (13.0, A4,  0.5,  122),
+    (13.5, Bb4, 0.5,  118),    # phrygian flat-2 above
+    (14.0, A4,  0.5,  125),
+    (14.5, F4,  0.5,  118),
+    (15.0, E4,  0.5,  115),
+    (15.5, A3,  0.5,  120),    # terminal root
+]
+
+# Per-scene hoover phrase map — which signature plays on which scene
+SCENE_HOOVER = {
+    3: HOOVER_ENTRY,
+    4: HOOVER_PEAK,
+    7: HOOVER_NUCLEAR,
+}
+# Legacy name kept pointing at HOOVER_ENTRY so external code that
+# references HOOVER_4BAR (no longer should but just in case) still works.
+HOOVER_4BAR = HOOVER_ENTRY
 
 
 # --- KICK_ROTTERDAM ------------------------------------------------------
@@ -404,11 +484,13 @@ def sub_pattern(s: int) -> list[dict]:
 
 
 # --- HOOVER_LEAD ---------------------------------------------------------
-def _emit_riff(notes: list[dict], base: float, oct_shift: int = 0,
-               vel_offset: int = 0) -> None:
-    """Emit one 4-bar pass of the HOOVER_4BAR anthem starting at `base` beats,
-    with optional octave shift and velocity offset."""
-    for (t, p, d, v) in HOOVER_4BAR:
+def _emit_riff(notes: list[dict], base: float, phrase: list = None,
+               oct_shift: int = 0, vel_offset: int = 0) -> None:
+    """Emit one 4-bar pass of the given hoover `phrase` starting at `base`
+    beats, with optional octave shift and velocity offset. If `phrase`
+    is None, falls back to HOOVER_ENTRY (legacy default)."""
+    phrase = phrase if phrase is not None else HOOVER_ENTRY
+    for (t, p, d, v) in phrase:
         notes.append({
             "pitch":      p + oct_shift,
             "start_time": base + t,
@@ -418,32 +500,37 @@ def _emit_riff(notes: list[dict], base: float, oct_shift: int = 0,
 
 
 def hoover_pattern(s: int) -> list[dict]:
-    """Anthemic 4-bar rave riff repeated 2× per scene. Gabber leads are
-    simple, chantable, and locked to the harmonic skeleton — that's where
-    the singalong-stomp energy comes from."""
+    """Per-scene anthem — distinct 4-bar phrase per drop scene:
+      S3 HOOVER_ENTRY   — classic call/answer/push/descent statement
+      S4 HOOVER_PEAK    — held high notes climbing E4 -> F4 -> G4 -> A4
+      S5 BREAKDOWN_BLOOD — long held screams (no phrase, just sustains)
+      S7 HOOVER_NUCLEAR  — 8th-note frenzy with octave jumps
+    Same A-phrygian harmonic skeleton so the drops feel coherent, but
+    each scene has its own rhythmic + melodic signature."""
     notes: list[dict] = []
     if s in (0, 1, 2, 6):
         return []
-    if s == 3:    # HOOVER_DROP — single-voice riff ×2 (4 bars × 2 = 8 bars)
-        _emit_riff(notes, 0.0)
-        _emit_riff(notes, 16.0)
-    elif s == 4:  # ANNIHILATION — riff ×2, octave-stacked (lead + above)
+    if s == 3:    # HOOVER_DROP — ENTRY phrase ×2 (single voice, lead statement)
         for base in (0.0, 16.0):
-            _emit_riff(notes, base)
-            _emit_riff(notes, base, oct_shift=+12, vel_offset=-18)
-    elif s == 5:  # BREAKDOWN_BLOOD — long held screams descend the riff peaks
-        # Pull out the peak notes (E4 / G3 / F4 / A2) and hold them long
+            _emit_riff(notes, base, phrase=HOOVER_ENTRY)
+    elif s == 4:  # ANNIHILATION — PEAK phrase ×2, octave-stacked (triumphant)
+        for base in (0.0, 16.0):
+            _emit_riff(notes, base, phrase=HOOVER_PEAK)
+            _emit_riff(notes, base, phrase=HOOVER_PEAK,
+                       oct_shift=+12, vel_offset=-18)
+    elif s == 5:  # BREAKDOWN_BLOOD — long held screams descending A→G→F→E
         screams = [E4, G3, F4, A3]
         for i, p in enumerate(screams):
             notes.append({"pitch": p, "start_time": float(i * 8),
                           "duration": 7.5, "velocity": 110})
-            # minor-2nd ghost a half-bar later for that dystopian wobble
+            # minor-2nd ghost a half-bar later — dystopian wobble
             notes.append({"pitch": p + 1, "start_time": float(i * 8) + 2.0,
                           "duration": 5.0, "velocity": 80})
-    elif s == 7:  # NUCLEAR — riff ×2 octave-stacked + tail wail on E4
+    elif s == 7:  # NUCLEAR — NUCLEAR phrase ×2 octave-stacked, frenzied 8ths
         for base in (0.0, 16.0):
-            _emit_riff(notes, base, vel_offset=+5)
-            _emit_riff(notes, base, oct_shift=+12, vel_offset=-15)
+            _emit_riff(notes, base, phrase=HOOVER_NUCLEAR, vel_offset=+5)
+            _emit_riff(notes, base, phrase=HOOVER_NUCLEAR,
+                       oct_shift=+12, vel_offset=-15)
         # Final-bar wail — held E4 over the whole bar
         notes.append({"pitch": E4, "start_time": 28.0, "duration": 4.0, "velocity": 118})
     return notes
@@ -478,9 +565,12 @@ def stab_pattern(s: int) -> list[dict]:
             for p in chord:
                 notes.append({"pitch": p, "start_time": float(bar*4 + off),
                               "duration": 1.5, "velocity": 100})
-    # Double the hoover riff an octave UP — the supersaw lead-stack
-    for base in (0.0, 16.0):
-        _emit_riff(notes, base, oct_shift=+12, vel_offset=-10)
+    # Double the per-scene hoover phrase an octave UP — supersaw lead-stack
+    # that mirrors whatever signature the hoover lane is playing.
+    phrase = SCENE_HOOVER.get(s)
+    if phrase is not None:
+        for base in (0.0, 16.0):
+            _emit_riff(notes, base, phrase=phrase, oct_shift=+12, vel_offset=-10)
     if s == 7:  # NUCLEAR — additional rhythmic stabs on every beat last 2 bars
         for beat in range(24, 32):
             chord = CHORD_PROG[beat // 4]
@@ -746,22 +836,36 @@ def choir_necro_pattern(s: int) -> list[dict]:
 # These are the chopped vocal-stand-in stabs (replace synth with actual
 # vocal sample later).
 def scream_bleach_pattern(s: int) -> list[dict]:
+    """Distorted vocal screams doubling the per-scene hoover PEAK notes
+    an octave above. Picks the highest-pitch note from each bar of the
+    current scene's hoover phrase (the natural climax point), shifts up
+    one octave, lands as a held stab in the rafters."""
     notes: list[dict] = []
     if s not in (4, 7):
         return []
-    # Peak notes from HOOVER_4BAR + 12 (octave up, "in the rafters")
-    # bar 1 peak: E4 at t=2.0 -> E5 at t=2.0
-    # bar 3 peak: F4 at t=10.0 -> F5 at t=10.0
-    # Plus bar 4 final A2 -> A4 echo
+    phrase = SCENE_HOOVER.get(s)
+    if phrase is None:
+        return []
+    # Identify the highest-pitch note within each of the 4 bars (beats 0-4,
+    # 4-8, 8-12, 12-16). That's the peak the scream should double.
+    peaks_per_bar = {}
+    for (t, p, d, v) in phrase:
+        bar = int(t // 4)
+        cur = peaks_per_bar.get(bar)
+        if cur is None or p > cur[1]:
+            peaks_per_bar[bar] = (t, p, d, v)
+    # Emit one scream per bar, both reps (4 bars × 2 reps = 8 screams),
+    # an octave above the peak, with healthy velocity.
     for rep_base in (0.0, 16.0):
-        notes.append({"pitch": E4 + 12, "start_time": rep_base + 2.0,
-                      "duration": 2.0, "velocity": 115})
-        notes.append({"pitch": F4 + 12, "start_time": rep_base + 10.0,
-                      "duration": 2.0, "velocity": 118})
-        # Bar 4 echo — A4 short stab
-        notes.append({"pitch": A3 + 12, "start_time": rep_base + 14.0,
-                      "duration": 1.5, "velocity": 105})
-    if s == 7:  # NUCLEAR — additional final-bar screams ramping up
+        for bar in sorted(peaks_per_bar.keys()):
+            t, p, d, v = peaks_per_bar[bar]
+            notes.append({
+                "pitch":      p + 12,
+                "start_time": rep_base + t,
+                "duration":   max(1.0, d * 1.3),
+                "velocity":   min(127, v + 5),
+            })
+    if s == 7:  # NUCLEAR — additional final-bar pincer screams ramping up
         for i, p in enumerate([A3 + 12, Bb3 + 12, E4 + 12, F4 + 12]):
             notes.append({"pitch": p, "start_time": 28.0 + i * 1.0,
                           "duration": 0.8, "velocity": 110 + i * 4})
