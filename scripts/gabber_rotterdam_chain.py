@@ -132,8 +132,11 @@ HATO   = 46
 A1, E2, A2, Bb2, B2, C3, D3, E3, F3, G3, Gs3, A3, Bb3, B3, C4, D4, E4, F4, G4, Bb4 = (
     33, 40, 45, 46, 47, 48, 50, 52, 53, 55, 56, 57, 58, 59, 60, 62, 64, 65, 67, 70
 )
-# Gabber sub root — A0 area for tectonic weight (kick-tied)
-A0_SUB = 21
+# Sub bass root. Was A0 (21) but that's ~27 Hz fundamental — sub-audible
+# even through a Sub Boom Bass preset. A1 (33 = 55 Hz) is the bass sweet
+# spot where the fundamental + harmonics carry the weight. The constant
+# is named A0_SUB for legacy reasons; treat it as "sub root MIDI note".
+A0_SUB = 33
 
 # 8-bar root progression: 2-bar holds per chord. This is the SAME progression
 # the kick-bass-sub-stab-hoover all hew to — gabber locks every voice to the
@@ -981,11 +984,14 @@ DEPRAVED_PRESETS = {
     "ACID_TONGUE":   ("sounds/Bass",       "Acid Bass.adv"),
     "DRONE_CRYPT":   ("sounds/Pad",        "Atmos Pad.adv"),
     "REVERSE_VOID":  ("sounds/Effects",    "Air Raid Riser.adg"),
-    "CHOIR_NECRO":   ("sounds/Voices",     "Dark Whispers.adg"),
+    "CHOIR_NECRO":   ("sounds/Voices",     "Driving Choir Male.adg"),  # was Dark Whispers — too quiet
     "SCREAM_BLEACH": ("sounds/Synth Lead", "Anger Management.adv"),
     "STAB_BWAAH":    ("sounds/Brass",      "Abrasive Brass.adg"),
     "NOISE_OSSUARY": ("sounds/Effects",    "Broadcast Noise.adg"),
 }
+# Core lane T2 SUB_PUNCH also uses a factory preset (sounds/Bass/Sub Boom Bass.adg)
+# rather than raw Operator — Operator's default sine at sub-bass frequencies
+# was inaudible.
 
 
 def main():
