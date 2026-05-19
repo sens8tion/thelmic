@@ -270,69 +270,98 @@ def kick_pattern(s: int) -> list[dict]:
     """Distorted 4OTF gabber kick — kick IS the bass.
 
     Velocity is high across the board; gabber kicks are uniform-loud, the
-    variation comes from the distorted sample's interaction at peak, not from
-    velocity dynamics.
+    variation comes from the distorted sample's interaction at peak, not
+    from velocity dynamics.
+
+    Bars 0-5 carry the scene's main rhythm. Bars 6-7 (final 8 beats) are
+    TIGHTENED — shorter durations, no loose fills/rolls/ghosts — so each
+    scene ends with decisive 4OTF hits leading to the next scene's drop
+    rather than a busy, smeared closer.
     """
     notes: list[dict] = []
     if s == 0:    # BLACKOUT — silent
         return []
-    if s == 1:    # KICK_ENTRY — pure 4OTF, no embellishment
-        for beat in range(32):
+
+    if s == 1:    # KICK_ENTRY — pure 4OTF, tight tail
+        for beat in range(24):   # bars 0-5: 4OTF, normal duration
             notes.append({"pitch": KICK, "start_time": float(beat),
                           "duration": 0.4, "velocity": 115})
-    elif s == 2:  # IRON_MARCH — 4OTF + ghost on &-of-2
-        for beat in range(32):
+        for beat in range(24, 32):  # bars 6-7: tightened, shorter dur
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.22, "velocity": 118})
+
+    elif s == 2:  # IRON_MARCH — 4OTF + ghost on &-of-2 (ghosts dropped in tail)
+        for beat in range(24):
             notes.append({"pitch": KICK, "start_time": float(beat),
                           "duration": 0.4, "velocity": 116})
-        for bar in range(8):
+        for bar in range(6):   # ghosts only in bars 0-5
             notes.append({"pitch": KICK, "start_time": float(bar*4 + 1.5),
                           "duration": 0.25, "velocity": 92})
-    elif s == 3:  # HOOVER_DROP — 4OTF + double-up on &-of-4 (Rotterdam stomp)
-        for beat in range(32):
+        for beat in range(24, 32):  # bars 6-7: clean 4OTF, tight dur
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.22, "velocity": 118})
+
+    elif s == 3:  # HOOVER_DROP — 4OTF + &-of-4 doubles (doubles dropped in tail)
+        for beat in range(24):
             notes.append({"pitch": KICK, "start_time": float(beat),
                           "duration": 0.4, "velocity": 118})
-        for bar in range(8):
+        for bar in range(6):
             notes.append({"pitch": KICK, "start_time": float(bar*4 + 3.5),
                           "duration": 0.25, "velocity": 105})
-    elif s == 4:  # ANNIHILATION — double-kicks: every beat + every &
-        for half in range(64):
+        for beat in range(24, 32):  # bars 6-7: clean 4OTF, tight dur
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.22, "velocity": 120})
+
+    elif s == 4:  # ANNIHILATION — double-kicks bars 0-5; clean 4OTF in tail
+        for half in range(48):   # bars 0-5: every &
             t = half * 0.5
             v = 120 if half % 2 == 0 else 100
             notes.append({"pitch": KICK, "start_time": t, "duration": 0.35, "velocity": v})
-    elif s == 5:  # BREAKDOWN_BLOOD — kicks GONE except a single bar-7 roll preview
-        for i in range(8):  # 8th-note kick roll on the final bar (bar 7)
-            notes.append({"pitch": KICK, "start_time": 28.0 + i * 0.5,
-                          "duration": 0.3, "velocity": 80 + i * 5})
-    elif s == 6:  # REBUILD_HAMMER — per-bar -> per-beat -> 8ths acceleration
-        # bars 0-1: 1 hit per bar
-        for bar in range(2):
+        for beat in range(24, 32):  # bars 6-7: 4OTF, no &-doubles
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.22, "velocity": 122})
+
+    elif s == 5:  # BREAKDOWN_BLOOD — bars 0-5 silent; tight cadence in tail
+        # Bar 6 silent (kicks still gone — let the choir scream).
+        # Bar 7: 4 emphatic quarter-note hits as the rebuild begins.
+        for beat in range(28, 32):
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.22, "velocity": 95 + (beat - 28) * 7})
+
+    elif s == 6:  # REBUILD_HAMMER — accelerate through bars 0-5, tight cadence in tail
+        for bar in range(2):     # bars 0-1: 1/bar
             notes.append({"pitch": KICK, "start_time": float(bar*4),
                           "duration": 0.4, "velocity": 110})
-        # bars 2-3: 2 hits per bar (1, 3)
-        for bar in range(2, 4):
+        for bar in range(2, 4):  # bars 2-3: 2/bar
             for off in (0.0, 2.0):
                 notes.append({"pitch": KICK, "start_time": float(bar*4 + off),
                               "duration": 0.4, "velocity": 112})
-        # bars 4-5: 4OTF
-        for beat in range(16, 24):
+        for beat in range(16, 24):  # bars 4-5: 4OTF
             notes.append({"pitch": KICK, "start_time": float(beat),
                           "duration": 0.4, "velocity": 115})
-        # bars 6-7: 8ths
-        for half in range(16):
-            notes.append({"pitch": KICK, "start_time": 24.0 + half * 0.5,
-                          "duration": 0.3, "velocity": 118})
-    elif s == 7:  # NUCLEAR — 4OTF + ALL the &-doubles + 16th triplet roll fills
-        for beat in range(32):
+        # Bars 6-7: TIGHTENED — was 16 × 8ths (carpet); now 8 × clean
+        # quarter-note hits with rising velocity. Single emphatic hits
+        # leading into NUCLEAR rather than a roll fill that smears.
+        for beat in range(24, 32):
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.20, "velocity": 116 + (beat - 24)})
+
+    elif s == 7:  # NUCLEAR — full chaos bars 0-5, tight 4OTF cadence in tail
+        for beat in range(24):   # bars 0-5: 4OTF + & doubles
             notes.append({"pitch": KICK, "start_time": float(beat),
                           "duration": 0.35, "velocity": 122})
-            # & double on every beat
             notes.append({"pitch": KICK, "start_time": float(beat) + 0.5,
                           "duration": 0.3, "velocity": 102})
-        # 16th-triplet roll on the last beat of bars 3 and 7
-        for bar in (3, 7):
-            for i in range(6):  # 6 hits across one beat = 16th-triplets
-                notes.append({"pitch": KICK, "start_time": float(bar*4 + 3) + i * (1.0/6.0),
-                              "duration": 0.12, "velocity": 110})
+        # 16th-triplet roll on bar 3 last beat (mid-scene flourish kept)
+        for i in range(6):
+            notes.append({"pitch": KICK, "start_time": 15.0 + i * (1.0/6.0),
+                          "duration": 0.10, "velocity": 110})
+        # Bars 6-7: TIGHTENED — drop the &-doubles + drop the bar-7
+        # triplet roll. Tight 4OTF terminal cadence, accent crescendo.
+        for beat in range(24, 32):
+            notes.append({"pitch": KICK, "start_time": float(beat),
+                          "duration": 0.20, "velocity": 122 + (beat - 24) // 2})
+
     return notes
 
 
