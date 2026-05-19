@@ -703,17 +703,22 @@ def reverse_void_pattern(s: int) -> list[dict]:
 # Demonic chant cluster — A minor with the phrygian Bb on top. Sustained
 # 4-bar chord blocks. Plays at peaks for "ancient evil descending" vibe.
 def choir_necro_pattern(s: int) -> list[dict]:
+    """Demonic chant cluster. Transposed up one octave from the theory's
+    base range — voice/choir presets (Dark Whispers etc.) sound in the
+    C4-C6 register, sub-C4 territory is dead-zone for most choir patches.
+    Cluster A3-C4-E4-Bb4 still preserves the A-root + phrygian-Bb-on-top
+    dissonance the depravity needs."""
     notes: list[dict] = []
-    # Cluster pitches — A2, C3, E3, Bb3 (phrygian flat-2 on top = the dissonance)
-    CLUSTER = (A2, C3, E3, Bb3)
+    # Cluster — transposed up an octave: A3, C4, E4, Bb4 (phrygian flat-2 top)
+    CLUSTER = (A3, C4, E4, Bb4)  # MIDI 57, 60, 64, 70
     if s == 4:    # ANNIHILATION — 2× 4-bar holds, full cluster
         for base in (0.0, 16.0):
             for p in CLUSTER:
                 notes.append({"pitch": p, "start_time": base,
                               "duration": 14.0, "velocity": 95})
     elif s == 5:  # BREAKDOWN_BLOOD — choir descends A→G→F→E across the void
-        # 4 × 2-bar phrases — root descent
-        descent_roots = [A3, G3, F3, E3]
+        # 4 × 2-bar phrases — root descent, also transposed up
+        descent_roots = [A3 + 12, G3 + 12, F3 + 12, E3 + 12]  # A4, G4, F4, E4
         for i, root in enumerate(descent_roots):
             base = i * 8.0
             # Triad: root + minor 3rd + 5th + b2 above (phrygian color)
@@ -725,8 +730,8 @@ def choir_necro_pattern(s: int) -> list[dict]:
             for p in CLUSTER:
                 notes.append({"pitch": p, "start_time": base,
                               "duration": 14.0, "velocity": 100})
-        # Extra Bb-major triad layer at bar 5-6 — phrygian crash echo
-        for p in (Bb3, D4, F4):
+        # Extra Bb-major triad layer at bar 5-6 — phrygian crash echo (octave up)
+        for p in (Bb4, D4 + 12, F4 + 12):  # Bb4, D5, F5
             notes.append({"pitch": p, "start_time": 16.0,
                           "duration": 8.0, "velocity": 88})
     return notes
