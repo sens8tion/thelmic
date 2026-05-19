@@ -64,23 +64,21 @@ SIDECHAIN_LANES = [
 #   Release   0.08 (~60-80ms): snaps back between kicks — the audible pump
 PUMP_SETTINGS = {
     "S/C On":      1.0,
-    # Threshold ~-10 dB so only the kick's peak transient triggers the duck.
-    # Lower threshold (-24 dB) made the comp see kick-post-FX as a constant
-    # signal above threshold and pinned GR to the floor.
-    "Threshold":   0.62,
-    "Ratio":       0.55,   # ~3:1 — heavy enough to read, light enough to release
-    # Attack ~5 ms lets the kick CLICK pass through the wash before the duck
-    # kicks in — that creates the audible "punch through then sink" pump
-    # rather than a simultaneous duck.
-    "Attack":      0.12,
-    "Release":     0.10,   # ~80 ms — recover between hits at 190 BPM
+    # Aggressive threshold + fast attack — assumes sidechain source is
+    # set to PRE FX (which sees the raw kick transient envelope, not
+    # the sustained post-Drum-Buss signal). With Pre FX, even a low
+    # threshold gives a properly breathing pump because the source
+    # signal itself returns to zero between kicks.
+    "Threshold":   0.30,
+    "Ratio":       0.55,
+    "Attack":      0.02,
+    "Release":     0.10,
     "Auto Release On/Off": 0.0,
     "Knee":        0.0,
     "S/C Listen":  0.0,
-    # HP the sidechain KEY so the comp tracks the kick transient, not the
-    # sustained sub tail (Drum Buss Boom makes the kick post-FX a near-
-    # constant low signal — HP at ~200 Hz isolates the click that has
-    # a distinct attack-decay envelope).
+    # HP the sidechain KEY — even with Pre FX source, HP at ~200 Hz
+    # removes any low-frequency lingering that could trigger ducking
+    # outside the kick transient window.
     "S/C EQ On":   1.0,
     "S/C EQ Type": 1.0,    # high-pass
     "S/C EQ Freq": 0.40,   # normalized — roughly 200 Hz
@@ -88,12 +86,12 @@ PUMP_SETTINGS = {
     "S/C EQ Gain": 0.0,
     "Dry/Wet":     1.0,
 }
-# NOTE: Live's LOM doesn't expose the routing-channel selector
-# (Pre FX / Post FX / Post Mixer), only the source-track type. The
-# sidechain key reads Post FX by default, which for the kick means
-# post Drum Buss / Saturator / internal compressor — already-compressed
-# signal that sits constantly above threshold. Higher threshold above
-# is the workaround; manual Pre FX selection in the UI is even cleaner.
+# NOTE: Live's LOM doesn't yet expose the routing-channel selector
+# (Pre FX / Post FX / Post Mixer), only the source-track type. Until
+# `set_device_sidechain_channel` lands in the deployed remote script,
+# the source channel must be flipped to "Pre FX" manually in the UI
+# for every sidechain comp on the session. Post FX as source pins the
+# comp to the floor because post-Drum-Buss kick is a continuous signal.
 
 # Master Glue Compressor — gentle final bus glue. 2:1, slow attack,
 # auto release, threshold to grab ~1-2 dB GR on peaks.
