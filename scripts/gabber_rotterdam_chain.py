@@ -47,8 +47,19 @@ LANE_NAMES = [
     "STAB_HARDCORE",
     "SIREN_FX",
     "VOX_SHOUT",
+    # depraved layer — added 2026-05-19, follows the A-phrygian theory
+    "KICK_VEIN",        # pitched 2nd-kick that root-follows the progression
+    "ACID_TONGUE",      # TB-303 squelch in A phrygian
+    "DRONE_CRYPT",      # sustained dread pad
+    "REVERSE_VOID",     # reverse-suck swells before drops
+    "CHOIR_NECRO",      # demonic chant cluster
+    "SCREAM_BLEACH",    # distorted vocal screams doubling hoover peaks
+    "STAB_BWAAH",       # terror-orchestral hits
+    "NOISE_OSSUARY",    # white noise crescendo in builds
 ]
-LANE_COLORS = [3, 13, 1, 14, 5, 7, 10]  # vary so the session view is readable
+LANE_COLORS = [3, 13, 1, 14, 5, 7, 10,
+               # depraved: dark reds + purples + black-ish
+               2, 11, 19, 17, 16, 4, 12, 18]
 
 SCENE_NAMES = [
     "BLACKOUT",
@@ -508,6 +519,270 @@ def vox_pattern(s: int) -> list[dict]:
     return notes
 
 
+# =========================================================================
+# DEPRAVED LAYER  — 8 lanes added 2026-05-19 after Convert-to-MIDI analysis
+# =========================================================================
+
+# --- KICK_VEIN -----------------------------------------------------------
+# Pitched second kick that root-follows the progression Am-Am-F-F-G-G-Em-Em.
+# In real Rotterdam productions the bass kick CHANGES PITCH to track the
+# bassline — making the kick itself the lead bass melody. Drum-rack pads
+# can't easily do per-hit pitch, so this is a separate MIDI synth lane
+# playing kick-shaped percussive notes at the chord roots, kick-tied to
+# the main kick rhythm.
+def kick_vein_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    if s not in (1, 3, 4, 7):
+        return []
+    # Root pitch per bar — one octave above the sub root for kick-bass register
+    BAR_ROOTS = [r + 12 for r in ROOT_PROG]  # A1-A1-F1-F1-G1-G1-E1-E1 area
+    if s == 1:    # KICK_ENTRY — austere, root only, every kick
+        for beat in range(32):
+            notes.append({"pitch": A0_SUB + 12, "start_time": float(beat),
+                          "duration": 0.3, "velocity": 110})
+    elif s == 3:  # HOOVER_DROP — follows progression, every kick
+        for bar in range(8):
+            root = BAR_ROOTS[bar]
+            for beat in range(4):
+                notes.append({"pitch": root, "start_time": float(bar*4 + beat),
+                              "duration": 0.3, "velocity": 112})
+    elif s == 4:  # ANNIHILATION — progression + & doubles
+        for bar in range(8):
+            root = BAR_ROOTS[bar]
+            for half in range(8):
+                t = bar*4 + half*0.5
+                notes.append({"pitch": root, "start_time": float(t),
+                              "duration": 0.25, "velocity": 116 if half % 2 == 0 else 95})
+    elif s == 7:  # NUCLEAR — progression + every 8th + triplet roll on bar ends
+        for bar in range(8):
+            root = BAR_ROOTS[bar]
+            for half in range(8):
+                t = bar*4 + half*0.5
+                notes.append({"pitch": root, "start_time": float(t),
+                              "duration": 0.25, "velocity": 120 if half % 2 == 0 else 100})
+            # Triplet roll on bar 3 + 7 last beat
+            if bar in (3, 7):
+                for i in range(6):
+                    notes.append({"pitch": root, "start_time": float(bar*4 + 3) + i * (1.0/6.0),
+                                  "duration": 0.12, "velocity": 108})
+    return notes
+
+
+# --- ACID_TONGUE ---------------------------------------------------------
+# TB-303-style 16th-note squelch in A phrygian. The 2-bar pattern emphasizes
+# A root, slides up to Bb (phrygian flat-2) and G# (harmonic-minor leading
+# tone), descends through F and back. Plays in peak scenes only.
+ACID_2BAR = [
+    # (beat_offset_within_2bar, pitch, duration, velocity)
+    # bar 1 — pulsing root + b2 punctuation
+    (0.0,   A1,  0.25, 105),
+    (0.25,  A1,  0.25,  90),
+    (0.5,   Bb2, 0.25, 100),
+    (0.75,  A1,  0.25,  90),
+    (1.0,   A2,  0.25, 110),  # accent — octave up
+    (1.25,  A1,  0.25,  85),
+    (1.5,   Bb2, 0.25,  95),
+    (1.75,  G3-12, 0.25, 80),  # G2 — minor 7
+    (2.0,   A1,  0.25, 100),
+    (2.25,  A1,  0.25,  80),
+    (2.5,   Bb2, 0.25,  95),
+    (2.75,  A1,  0.25,  80),
+    (3.0,   E3-12, 0.25, 100),  # E2 — perfect 5th
+    (3.25,  A1,  0.25,  80),
+    (3.5,   Bb2, 0.25,  90),
+    (3.75,  A1,  0.25,  80),
+    # bar 2 — descent + G# leading-tone tension
+    (4.0,   A2,  0.25, 110),  # accent — octave
+    (4.25,  G3-12, 0.25, 90),  # G2
+    (4.5,   F3-12, 0.25, 95),  # F2 — phrygian b6
+    (4.75,  E3-12, 0.25, 90),  # E2
+    (5.0,   A1,  0.25, 100),
+    (5.25,  A1,  0.25,  80),
+    (5.5,   Gs3-12,0.25, 105), # G#2 — leading tone tension
+    (5.75,  A1,  0.25,  90),
+    (6.0,   Bb2, 0.25, 100),
+    (6.25,  A1,  0.25,  85),
+    (6.5,   A2,  0.25, 105),
+    (6.75,  Bb2, 0.25,  95),
+    (7.0,   A1,  0.25, 100),
+    (7.25,  Gs3-12,0.25, 90),
+    (7.5,   A1,  0.25,  90),
+    (7.75,  A1,  0.25,  85),
+]
+
+
+def acid_tongue_pattern(s: int) -> list[dict]:
+    if s not in (4, 7):
+        return []
+    notes: list[dict] = []
+    # 4 reps of the 2-bar phrase = 8 bars
+    for rep in range(4):
+        base = rep * 8.0
+        for (t, p, d, v) in ACID_2BAR:
+            notes.append({"pitch": p, "start_time": base + t,
+                          "duration": d, "velocity": v})
+    return notes
+
+
+# --- DRONE_CRYPT ---------------------------------------------------------
+# Sustained dystopian pad bed: A1 + Bb1 phrygian stack (the half-step
+# clash is the dread). Plays in the dark/quiet scenes — never alongside
+# the peak chaos. Long held notes — 16+ beats each.
+def drone_crypt_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    if s == 0:    # BLACKOUT — full-scene drone, A1 + Bb1 + A2 stack
+        for p in (A1, A1 + 1, A2):  # A1, Bb1, A2 — phrygian half-step stack
+            notes.append({"pitch": p, "start_time": 0.0,
+                          "duration": 32.0, "velocity": 80 if p != A2 else 70})
+    elif s == 5:  # BREAKDOWN_BLOOD — A1 + Bb2 throughout, F2 enters bar 5
+        notes.append({"pitch": A1,  "start_time": 0.0,  "duration": 32.0, "velocity": 90})
+        notes.append({"pitch": Bb2, "start_time": 0.0,  "duration": 32.0, "velocity": 80})
+        notes.append({"pitch": F3,  "start_time": 16.0, "duration": 16.0, "velocity": 95})  # F3 — phrygian b6 push
+    elif s == 6:  # REBUILD_HAMMER — sustained but builds intensity via overlapping notes
+        # bars 0-3: just A1
+        notes.append({"pitch": A1, "start_time": 0.0, "duration": 16.0, "velocity": 75})
+        # bars 4-5: + Bb2
+        notes.append({"pitch": Bb2, "start_time": 16.0, "duration": 8.0, "velocity": 85})
+        # bars 6-7: + A2 (climbing the stack as the kicks accelerate)
+        notes.append({"pitch": A2, "start_time": 24.0, "duration": 8.0, "velocity": 95})
+    return notes
+
+
+# --- REVERSE_VOID --------------------------------------------------------
+# Reverse-suck swells before drops. Single long-decay notes played at the
+# tail of build scenes — they should be heard as a "swooping inhalation"
+# right before the kick hits the next scene. (Live can't natively reverse
+# MIDI; this lane's Operator gets a reversed envelope shape so the note
+# crescendos INTO its release rather than starting loud.)
+def reverse_void_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    if s == 2:    # IRON_MARCH — swell across bars 7-8 leading into S3 HOOVER_DROP
+        notes.append({"pitch": A3, "start_time": 24.0, "duration": 8.0, "velocity": 100})
+        notes.append({"pitch": E4, "start_time": 28.0, "duration": 4.0, "velocity": 110})
+    elif s == 6:  # REBUILD_HAMMER — swell across last 4 bars into NUCLEAR
+        notes.append({"pitch": A3, "start_time": 16.0, "duration": 16.0, "velocity": 90})
+        notes.append({"pitch": E4, "start_time": 24.0, "duration": 8.0, "velocity": 110})
+        notes.append({"pitch": A4 if False else 69, "start_time": 28.0, "duration": 4.0, "velocity": 120})
+    return notes
+
+
+# --- CHOIR_NECRO ---------------------------------------------------------
+# Demonic chant cluster — A minor with the phrygian Bb on top. Sustained
+# 4-bar chord blocks. Plays at peaks for "ancient evil descending" vibe.
+def choir_necro_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    # Cluster pitches — A2, C3, E3, Bb3 (phrygian flat-2 on top = the dissonance)
+    CLUSTER = (A2, C3, E3, Bb3)
+    if s == 4:    # ANNIHILATION — 2× 4-bar holds, full cluster
+        for base in (0.0, 16.0):
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": base,
+                              "duration": 14.0, "velocity": 95})
+    elif s == 5:  # BREAKDOWN_BLOOD — choir descends A→G→F→E across the void
+        # 4 × 2-bar phrases — root descent
+        descent_roots = [A3, G3, F3, E3]
+        for i, root in enumerate(descent_roots):
+            base = i * 8.0
+            # Triad: root + minor 3rd + 5th + b2 above (phrygian color)
+            for offset in (0, 3, 7, 13):
+                notes.append({"pitch": root + offset, "start_time": base,
+                              "duration": 7.0, "velocity": 92})
+    elif s == 7:  # NUCLEAR — full cluster throughout + Bb major reinforcement
+        for base in (0.0, 16.0):
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": base,
+                              "duration": 14.0, "velocity": 100})
+        # Extra Bb-major triad layer at bar 5-6 — phrygian crash echo
+        for p in (Bb3, D4, F4):
+            notes.append({"pitch": p, "start_time": 16.0,
+                          "duration": 8.0, "velocity": 88})
+    return notes
+
+
+# --- SCREAM_BLEACH -------------------------------------------------------
+# Distorted vocal screams doubling the hoover peaks an octave above.
+# Plays the PEAK NOTES of the hoover riff only — sparse, punctuation-style.
+# These are the chopped vocal-stand-in stabs (replace synth with actual
+# vocal sample later).
+def scream_bleach_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    if s not in (4, 7):
+        return []
+    # Peak notes from HOOVER_4BAR + 12 (octave up, "in the rafters")
+    # bar 1 peak: E4 at t=2.0 -> E5 at t=2.0
+    # bar 3 peak: F4 at t=10.0 -> F5 at t=10.0
+    # Plus bar 4 final A2 -> A4 echo
+    for rep_base in (0.0, 16.0):
+        notes.append({"pitch": E4 + 12, "start_time": rep_base + 2.0,
+                      "duration": 2.0, "velocity": 115})
+        notes.append({"pitch": F4 + 12, "start_time": rep_base + 10.0,
+                      "duration": 2.0, "velocity": 118})
+        # Bar 4 echo — A4 short stab
+        notes.append({"pitch": A3 + 12, "start_time": rep_base + 14.0,
+                      "duration": 1.5, "velocity": 105})
+    if s == 7:  # NUCLEAR — additional final-bar screams ramping up
+        for i, p in enumerate([A3 + 12, Bb3 + 12, E4 + 12, F4 + 12]):
+            notes.append({"pitch": p, "start_time": 28.0 + i * 1.0,
+                          "duration": 0.8, "velocity": 110 + i * 4})
+    return notes
+
+
+# --- STAB_BWAAH ----------------------------------------------------------
+# Terror-orchestral stab hits — the classic gabber "BWAAH" punctuation
+# (think horror-film brass cluster). Single chord hits on key bars of
+# drop scenes. Dissonant cluster: root + minor 2nd + minor 3rd + tritone.
+def stab_bwaah_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    # Dissonant cluster around A: A2, Bb2, C3, Eb3 (root, b2, m3, tritone)
+    CLUSTER = (A2, Bb2, C3, 51)  # 51 = Eb3
+    if s == 3:    # HOOVER_DROP — hit on bar 1 + bar 5 (the "scene-defining" moments)
+        for base in (0.0, 16.0):
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": base,
+                              "duration": 1.5, "velocity": 115})
+    elif s == 4:  # ANNIHILATION — hits on bar 1, 3, 5, 7 (every 2 bars)
+        for bar in (0, 2, 4, 6):
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": float(bar*4),
+                              "duration": 1.2, "velocity": 118})
+    elif s == 7:  # NUCLEAR — hits on every bar 1 + 3 + final climax
+        for bar in range(8):
+            t = bar * 4
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": float(t),
+                              "duration": 1.2, "velocity": 120 if bar % 2 == 0 else 105})
+        # Final-bar BWAAH ramp: 4 hits 16th apart on last beat
+        for i in range(4):
+            for p in CLUSTER:
+                notes.append({"pitch": p, "start_time": 31.0 + i * 0.25,
+                              "duration": 0.2, "velocity": 110 + i * 4})
+    return notes
+
+
+# --- NOISE_OSSUARY -------------------------------------------------------
+# White noise crescendo across build scenes. Single sustained note that
+# swells via the Operator patch's filter sweep (loaded later). Plays
+# only in build scenes — IRON_MARCH crescendo into HOOVER_DROP, and
+# REBUILD_HAMMER crescendo into NUCLEAR.
+def noise_ossuary_pattern(s: int) -> list[dict]:
+    notes: list[dict] = []
+    # Pitch is arbitrary for noise — pick C3 as a stable trigger note
+    if s == 2:    # IRON_MARCH — single 32-beat swell
+        notes.append({"pitch": C3, "start_time": 0.0,
+                      "duration": 32.0, "velocity": 70})
+        # Add a final-bar punch — louder
+        notes.append({"pitch": C3, "start_time": 28.0,
+                      "duration": 4.0, "velocity": 120})
+    elif s == 6:  # REBUILD_HAMMER — staged swell that ramps to peak
+        notes.append({"pitch": C3, "start_time": 0.0,
+                      "duration": 16.0, "velocity": 75})
+        notes.append({"pitch": C3, "start_time": 16.0,
+                      "duration": 8.0, "velocity": 95})
+        notes.append({"pitch": C3, "start_time": 24.0,
+                      "duration": 8.0, "velocity": 120})
+    return notes
+
+
 # --- main ---------------------------------------------------------------
 def find_track_by_name(ch: LiveChannel, name: str) -> int | None:
     info = ch.get_session_info().result(timeout=5)
@@ -562,6 +837,15 @@ PATTERN_FNS = {
     "STAB_HARDCORE":   stab_pattern,
     "SIREN_FX":        siren_pattern,
     "VOX_SHOUT":       vox_pattern,
+    # depraved layer
+    "KICK_VEIN":       kick_vein_pattern,
+    "ACID_TONGUE":     acid_tongue_pattern,
+    "DRONE_CRYPT":     drone_crypt_pattern,
+    "REVERSE_VOID":    reverse_void_pattern,
+    "CHOIR_NECRO":     choir_necro_pattern,
+    "SCREAM_BLEACH":   scream_bleach_pattern,
+    "STAB_BWAAH":      stab_bwaah_pattern,
+    "NOISE_OSSUARY":   noise_ossuary_pattern,
 }
 
 # Suggested per-track volumes (gabber mixing keeps kick HOT, everything else
@@ -574,6 +858,15 @@ TRACK_VOLUMES = {
     "STAB_HARDCORE":   0.70,
     "SIREN_FX":        0.65,
     "VOX_SHOUT":       0.72,
+    # depraved — kept lower than core lanes so they don't crowd the wall
+    "KICK_VEIN":       0.78,
+    "ACID_TONGUE":     0.62,
+    "DRONE_CRYPT":     0.55,
+    "REVERSE_VOID":    0.58,
+    "CHOIR_NECRO":     0.60,
+    "SCREAM_BLEACH":   0.65,
+    "STAB_BWAAH":      0.72,
+    "NOISE_OSSUARY":   0.50,
 }
 
 
