@@ -55,16 +55,19 @@ SIDECHAIN_LANES = [
 ]
 
 # Pump settings — Live's Compressor uses normalized 0-1 for most params.
-# Threshold: lower = more ducking. ~0.20 ≈ -18 dB.
-# Ratio:     higher = harder pump. ~0.70 ≈ 6:1.
-# Attack:    lower = faster. 0.03 ≈ 1 ms (transient cuts through).
-# Release:   medium-fast — recover before next kick (316 ms at 190 BPM).
+# At 190 BPM kicks fire every 316 ms and ghost notes are tighter still,
+# so release MUST recover within ~80-100 ms or the comp pins to the
+# floor and the duck just sits there permanently.
+#   Threshold 0.30 (~-13 dB):  only peaks trigger, not every note
+#   Ratio     0.50 (~3:1):     light enough to release cleanly
+#   Attack    0.02 (~1 ms):    transient passes first
+#   Release   0.08 (~60-80ms): snaps back between kicks — the audible pump
 PUMP_SETTINGS = {
     "S/C On":      1.0,
-    "Threshold":   0.20,
-    "Ratio":       0.70,
-    "Attack":      0.03,
-    "Release":     0.28,
+    "Threshold":   0.30,
+    "Ratio":       0.50,
+    "Attack":      0.02,
+    "Release":     0.08,
     "Auto Release On/Off": 0.0,
     "Knee":        0.0,
     "S/C Listen":  0.0,
