@@ -71,7 +71,15 @@ PUMP_SETTINGS = {
     "Auto Release On/Off": 0.0,
     "Knee":        0.0,
     "S/C Listen":  0.0,
-    "S/C EQ On":   0.0,
+    # HP the sidechain key so the comp tracks the kick TRANSIENT, not the
+    # sustained sub tail (Drum Buss Boom on the kick made the source
+    # signal a constant low rumble — comp pinned to the floor with no
+    # release window). HP @ ~200 Hz lets only the click through.
+    "S/C EQ On":   1.0,
+    "S/C EQ Type": 1.0,    # high-pass
+    "S/C EQ Freq": 0.40,   # normalized — roughly 200 Hz
+    "S/C EQ Q":    0.30,   # low Q for a broad HP slope
+    "S/C EQ Gain": 0.0,
     "Dry/Wet":     1.0,
 }
 

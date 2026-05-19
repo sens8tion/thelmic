@@ -984,7 +984,8 @@ SAFE_DRUM_BUSS = {
     "Drive": 0.18,
     "Output": 0.92,
     "Transients": 0.5,
-    "Boom Amt": 0.30,
+    "Boom Amt": 0.20,    # was 0.30 — too much sustained sub holds sidechains down
+    "Boom Decay": 0.35,  # tail dies between kicks at 190 BPM (was 1.0 = endless)
     "Compressor On": 1.0,
     "Crunch": 0.12,
 }
