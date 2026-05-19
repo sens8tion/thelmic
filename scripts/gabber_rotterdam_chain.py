@@ -944,31 +944,31 @@ PATTERN_FNS = {
 # unity so the Saturator/Drum Buss after them doesn't push into clipping.
 # 0.85 ≈ 0 dB; these all sit at -2 to -8 dB.
 TRACK_VOLUMES = {
-    "KICK_ROTTERDAM":  0.82,
-    "PERC_INDUSTRIAL": 0.66,
-    "SUB_PUNCH":       0.78,
-    "HOOVER_LEAD":     0.68,
-    "STAB_HARDCORE":   0.65,
+    "KICK_ROTTERDAM":  0.88,
+    "PERC_INDUSTRIAL": 0.72,
+    "SUB_PUNCH":       0.85,   # bass needs presence — keep this hot
+    "HOOVER_LEAD":     0.72,
+    "STAB_HARDCORE":   0.70,
     "SIREN_FX":        0.65,
     "VOX_SHOUT":       0.72,
-    # depraved — factory presets in the chain are pre-mastered so headroom
-    # is at a premium. Pulled back from earlier hotter values.
-    "KICK_VEIN":       0.80,
-    "ACID_TONGUE":     0.72,
+    # depraved layer
+    "KICK_VEIN":       0.85,
+    "ACID_TONGUE":     0.75,
     "DRONE_CRYPT":     0.70,
     "REVERSE_VOID":    0.75,
     "CHOIR_NECRO":     0.75,
-    "SCREAM_BLEACH":   0.72,
-    "STAB_BWAAH":      0.74,
+    "SCREAM_BLEACH":   0.75,
+    "STAB_BWAAH":      0.78,
     "NOISE_OSSUARY":   0.68,
 }
 
-# Safe defaults for distortion stages when chained AFTER a hot factory
-# preset. Setting these on every Saturator/Drum Buss in the session is
-# the difference between gabber crunch and brick-walled clipping.
-# Apply via apply_safe_gain_staging() — auto-called when script runs full.
-SAFE_SATURATOR = {"Drive": 0.55, "Output": 0.70, "Threshold": 0.05}
-SAFE_DRUM_BUSS = {"Drive": 0.15, "Output": 0.70}
+# Safe defaults for distortion stages — calibrated for gabber crunch
+# without losing bass body. Earlier (Output 0.70, Threshold 0.05) was
+# too conservative — gutted the low end. Drive 0.60 still pushes the
+# saturator into character, Output 0.85 keeps body, Threshold back to
+# default 0.0 lets the bass fundamentals through clean.
+SAFE_SATURATOR = {"Drive": 0.60, "Output": 0.85, "Threshold": 0.0}
+SAFE_DRUM_BUSS = {"Drive": 0.18, "Output": 0.85}
 
 
 # Factory preset paths per depraved lane — these REPLACE the default
