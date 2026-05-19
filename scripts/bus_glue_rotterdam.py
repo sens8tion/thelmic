@@ -64,24 +64,36 @@ SIDECHAIN_LANES = [
 #   Release   0.08 (~60-80ms): snaps back between kicks — the audible pump
 PUMP_SETTINGS = {
     "S/C On":      1.0,
-    "Threshold":   0.30,
-    "Ratio":       0.50,
-    "Attack":      0.02,
-    "Release":     0.08,
+    # Threshold ~-10 dB so only the kick's peak transient triggers the duck.
+    # Lower threshold (-24 dB) made the comp see kick-post-FX as a constant
+    # signal above threshold and pinned GR to the floor.
+    "Threshold":   0.62,
+    "Ratio":       0.55,   # ~3:1 — heavy enough to read, light enough to release
+    # Attack ~5 ms lets the kick CLICK pass through the wash before the duck
+    # kicks in — that creates the audible "punch through then sink" pump
+    # rather than a simultaneous duck.
+    "Attack":      0.12,
+    "Release":     0.10,   # ~80 ms — recover between hits at 190 BPM
     "Auto Release On/Off": 0.0,
     "Knee":        0.0,
     "S/C Listen":  0.0,
-    # HP the sidechain key so the comp tracks the kick TRANSIENT, not the
-    # sustained sub tail (Drum Buss Boom on the kick made the source
-    # signal a constant low rumble — comp pinned to the floor with no
-    # release window). HP @ ~200 Hz lets only the click through.
+    # HP the sidechain KEY so the comp tracks the kick transient, not the
+    # sustained sub tail (Drum Buss Boom makes the kick post-FX a near-
+    # constant low signal — HP at ~200 Hz isolates the click that has
+    # a distinct attack-decay envelope).
     "S/C EQ On":   1.0,
     "S/C EQ Type": 1.0,    # high-pass
     "S/C EQ Freq": 0.40,   # normalized — roughly 200 Hz
-    "S/C EQ Q":    0.30,   # low Q for a broad HP slope
+    "S/C EQ Q":    0.30,
     "S/C EQ Gain": 0.0,
     "Dry/Wet":     1.0,
 }
+# NOTE: Live's LOM doesn't expose the routing-channel selector
+# (Pre FX / Post FX / Post Mixer), only the source-track type. The
+# sidechain key reads Post FX by default, which for the kick means
+# post Drum Buss / Saturator / internal compressor — already-compressed
+# signal that sits constantly above threshold. Higher threshold above
+# is the workaround; manual Pre FX selection in the UI is even cleaner.
 
 # Master Glue Compressor — gentle final bus glue. 2:1, slow attack,
 # auto release, threshold to grab ~1-2 dB GR on peaks.
