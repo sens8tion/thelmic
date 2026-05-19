@@ -984,11 +984,16 @@ SAFE_DRUM_BUSS = {
     "Drive": 0.18,
     "Output": 0.92,
     "Transients": 0.5,
-    "Boom Amt": 0.20,    # was 0.30 — too much sustained sub holds sidechains down
-    "Boom Decay": 0.35,  # tail dies between kicks at 190 BPM (was 1.0 = endless)
+    "Boom Amt": 0.30,    # full boom — body for the kick
+    "Boom Decay": 1.0,   # full decay — let the sub tail sustain
     "Compressor On": 1.0,
     "Crunch": 0.12,
 }
+# Note: the kick's sustained boom would normally pin the sidechain comps
+# to the floor (constant sub signal = no gaps between kicks). That's
+# handled in bus_glue_rotterdam.py by HP-filtering the sidechain KEY
+# at ~200 Hz so the comps track the kick transient, not the sub tail.
+# Two-layer separation: audible kick keeps its body, comps see clicks.
 
 
 # Factory preset paths per depraved lane — these REPLACE the default
