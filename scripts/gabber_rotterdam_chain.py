@@ -947,25 +947,26 @@ PATTERN_FNS = {
 # unity so the Saturator/Drum Buss after them doesn't push into clipping.
 # 0.85 ≈ 0 dB; these all sit at -2 to -8 dB.
 TRACK_VOLUMES = {
-    # v5 calibration — pulled back another notch after the EQ-zoning pass
-    # removed sub-rumble that was eating headroom. Cleaner spectrum means
-    # the audible content reads hotter, so faders sit lower.
-    "KICK_ROTTERDAM":  0.85,
-    "PERC_INDUSTRIAL": 0.72,
+    # v6 — punch dial-in. Kicks + perc + stab bumped for transient cut,
+    # wash lanes (sirens, drones, noise) pulled back to make room. Real
+    # punch is the gap between transient peak and surrounding wash; making
+    # everything loud just averages out the impact.
+    "KICK_ROTTERDAM":  0.88,
+    "PERC_INDUSTRIAL": 0.78,
     "SUB_PUNCH":       0.85,
     "HOOVER_LEAD":     0.72,
     "STAB_HARDCORE":   0.70,
-    "SIREN_FX":        0.66,
+    "SIREN_FX":        0.62,   # wash — pulled back
     "VOX_SHOUT":       0.72,
     # depraved layer
-    "KICK_VEIN":       0.83,
+    "KICK_VEIN":       0.86,
     "ACID_TONGUE":     0.75,
-    "DRONE_CRYPT":     0.70,
+    "DRONE_CRYPT":     0.65,   # wash — pulled back
     "REVERSE_VOID":    0.74,
     "CHOIR_NECRO":     0.74,
     "SCREAM_BLEACH":   0.74,
-    "STAB_BWAAH":      0.75,
-    "NOISE_OSSUARY":   0.70,
+    "STAB_BWAAH":      0.80,   # punctuation — bumped
+    "NOISE_OSSUARY":   0.65,   # wash — pulled back
 }
 
 # Safe defaults for distortion stages — calibrated for gabber loudness
@@ -976,7 +977,17 @@ TRACK_VOLUMES = {
 #   v4 Drive 0.60, Output 0.92, Threshold 0.00 <- current
 # Track volumes were also pushed up alongside v4 — see TRACK_VOLUMES.
 SAFE_SATURATOR = {"Drive": 0.60, "Output": 0.92, "Threshold": 0.0}
-SAFE_DRUM_BUSS = {"Drive": 0.18, "Output": 0.92}
+# Drum Buss tuned for punch — Transients +0.5 boosts attack, Boom 0.30
+# adds sub-body, internal Compressor engaged + tiny Crunch for character.
+# Used on KICK_ROTTERDAM + KICK_VEIN.
+SAFE_DRUM_BUSS = {
+    "Drive": 0.18,
+    "Output": 0.92,
+    "Transients": 0.5,
+    "Boom Amt": 0.30,
+    "Compressor On": 1.0,
+    "Crunch": 0.12,
+}
 
 
 # Factory preset paths per depraved lane — these REPLACE the default
