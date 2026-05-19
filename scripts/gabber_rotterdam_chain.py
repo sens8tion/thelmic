@@ -947,22 +947,25 @@ PATTERN_FNS = {
 # unity so the Saturator/Drum Buss after them doesn't push into clipping.
 # 0.85 ≈ 0 dB; these all sit at -2 to -8 dB.
 TRACK_VOLUMES = {
-    "KICK_ROTTERDAM":  0.92,
-    "PERC_INDUSTRIAL": 0.78,
-    "SUB_PUNCH":       0.90,
-    "HOOVER_LEAD":     0.78,
-    "STAB_HARDCORE":   0.76,
-    "SIREN_FX":        0.70,
-    "VOX_SHOUT":       0.78,
+    # v5 calibration — pulled back another notch after the EQ-zoning pass
+    # removed sub-rumble that was eating headroom. Cleaner spectrum means
+    # the audible content reads hotter, so faders sit lower.
+    "KICK_ROTTERDAM":  0.85,
+    "PERC_INDUSTRIAL": 0.72,
+    "SUB_PUNCH":       0.85,
+    "HOOVER_LEAD":     0.72,
+    "STAB_HARDCORE":   0.70,
+    "SIREN_FX":        0.66,
+    "VOX_SHOUT":       0.72,
     # depraved layer
-    "KICK_VEIN":       0.90,
-    "ACID_TONGUE":     0.80,
-    "DRONE_CRYPT":     0.75,
-    "REVERSE_VOID":    0.80,
-    "CHOIR_NECRO":     0.80,
-    "SCREAM_BLEACH":   0.80,
-    "STAB_BWAAH":      0.82,
-    "NOISE_OSSUARY":   0.74,
+    "KICK_VEIN":       0.83,
+    "ACID_TONGUE":     0.75,
+    "DRONE_CRYPT":     0.70,
+    "REVERSE_VOID":    0.74,
+    "CHOIR_NECRO":     0.74,
+    "SCREAM_BLEACH":   0.74,
+    "STAB_BWAAH":      0.75,
+    "NOISE_OSSUARY":   0.70,
 }
 
 # Safe defaults for distortion stages — calibrated for gabber loudness
