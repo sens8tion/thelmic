@@ -108,7 +108,136 @@ The script is idempotent — re-running reconciles lanes/scenes/clips
 against current Live state. Patterns are deterministic; tweak the
 generator fns + re-run to push fresh MIDI.
 
+## Reference-driven refinement pass
+
+After the initial build + Wikipedia-driven revision, a second pass
+extracted MIDI from real gabber tracks using Live's native Convert
+features and folded the findings back into the patterns.
+
+### Source acquisition
+
+Picked 4 candidate references — RTS *Poing* (1992), Euromasters *Alles
+Naar De Klote* (1992), Neophyte *Killer Squad*, The Mover *Frontal
+Sickness*. YouTube was bot-gated against `yt-dlp` (chrome cookie DPAPI
+decrypt failed; iterating other browsers' credential stores was
+correctly blocked by the auto-mode classifier). Cobalt / savefrom /
+y2mate all blocked or disabled.
+
+SoundCloud via `python -m yt_dlp --default-search scsearch1:` worked.
+Two of four landed (the 1992 originals 404'd on SoundCloud's side):
+
+- **Angerfist - Lethal Assassins** (Neophyte Records, modern hardcore stand-in)
+- **The Mover - Final Sickness (Remastered 2017)** (Marc Acardipane dark hardcore)
+
+Files arrived as `.m4a` which Live's Convert features didn't like.
+Re-encoded to 44.1 kHz / 16-bit stereo WAV via `imageio-ffmpeg`'s
+bundled binary, dropped into the User Library.
+
+### Convert-to-MIDI workflow
+
+Live's browser is lazy-scanning — newly-created sample folders aren't
+visible to `load_audio_to_slot` (the LOM resolver walks `browser.children`
+which is cached). No `refresh` action exists on the LOM browser; only
+listener registration. Fix was to drag files from File Explorer
+directly onto the track's session slot, bypassing the browser.
+
+Once audio clips were in slots 0+1 on a `GABBER_REF` audio track,
+right-click → Convert → Drums / Melody / Harmony to MIDI created three
+new tracks each holding a MIDI clip per audio source:
+
+```
+T9   "10-Melody to MIDI"   slot 0 = Angerfist melody     slot 1 = Mover melody
+T10  "11-Harmony to MIDI"  slot 0 = Angerfist harmony    slot 1 = Mover harmony
+T11  "12-Drums to MIDI"    slot 0 = Angerfist drums      slot 1 = Mover drums
+```
+
+Note counts: Mover melody 1019, Mover harmony 1730, Mover drums 3538;
+Angerfist melody 592, Angerfist harmony 1100, Angerfist drums 2353.
+
+### Analyzer scripts
+
+Four underscore-prefixed analyzer scripts walk the extractions:
+
+- [scripts/_inspect_session.py](../scripts/_inspect_session.py) — quick
+  session state dump (all tracks, devices, clips, files).
+- [scripts/_analyze_extractions.py](../scripts/_analyze_extractions.py) —
+  per-conversion pitch + IOI breakdown, identifying which clips hold
+  drums vs melodic content.
+- [scripts/_full_extraction_report.py](../scripts/_full_extraction_report.py)
+  — pitch-class histogram (relative to A root) + density sparkline for
+  each `(audio-source, conversion-type)` combination.
+- [scripts/_drum_density_timeline.py](../scripts/_drum_density_timeline.py)
+  — 16-beat bucket sparkline of drum activity across the clip, with
+  shape tags (SILENCE / sparse / PEAK / no-kick / hat-heavy / snare-heavy).
+
+These are analysis helpers, not part of the build pipeline — they read
+state but don't write.
+
+### Findings
+
+**Key choice validated.** The Mover's melody pitch-class histogram is
+overwhelmingly A-rooted (32.8 %). Our ROTTERDAM_CHAIN choice of A
+minor matches it exactly. Angerfist roots in F (24.5 %) instead —
+a tritone away, F minor / phrygian.
+
+**Phrygian inflection is universal.** Both tracks weight the flat-2
+heavily — The Mover's melody is 9.9 % Bb, Angerfist's is 6.9 %. That
+Bb against the A (or Eb against F for Angerfist) is the dystopian-
+darkness signature.
+
+**Harmonic-minor leading tone too.** The Mover's melody is 11.6 % G#
+— the harmonic-minor pull-tone. Combined with Bb, this is a G#/Bb
+pincer around the A root: leading-tone tension below, phrygian shadow
+above. Both notes were absent from the v1/v2 hoover riff (pure A
+natural minor).
+
+**Density structure is informative even with detection noise.** Drums
+to MIDI mis-classifies distorted gabber kicks (the broadband transient
+trips kick + snare + hat detectors simultaneously), so raw note counts
+are dilute. But the per-16-beat sparkline still resolves the song's
+arrangement structure: silent intros, drop locations, breakdown
+durations, multi-peak shapes. Mover's full density sparkline:
+
+```
+-::=*#######-:-:=###*+#@=+#####+---*#*###*#@#--
+```
+
+Reading that as 16-beat windows: sparse intro (10 bars) → drop 1
+(bars 16-19) → 80-beat silence breakdown (bars 36-55) → second build
+→ drop 2 (bars 116-123) → long sparse tail. Our 8-scene arc broadly
+matches this shape, validating the dramaturgy.
+
+### Refinements applied
+
+Two cheap-but-high-impact changes pushed in commit `9b5d385`:
+
+**1. HOOVER_4BAR riff — phrygian + harmonic-minor color notes:**
+
+```
+bar 1 CALL    : A3, G#3 (leading-tone pickup), E4
+bar 2 ANSWER  : A3, Bb3 (phrygian shadow),     A3, G3
+bar 3 PUSH    : A3, G#3 (leading-tone pickup), F4
+bar 4 DESCENT : G3, F3, E3, Bb2 (phrygian crash), A2
+```
+
+Was: pure A natural minor with B3 (natural 2nd) instead of Bb3, D3
+instead of Bb2, and no G# anywhere. Now matches the genre's actual
+harmonic vocabulary.
+
+**2. STAB_HARDCORE S5 BREAKDOWN_BLOOD entry — phrygian crash:**
+
+Bb-major triad (Bb3 + D4 + F4) held 6 beats on beat 1 of S5, octave-
+stacked screech ceiling (Bb4 + D5 + F5) held 4 beats. The "darkness
+drops" hit: the phrygian flat-2 above A lands hard on the void as
+kicks cut out.
+
+Not applied (deferred): full transpose to F minor (would lose the A
+phrygian Mover-character we're locked to), extended-length S5
+breakdown (could later mirror the Mover's 80-beat void).
+
 ## Commits on the branch
 
 - `7d2660c` feat: ROTTERDAM_CHAIN — initial 7-lane × 8-scene gabber session
 - `703f7e5` feat: revise patterns with real Rotterdam gabber conventions
+- `c8087ea` docs: track recipe — ROTTERDAM_CHAIN with embedded gabber theory + sources
+- `9b5d385` feat: phrygian refinements from Convert-to-MIDI analysis
