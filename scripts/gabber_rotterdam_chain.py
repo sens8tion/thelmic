@@ -891,15 +891,33 @@ TRACK_VOLUMES = {
     "STAB_HARDCORE":   0.70,
     "SIREN_FX":        0.65,
     "VOX_SHOUT":       0.72,
-    # depraved — kept lower than core lanes so they don't crowd the wall
-    "KICK_VEIN":       0.78,
-    "ACID_TONGUE":     0.62,
-    "DRONE_CRYPT":     0.55,
-    "REVERSE_VOID":    0.58,
-    "CHOIR_NECRO":     0.60,
-    "SCREAM_BLEACH":   0.65,
-    "STAB_BWAAH":      0.72,
-    "NOISE_OSSUARY":   0.50,
+    # depraved — pushed up to working levels after loading factory presets.
+    # (Operator default sine + low vol was inaudible; factory presets like
+    # 808 Pure / Acid Bass / Dark Whispers are properly mastered so we can
+    # sit closer to 0 dB.)
+    "KICK_VEIN":       0.88,   # matches main kick
+    "ACID_TONGUE":     0.78,
+    "DRONE_CRYPT":     0.70,
+    "REVERSE_VOID":    0.75,
+    "CHOIR_NECRO":     0.75,
+    "SCREAM_BLEACH":   0.80,
+    "STAB_BWAAH":      0.82,   # punctuation, needs to cut
+    "NOISE_OSSUARY":   0.68,
+}
+
+
+# Factory preset paths per depraved lane — these REPLACE the default
+# Operator-sine setup (which is dead quiet at low transposes). Existing
+# FX chains (Saturator / Drum Buss / Auto Filter / Reverb) are preserved.
+DEPRAVED_PRESETS = {
+    "KICK_VEIN":     ("sounds/Bass",       "808 Pure.adg"),
+    "ACID_TONGUE":   ("sounds/Bass",       "Acid Bass.adv"),
+    "DRONE_CRYPT":   ("sounds/Pad",        "Atmos Pad.adv"),
+    "REVERSE_VOID":  ("sounds/Effects",    "Air Raid Riser.adg"),
+    "CHOIR_NECRO":   ("sounds/Voices",     "Dark Whispers.adg"),
+    "SCREAM_BLEACH": ("sounds/Synth Lead", "Anger Management.adv"),
+    "STAB_BWAAH":    ("sounds/Brass",      "Abrasive Brass.adg"),
+    "NOISE_OSSUARY": ("sounds/Effects",    "Broadcast Noise.adg"),
 }
 
 
