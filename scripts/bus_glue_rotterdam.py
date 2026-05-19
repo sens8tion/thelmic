@@ -150,7 +150,7 @@ def main():
                     ch.set_device_param(t, comp_idx, pname, pval).result(timeout=5)
                 except Exception as e:
                     print(f"      {pname} fail: {e}")
-            # Wire sidechain to KICK_ROTTERDAM (by track index)
+            # Wire sidechain to KICK_ROTTERDAM (by track index) + Pre FX channel
             key_idx = name_to_idx.get(SIDECHAIN_KEY)
             if key_idx is None:
                 print(f"      sidechain skip: {SIDECHAIN_KEY} not found")
@@ -163,7 +163,15 @@ def main():
                     }).result(timeout=5)
                     print(f"      sidechain <- T{key_idx} {SIDECHAIN_KEY}")
                 except Exception as e:
-                    print(f"      sidechain fail: {e}")
+                    print(f"      sidechain source fail: {e}")
+                # Pre FX channel — sees the raw kick transient envelope,
+                # not the heavily-processed Post FX signal that would pin
+                # the comp to the floor.
+                try:
+                    ch.set_device_sidechain_channel(t, comp_idx, "Pre FX").result(timeout=5)
+                    print(f"      channel = Pre FX")
+                except Exception as e:
+                    print(f"      sidechain channel fail (RPC may not be deployed): {e}")
 
         # ============== Master Glue Compressor ==============
         print("\n=== Master Glue Compressor ===")

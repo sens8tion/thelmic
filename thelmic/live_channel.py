@@ -411,6 +411,23 @@ class LiveChannel:
             },
         )
 
+    def set_device_sidechain_channel(self, track_index: int, device_index: int, channel: str) -> Future:
+        """Set the sidechain CHANNEL (Pre FX / Post FX / Post Mixer / etc.).
+
+        The CHANNEL is the audio tap point on the source track. Pre FX
+        sees the raw instrument output before any device chain — this is
+        usually the right pick for pumping because the kick's transient
+        envelope is preserved. Post FX of a heavily-processed kick
+        becomes a near-constant signal that pins comps to the floor."""
+        return self._enqueue(
+            "set_device_sidechain_channel",
+            {
+                "track_index": track_index,
+                "device_index": device_index,
+                "channel": channel,
+            },
+        )
+
     def get_device_routing_options(self, track_index: int, device_index: int) -> Future:
         return self._enqueue(
             "get_device_routing_options",
