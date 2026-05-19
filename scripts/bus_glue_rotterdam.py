@@ -37,10 +37,15 @@ COMP_URI = "query:AudioFx#Compressor"
 GLUE_URI = "query:AudioFx#Glue%20Compressor"
 SIDECHAIN_KEY = "KICK_ROTTERDAM"   # sidechain source for all ducked lanes
 
-# Lanes to sidechain-compress (everything except kicks and snare-stack
-# perc). Order doesn't matter — we look up by name.
+# Lanes to sidechain-compress. EXCLUSIONS:
+#   - KICK_ROTTERDAM / KICK_VEIN: the kicks themselves, would self-duck
+#   - PERC_INDUSTRIAL: snare/clap lands on 2/4 = part of the kick wall;
+#     ducking it would gap the backbeat
+#   - SUB_PUNCH: kick-tied — plays at the SAME time as the kick, so
+#     sidechain ducks the sub exactly when it should be hitting WITH
+#     the kick. (Real gabber: the kick IS the bass, the sub reinforces
+#     it; both should peak together.)
 SIDECHAIN_LANES = [
-    "SUB_PUNCH",
     "HOOVER_LEAD",
     "STAB_HARDCORE",
     "SIREN_FX",
