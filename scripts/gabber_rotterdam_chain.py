@@ -822,30 +822,51 @@ def noise_ossuary_pattern(s: int) -> list[dict]:
 
 
 # --- main ---------------------------------------------------------------
-def find_track_by_name(ch: LiveChannel, name: str) -> int | None:
+def _scan_all_track_names(ch: LiveChannel) -> dict[str, int]:
+    """Single-pass: read every track's name in parallel, return name->idx map.
+    Avoids the O(L*T) trap of looking up each lane by name with a full
+    track scan each time."""
     info = ch.get_session_info().result(timeout=5)
     tc = info.get("track_count") or info.get("num_tracks") or 0
-    for i in range(tc):
-        ti = ch.get_track_info(i).result(timeout=3)
-        if ti.get("name", "") == name:
-            return i
-    return None
+    futs = [ch.get_track_info(i) for i in range(tc)]
+    out: dict[str, int] = {}
+    for i, f in enumerate(futs):
+        try:
+            ti = f.result(timeout=5)
+            nm = ti.get("name", "")
+            if nm:
+                out[nm] = i
+        except Exception:
+            pass
+    return out
+
+
+def find_track_by_name(ch: LiveChannel, name: str) -> int | None:
+    """Kept for back-compat with one-off scripts. Inside this script the
+    batched _scan_all_track_names is used instead."""
+    return _scan_all_track_names(ch).get(name)
 
 
 def ensure_lanes(ch: LiveChannel) -> list[int]:
-    """Create any missing lanes (by name). Return ordered list of indices."""
+    """Create any missing lanes (by name). Returns ordered list of indices.
+    Single-pass scan + only create what's missing."""
+    name_map = _scan_all_track_names(ch)
     indices: list[int] = []
     for name, color in zip(LANE_NAMES, LANE_COLORS):
-        t = find_track_by_name(ch, name)
+        t = name_map.get(name)
         if t is None:
+            # Create at end; re-scan to find the new track's index
             ch.create_midi_track(-1).result(timeout=10)
-            t = find_track_by_name(ch, name)
-            if t is None:
-                # New track lands at the end — find it
-                info = ch.get_session_info().result(timeout=5)
-                t = (info.get("track_count") or info.get("num_tracks")) - 1
+            name_map = _scan_all_track_names(ch)
+            # New track will have a default name like "N-MIDI" — pick the
+            # highest-index MIDI track that isn't already mapped to a lane
+            mapped = set(name_map.values()) & set(indices)
+            info = ch.get_session_info().result(timeout=5)
+            new_idx = (info.get("track_count") or 0) - 1
+            t = new_idx
             ch.set_track_name(t, name).result(timeout=5)
             ch.set_track_color(t, color).result(timeout=5)
+            name_map[name] = t  # update local cache
             print(f"  created T{t} '{name}' (color {color})")
         else:
             print(f"  reused T{t} '{name}'")
@@ -927,77 +948,138 @@ DEPRAVED_PRESETS = {
 
 
 def main():
+    import argparse, time
+    ap = argparse.ArgumentParser(
+        description="ROTTERDAM_CHAIN build script. Re-run is idempotent. "
+                    "Filter by --lanes / --scenes to iterate on subsets fast.")
+    ap.add_argument("--lanes", nargs="+", default=None,
+                    help="Only update these lane names (e.g. CHOIR_NECRO SCREAM_BLEACH). "
+                         "Default: all lanes.")
+    ap.add_argument("--scenes", nargs="+", type=int, default=None,
+                    help="Only update these scene indices (0-15). Default: all 16.")
+    ap.add_argument("--skip-tempo", action="store_true",
+                    help="Skip the scene tempo/name/color bake (saves 48 RPCs).")
+    ap.add_argument("--skip-volumes", action="store_true",
+                    help="Skip setting track volumes.")
+    args = ap.parse_args()
+
+    only_lanes = set(args.lanes) if args.lanes else None
+    only_scenes = set(args.scenes) if args.scenes else None
+    if only_lanes:
+        invalid = only_lanes - set(LANE_NAMES)
+        if invalid:
+            print(f"ERROR: unknown lane name(s): {invalid}")
+            print(f"  available: {LANE_NAMES}")
+            return
+
     ch = LiveChannel(enabled=True)
     ch.start()
     try:
+        t_start = time.monotonic()
         print("\n--- ROTTERDAM_CHAIN build ---")
+        if only_lanes:
+            print(f"  FILTER lanes: {sorted(only_lanes)}")
+        if only_scenes:
+            print(f"  FILTER scenes: {sorted(only_scenes)}")
+
         info = ch.get_session_info().result(timeout=5)
         print(f"start track count: {info.get('track_count') or info.get('num_tracks')}")
 
-        # 1. Lanes
+        # 1. Lanes — always reconcile (creates missing, cheap if already there)
         print("\n[1] ensuring lanes")
         lane_idx = ensure_lanes(ch)
         name_to_idx = dict(zip(LANE_NAMES, lane_idx))
 
         # 2. Scenes
-        print("\n[2] ensuring scenes")
-        ensure_scenes(ch, N_SCENES)
+        if not args.skip_tempo and not only_lanes and not only_scenes:
+            print("\n[2] ensuring scenes")
+            ensure_scenes(ch, N_SCENES)
 
-        # 3. Per-scene tempo bake + names + colors
-        print(f"\n[3] baking {BPM} BPM, names, colors into all {N_SCENES} scenes")
-        for s in range(N_SCENES):
-            ch.set_scene_tempo(s, BPM).result(timeout=5)
-            ch.set_scene_name(s, SCENE_NAMES[s]).result(timeout=5)
-            ch.set_scene_color(s, SCENE_COLORS[s]).result(timeout=5)
-            print(f"  S{s} -> name={SCENE_NAMES[s]!r} color={SCENE_COLORS[s]}")
+            # 3. Per-scene tempo bake + names + colors — submit in batch
+            print(f"\n[3] baking {BPM} BPM, names, colors into all {N_SCENES} scenes")
+            futs = []
+            for s in range(N_SCENES):
+                futs.append(ch.set_scene_tempo(s, BPM))
+                futs.append(ch.set_scene_name(s, SCENE_NAMES[s]))
+                futs.append(ch.set_scene_color(s, SCENE_COLORS[s]))
+            for f in futs:
+                try: f.result(timeout=10)
+                except Exception as e: print(f"  scene-meta RPC failed: {e}")
+        else:
+            print("\n[2-3] SKIPPED (filtered run)")
 
         # 4. Wipe + write clips per scene per lane.
         #
         # S0-S7 (base):     only CORE_LANES fire (original 7).
         # S8-S15 (depraved): CORE_LANES + DEPRAVED_LANES fire (all 15).
         #
-        # The depraved scenes mirror their base scene's pattern_idx
-        # (s_depraved - 8), so S8 mirrors S0, S15 mirrors S7. The core
-        # lanes play the SAME pattern in both bands — the difference is
-        # whether the depraved layer is layered on top.
+        # Pipelining strategy: enqueue all RPCs for a (scene,lane) without
+        # awaiting individually, then await per-lane. The bridge dispatcher
+        # is strictly serial (one send-recv per command on the same TCP
+        # socket), so we can't go FASTER than N × round-trip — but we can
+        # avoid Python-side blocking between calls. The biggest win is
+        # SKIPPING lanes/scenes when --lanes / --scenes filter is used.
         print("\n[4] writing clips (S0-S7 base, S8-S15 depraved)")
+        total_rpcs = 0
         for s in range(N_SCENES):
-            pattern_idx = s % N_BASE_SCENES  # S8 -> 0, S15 -> 7
+            if only_scenes and s not in only_scenes:
+                continue
+            pattern_idx = s % N_BASE_SCENES
             is_depraved_band = s >= N_BASE_SCENES
-            print(f"\n  S{s} {SCENE_NAMES[s]} (pattern_idx={pattern_idx}, depraved_band={is_depraved_band})")
+            print(f"\n  S{s} {SCENE_NAMES[s]} (pattern_idx={pattern_idx})")
+            scene_futs = []
             for name in LANE_NAMES:
+                if only_lanes and name not in only_lanes:
+                    continue
                 t = name_to_idx[name]
                 is_core = name in CORE_LANES
-                # Decide if this lane fires on this scene
-                if is_core:
-                    fires = True  # core lanes fire on every scene
-                else:
-                    fires = is_depraved_band  # depraved lanes only on S8-S15
-                # Always wipe first to handle re-runs that change the layout
-                try:
-                    ch.clear_clip(t, s).result(timeout=5)
-                except Exception:
-                    pass
+                fires = True if is_core else is_depraved_band
+                # Submit the clear (no await — failures are silent regardless)
+                scene_futs.append(("clear", name, ch.clear_clip(t, s)))
                 if not fires:
                     continue
-                ch.create_clip(t, s, SCENE_LEN).result(timeout=10)
-                ch.set_clip_name(t, s, f"{SCENE_NAMES[s]}_{name.lower()}").result(timeout=5)
-                # Color the clip to match the scene's dramaturgy
-                try:
-                    ch.set_clip_color(t, s, SCENE_COLORS[s]).result(timeout=3)
-                except Exception:
-                    pass
+                # Submit create + meta + notes without awaiting yet
+                scene_futs.append(("create", name,
+                                   ch.create_clip(t, s, SCENE_LEN)))
+                scene_futs.append(("name", name,
+                                   ch.set_clip_name(t, s, f"{SCENE_NAMES[s]}_{name.lower()}")))
+                scene_futs.append(("color", name,
+                                   ch.set_clip_color(t, s, SCENE_COLORS[s])))
                 notes = PATTERN_FNS[name](pattern_idx)
                 if notes:
-                    ch.add_notes_to_clip(t, s, notes).result(timeout=10)
-                print(f"    T{t:2d} {name:17s}: {len(notes):3d} notes")
+                    scene_futs.append(("notes", name,
+                                       ch.add_notes_to_clip(t, s, notes)))
+                print(f"    T{t:2d} {name:17s}: {len(notes):3d} notes queued")
+            # Await this scene's futures so we can report failures and don't
+            # let the queue grow unbounded
+            for tag, name, f in scene_futs:
+                try:
+                    f.result(timeout=15)
+                    total_rpcs += 1
+                except Exception as e:
+                    if tag != "clear" and tag != "color":  # these can fail silently
+                        print(f"    RPC failed [{tag} {name} S{s}]: {e}")
 
         # 5. Volumes
-        print("\n[5] setting track volumes")
-        for name, v in TRACK_VOLUMES.items():
-            t = name_to_idx[name]
-            ch.set_track_volume(t, v).result(timeout=5)
-            print(f"  T{t} {name}: {v}")
+        if not args.skip_volumes:
+            print("\n[5] setting track volumes")
+            vfuts = []
+            for name, v in TRACK_VOLUMES.items():
+                if only_lanes and name not in only_lanes:
+                    continue
+                t = name_to_idx[name]
+                vfuts.append((name, t, v, ch.set_track_volume(t, v)))
+            for name, t, v, f in vfuts:
+                try:
+                    f.result(timeout=5)
+                    print(f"  T{t} {name}: {v}")
+                except Exception as e:
+                    print(f"  T{t} {name}: vol set failed: {e}")
+        else:
+            print("\n[5] SKIPPED (--skip-volumes)")
+
+        elapsed = time.monotonic() - t_start
+        print(f"\nfired {total_rpcs} clip RPCs in {elapsed:.1f} s ({total_rpcs/max(elapsed, 0.01):.0f} rpc/s)")
 
         # 6. Summary
         print("\n--- FINAL TRACK LIST ---")
