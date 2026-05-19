@@ -37,7 +37,13 @@ from thelmic.live_channel import LiveChannel
 # --- constants ----------------------------------------------------------
 BPM        = 190.0
 SCENE_LEN  = 32.0    # 8 bars × 4 beats
-N_SCENES   = 8
+N_BASE_SCENES = 8    # the clean arc — core 7 lanes only
+N_SCENES      = 16   # base + depraved (S8-S15 mirror S0-S7 with depraved lanes)
+
+CORE_LANES = {"KICK_ROTTERDAM", "PERC_INDUSTRIAL", "SUB_PUNCH", "HOOVER_LEAD",
+              "STAB_HARDCORE", "SIREN_FX", "VOX_SHOUT"}
+DEPRAVED_LANES = {"KICK_VEIN", "ACID_TONGUE", "DRONE_CRYPT", "REVERSE_VOID",
+                  "CHOIR_NECRO", "SCREAM_BLEACH", "STAB_BWAAH", "NOISE_OSSUARY"}
 
 LANE_NAMES = [
     "KICK_ROTTERDAM",
@@ -61,7 +67,7 @@ LANE_COLORS = [3, 13, 1, 14, 5, 7, 10,
                # depraved: dark reds + purples + black-ish
                2, 11, 19, 17, 16, 4, 12, 18]
 
-SCENE_NAMES = [
+BASE_SCENE_NAMES = [
     "BLACKOUT",
     "KICK_ENTRY",
     "IRON_MARCH",
@@ -71,9 +77,24 @@ SCENE_NAMES = [
     "REBUILD_HAMMER",
     "NUCLEAR",
 ]
+# Depraved scene names — each pushes the equivalent base scene one notch
+# darker. Same arc shape, more menace per name.
+DEPRAVED_SCENE_NAMES = [
+    "BLACKOUT_BLEEDING",
+    "KICK_ENTRY_RABID",
+    "IRON_MARCH_BLISTERED",
+    "HOOVER_DROP_DEFILED",
+    "ANNIHILATION_UNSEALED",
+    "BREAKDOWN_RANCID",
+    "REBUILD_DEMONIC",
+    "NUCLEAR_TERMINAL",
+]
+SCENE_NAMES = BASE_SCENE_NAMES + DEPRAVED_SCENE_NAMES
+
 # Scene colors: dark/blue intro -> orange -> red peak -> black breakdown ->
-# orange rebuild -> magenta nuclear. Live's palette indices are 0-69.
-SCENE_COLORS = [
+# orange rebuild -> magenta nuclear. Depraved variants use darker / more
+# saturated palette indices. Live's palette indices are 0-69.
+BASE_SCENE_COLORS = [
     20,  # BLACKOUT          — dark navy
     14,  # KICK_ENTRY        — desaturated red
      6,  # IRON_MARCH        — orange
@@ -83,6 +104,18 @@ SCENE_COLORS = [
      6,  # REBUILD_HAMMER    — orange
      2,  # NUCLEAR           — hot magenta
 ]
+# Depraved scene colors — darker / more saturated variants
+DEPRAVED_SCENE_COLORS = [
+    19,  # BLACKOUT_BLEEDING     — black-purple
+    16,  # KICK_ENTRY_RABID      — deep crimson
+    17,  # IRON_MARCH_BLISTERED  — burnt orange
+     2,  # HOOVER_DROP_DEFILED   — hot magenta
+     4,  # ANNIHILATION_UNSEALED — blood red
+    19,  # BREAKDOWN_RANCID      — black-purple
+     4,  # REBUILD_DEMONIC       — blood red
+    18,  # NUCLEAR_TERMINAL      — black-magenta
+]
+SCENE_COLORS = BASE_SCENE_COLORS + DEPRAVED_SCENE_COLORS
 
 # Drum pads (Selectah Kit GM mapping)
 KICK   = 36
@@ -895,17 +928,35 @@ def main():
             ch.set_scene_color(s, SCENE_COLORS[s]).result(timeout=5)
             print(f"  S{s} -> name={SCENE_NAMES[s]!r} color={SCENE_COLORS[s]}")
 
-        # 4. Wipe + write clips per scene per lane
-        print("\n[4] writing clips")
+        # 4. Wipe + write clips per scene per lane.
+        #
+        # S0-S7 (base):     only CORE_LANES fire (original 7).
+        # S8-S15 (depraved): CORE_LANES + DEPRAVED_LANES fire (all 15).
+        #
+        # The depraved scenes mirror their base scene's pattern_idx
+        # (s_depraved - 8), so S8 mirrors S0, S15 mirrors S7. The core
+        # lanes play the SAME pattern in both bands — the difference is
+        # whether the depraved layer is layered on top.
+        print("\n[4] writing clips (S0-S7 base, S8-S15 depraved)")
         for s in range(N_SCENES):
-            print(f"\n  S{s} {SCENE_NAMES[s]}")
+            pattern_idx = s % N_BASE_SCENES  # S8 -> 0, S15 -> 7
+            is_depraved_band = s >= N_BASE_SCENES
+            print(f"\n  S{s} {SCENE_NAMES[s]} (pattern_idx={pattern_idx}, depraved_band={is_depraved_band})")
             for name in LANE_NAMES:
                 t = name_to_idx[name]
-                # Wipe any existing clip first
+                is_core = name in CORE_LANES
+                # Decide if this lane fires on this scene
+                if is_core:
+                    fires = True  # core lanes fire on every scene
+                else:
+                    fires = is_depraved_band  # depraved lanes only on S8-S15
+                # Always wipe first to handle re-runs that change the layout
                 try:
-                    ch.delete_clip(t, s).result(timeout=5)
+                    ch.clear_clip(t, s).result(timeout=5)
                 except Exception:
                     pass
+                if not fires:
+                    continue
                 ch.create_clip(t, s, SCENE_LEN).result(timeout=10)
                 ch.set_clip_name(t, s, f"{SCENE_NAMES[s]}_{name.lower()}").result(timeout=5)
                 # Color the clip to match the scene's dramaturgy
@@ -913,7 +964,7 @@ def main():
                     ch.set_clip_color(t, s, SCENE_COLORS[s]).result(timeout=3)
                 except Exception:
                     pass
-                notes = PATTERN_FNS[name](s)
+                notes = PATTERN_FNS[name](pattern_idx)
                 if notes:
                     ch.add_notes_to_clip(t, s, notes).result(timeout=10)
                 print(f"    T{t:2d} {name:17s}: {len(notes):3d} notes")
