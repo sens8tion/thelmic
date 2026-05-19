@@ -81,9 +81,12 @@ METAL  = 47
 HATC   = 42
 HATO   = 46
 
-# Am pitches — root octave centred at A2=45
-A1, E2, A2, B2, C3, D3, E3, F3, G3, A3, B3, C4, D4, E4, F4, G4 = (
-    33, 40, 45, 47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67
+# Am pitches — root octave centred at A2=45.
+# G#3 (56), Bb2 (46), Bb3 (58), Bb4 (70) added for the phrygian / harmonic-minor
+# pincer notes (per The Mover + Angerfist extraction analysis — both tracks
+# weight G# leading-tone and Bb flat-2 heavily around the A root).
+A1, E2, A2, Bb2, B2, C3, D3, E3, F3, G3, Gs3, A3, Bb3, B3, C4, D4, E4, F4, G4, Bb4 = (
+    33, 40, 45, 46, 47, 48, 50, 52, 53, 55, 56, 57, 58, 59, 60, 62, 64, 65, 67, 70
 )
 # Gabber sub root — A0 area for tectonic weight (kick-tied)
 A0_SUB = 21
@@ -113,25 +116,25 @@ CHORD_PROG = [AM_CHORD, AM_CHORD, F_CHORD, F_CHORD,
 # Bar 3: A3 dotted-quarter, A3 eighth, F4 half          (PUSH higher)
 # Bar 4: G3 eighth, F3 eighth, E3 eighth, D3 eighth, A2 half  (DESCENT)
 HOOVER_4BAR = [
-    # bar 1 — CALL
-    (0.0,  A3, 1.5,  108),
-    (1.5,  A3, 0.5,   95),
-    (2.0,  E4, 2.0,  115),
-    # bar 2 — ANSWER
-    (4.0,  A3, 1.0,  100),
-    (5.0,  B3, 0.5,   95),
-    (5.5,  A3, 0.5,   95),
-    (6.0,  G3, 2.0,  108),
-    # bar 3 — PUSH
-    (8.0,  A3, 1.5,  110),
-    (9.5,  A3, 0.5,   95),
-    (10.0, F4, 2.0,  118),
-    # bar 4 — DESCENT
-    (12.0, G3, 0.5,  100),
-    (12.5, F3, 0.5,  100),
-    (13.0, E3, 0.5,  100),
-    (13.5, D3, 0.5,  100),
-    (14.0, A2, 2.0,  105),
+    # bar 1 — CALL   (G#3 leading-tone pickup pulls into E4 peak)
+    (0.0,  A3,  1.5,  108),
+    (1.5,  Gs3, 0.5,   95),   # harmonic-minor pull
+    (2.0,  E4,  2.0,  115),
+    # bar 2 — ANSWER (Bb3 phrygian shadow before A3 + G3 resolution)
+    (4.0,  A3,  1.0,  100),
+    (5.0,  Bb3, 0.5,   95),   # phrygian flat-2
+    (5.5,  A3,  0.5,   95),
+    (6.0,  G3,  2.0,  108),
+    # bar 3 — PUSH   (G#3 pickup again, this time pulling up to F4 peak)
+    (8.0,  A3,  1.5,  110),
+    (9.5,  Gs3, 0.5,   95),
+    (10.0, F4,  2.0,  118),
+    # bar 4 — DESCENT (Bb2 phrygian crash before the A2 root rest)
+    (12.0, G3,  0.5,  100),
+    (12.5, F3,  0.5,  100),
+    (13.0, E3,  0.5,  100),
+    (13.5, Bb2, 0.5,  102),   # phrygian descent step
+    (14.0, A2,  2.0,  105),
 ]
 
 
@@ -404,8 +407,22 @@ def stab_pattern(s: int) -> list[dict]:
     """Supersaw stab DOUBLES THE HOOVER LEAD (octave above + chord skeleton
     under it). That's the classic gabber lead-stack — the same riff played
     on a different timbre creates the wall-of-sound peak. Plus power-chord
-    pads on bar 1 + 3 of each bar to fill harmonic body."""
+    pads on bar 1 + 3 of each bar to fill harmonic body.
+
+    Also fires a single phrygian Bb-major crash at the start of S5
+    BREAKDOWN_BLOOD — the dystopian "darkness drops" moment. Bb-D-F sits
+    a half-step above A and lands HARD on the void."""
     notes: list[dict] = []
+    if s == 5:
+        # Single Bb-major triad on beat 1 — Bb3 / D4 / F4, long held into the void
+        for p in (Bb3, D4, F4):
+            notes.append({"pitch": p, "start_time": 0.0,
+                          "duration": 6.0, "velocity": 112})
+        # Echo an octave up for the screech ceiling
+        for p in (Bb4, D4 + 12, F4 + 12):
+            notes.append({"pitch": p, "start_time": 0.0,
+                          "duration": 4.0, "velocity": 92})
+        return notes
     if s not in (4, 7):
         return []
     # Power-chord pads on 1 + 3 of each bar (root + 5th + octave)
