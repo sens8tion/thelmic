@@ -383,8 +383,19 @@ def perc_pattern(s: int) -> list[dict]:
     on key accents. The OH offbeat is the relentless drive — it's there in
     nearly every scene with kicks."""
     notes: list[dict] = []
-    if s in (0, 1):  # silent in BLACKOUT + KICK_ENTRY (austere intro)
+    if s == 0:       # BLACKOUT — totally silent (only sirens + drone)
         return []
+    if s == 1:       # KICK_ENTRY — austere, but mark structure with 4 single hits
+        # ONE metal hit per even bar (1, 3, 5, 7) — gives a "machine ticking"
+        # feel without breaking the pure-kick identity. Each hit accents the
+        # bar structure so 8 bars don't feel like one long block.
+        for bar in (0, 2, 4, 6):
+            notes.append({"pitch": METAL, "start_time": float(bar*4),
+                          "duration": 0.4, "velocity": 78 + bar * 2})
+        # Single OH on bar 8's last beat — a tension cue tipping into IRON_MARCH
+        notes.append({"pitch": HATO, "start_time": 31.0,
+                      "duration": 0.6, "velocity": 80})
+        return notes
     if s == 5:       # BREAKDOWN — kick out, hats keep the pace ticking
         # Metal pulse on every bar 1 + every bar 3 (twice per bar instead
         # of once — feels like a slow industrial machine still grinding)
@@ -518,10 +529,19 @@ def sub_pattern(s: int) -> list[dict]:
     notes: list[dict] = []
     if s in (0, 5):  # silent — let the void / hoover scream do the work
         return []
-    if s == 1:       # KICK_ENTRY — every kick gets a sub punch on root (Am)
-        for beat in range(32):
+    if s == 1:       # KICK_ENTRY — root for 4 bars, octave UP mid-scene, root again
+        # bars 0-3 (beats 0-15): A1 root
+        for beat in range(16):
             notes.append({"pitch": A0_SUB, "start_time": float(beat),
-                          "duration": 0.25, "velocity": 102})
+                          "duration": 0.25, "velocity": 100})
+        # bars 4-5 (beats 16-23): A2 — octave jump, marks mid-scene shift
+        for beat in range(16, 24):
+            notes.append({"pitch": A0_SUB + 12, "start_time": float(beat),
+                          "duration": 0.25, "velocity": 105})
+        # bars 6-7 (beats 24-31): back to A1, slight crescendo into S2
+        for beat in range(24, 32):
+            notes.append({"pitch": A0_SUB, "start_time": float(beat),
+                          "duration": 0.25, "velocity": 100 + (beat - 24) // 2})
     elif s == 2:     # IRON_MARCH — same austerity, still root
         for beat in range(32):
             notes.append({"pitch": A0_SUB, "start_time": float(beat),
@@ -590,8 +610,19 @@ def hoover_pattern(s: int) -> list[dict]:
     Same A-phrygian harmonic skeleton so the drops feel coherent, but
     each scene has its own rhythmic + melodic signature."""
     notes: list[dict] = []
-    if s in (0, 1, 2, 6):
+    if s in (0, 1, 6):
         return []
+    if s == 2:    # IRON_MARCH — bars 6-7 hoover TEASE (preview S3's call note)
+        # 2-bar lift: A3 short stab, then sustained E4 peak — sets up the
+        # listener for HOOVER_DROP's full statement on the next scene
+        notes.append({"pitch": A3, "start_time": 24.0, "duration": 0.5,  "velocity": 88})
+        notes.append({"pitch": A3, "start_time": 25.0, "duration": 0.5,  "velocity": 88})
+        notes.append({"pitch": E4, "start_time": 26.0, "duration": 2.0,  "velocity": 105})  # peak tease
+        notes.append({"pitch": A3, "start_time": 28.0, "duration": 0.5,  "velocity": 92})
+        notes.append({"pitch": Gs3, "start_time": 28.5, "duration": 0.5, "velocity": 90})
+        notes.append({"pitch": A3, "start_time": 29.0, "duration": 1.0,  "velocity": 95})
+        notes.append({"pitch": E4, "start_time": 30.0, "duration": 2.0,  "velocity": 112})  # final tease pull
+        return notes
     if s == 3:    # HOOVER_DROP — ENTRY phrase ×2 (single voice, lead statement)
         for base in (0.0, 16.0):
             _emit_riff(notes, base, phrase=HOOVER_ENTRY)
@@ -671,9 +702,18 @@ def siren_pattern(s: int) -> list[dict]:
     Sirens carry the tension across the no-kick scenes (0 + 5) and accent
     transitions in heavier scenes."""
     notes: list[dict] = []
-    if s == 0:    # BLACKOUT — full-scene siren, 2 swells
-        notes.append({"pitch": A3, "start_time": 0.0,  "duration": 16.0, "velocity": 90})
-        notes.append({"pitch": A3, "start_time": 16.0, "duration": 16.0, "velocity": 105})
+    if s == 0:    # BLACKOUT — 4-phase evolution across 8 bars
+        # Phase 1 (bars 0-1): low siren E3 fades in
+        notes.append({"pitch": E3, "start_time": 0.0,  "duration": 8.0, "velocity": 70})
+        # Phase 2 (bars 2-3): A3 enters, fifth above — chord-like
+        notes.append({"pitch": A3, "start_time": 8.0,  "duration": 8.0, "velocity": 85})
+        # Phase 3 (bars 4-5): Bb3 enters (phrygian flat-2) — dystonal tension
+        notes.append({"pitch": Bb3, "start_time": 16.0, "duration": 8.0, "velocity": 95})
+        # Phase 4 (bars 6-7): E4 high siren wails — climax of the void
+        notes.append({"pitch": E4, "start_time": 24.0, "duration": 8.0, "velocity": 108})
+        # Bridging short hits on bar 4 + bar 8 — punctuate transitions
+        notes.append({"pitch": A3, "start_time": 16.0, "duration": 1.0, "velocity": 110})
+        notes.append({"pitch": E4, "start_time": 28.0, "duration": 4.0, "velocity": 115})
     elif s == 1:  # KICK_ENTRY — silent, let the kick alone
         return []
     elif s == 2:  # IRON_MARCH — one swell on bars 5-8
@@ -838,10 +878,21 @@ def acid_tongue_pattern(s: int) -> list[dict]:
 # the peak chaos. Long held notes — 16+ beats each.
 def drone_crypt_pattern(s: int) -> list[dict]:
     notes: list[dict] = []
-    if s == 0:    # BLACKOUT — full-scene drone, A1 + Bb1 + A2 stack
-        for p in (A1, A1 + 1, A2):  # A1, Bb1, A2 — phrygian half-step stack
-            notes.append({"pitch": p, "start_time": 0.0,
-                          "duration": 32.0, "velocity": 80 if p != A2 else 70})
+    if s == 0:    # BLACKOUT — 4-phase phrygian stack accreting over 8 bars
+        # Phase 1 (bars 0-1): just A1 — single subterranean drone
+        notes.append({"pitch": A1, "start_time": 0.0, "duration": 8.0, "velocity": 70})
+        # Phase 2 (bars 2-3): A1 + Bb1 enters — phrygian half-step clash begins
+        notes.append({"pitch": A1, "start_time": 8.0, "duration": 8.0, "velocity": 75})
+        notes.append({"pitch": A1 + 1, "start_time": 8.0, "duration": 8.0, "velocity": 70})
+        # Phase 3 (bars 4-5): + A2 (octave up) — the stack thickens
+        notes.append({"pitch": A1, "start_time": 16.0, "duration": 8.0, "velocity": 80})
+        notes.append({"pitch": A1 + 1, "start_time": 16.0, "duration": 8.0, "velocity": 75})
+        notes.append({"pitch": A2, "start_time": 16.0, "duration": 8.0, "velocity": 70})
+        # Phase 4 (bars 6-7): full stack + E2 fifth — climax of the void
+        notes.append({"pitch": A1, "start_time": 24.0, "duration": 8.0, "velocity": 88})
+        notes.append({"pitch": A1 + 1, "start_time": 24.0, "duration": 8.0, "velocity": 82})
+        notes.append({"pitch": A2, "start_time": 24.0, "duration": 8.0, "velocity": 78})
+        notes.append({"pitch": E2, "start_time": 24.0, "duration": 8.0, "velocity": 85})
     elif s == 5:  # BREAKDOWN_BLOOD — A1 + Bb2 throughout, F2 enters bar 5
         notes.append({"pitch": A1,  "start_time": 0.0,  "duration": 32.0, "velocity": 90})
         notes.append({"pitch": Bb2, "start_time": 0.0,  "duration": 32.0, "velocity": 80})
