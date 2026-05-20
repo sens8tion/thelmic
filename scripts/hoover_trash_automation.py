@@ -2,8 +2,15 @@
 
 User exposed `B2 Trash Tilt Frequency` on the Trash plugin (T3 device 3)
 and asked for me to modulate it — but slowly so the changes are
-musical, not jittery. Five breakpoints per 32-beat scene = one
-inflection every ~2 bars.
+musical, not jittery.
+
+Live 12's clip-envelope API only exposes `insert_step(time, length, value)`
+which creates FLAT segments — it does NOT linearly interpolate between
+distant breakpoints. To produce a smooth-feeling ramp we have to
+pre-interpolate client-side: take our N anchor points, densify to
+32 breakpoints per clip (one per beat), each a 1-beat-long step at
+the linearly-interpolated value. Over an 8-bar/32-beat clip that
+reads as a clean ramp.
 
 Per-scene curve philosophy:
   S3 HOOVER_DROP   — first statement, somewhat clean: 0.30 -> 0.50
@@ -27,6 +34,35 @@ from thelmic.live_channel import LiveChannel
 
 HOOVER_TRACK_NAME = "HOOVER_LEAD"
 TRASH_PARAM = "B2 Trash Tilt Frequency"
+
+# Densify anchor breakpoints into N evenly-spaced steps spanning 0..CLIP_LEN
+CLIP_LEN = 32.0
+DENSE_STEPS = 32  # one step per beat — perceived as smooth ramp at 190 BPM
+
+
+def densify(anchors: list) -> list:
+    """Linearly interpolate the (t, v) anchors into DENSE_STEPS breakpoints
+    evenly spaced across [0, CLIP_LEN]."""
+    out = []
+    step = CLIP_LEN / DENSE_STEPS
+    for i in range(DENSE_STEPS):
+        t = i * step
+        # Find the two anchors bracketing t
+        before = anchors[0]
+        after = anchors[-1]
+        for j in range(len(anchors) - 1):
+            if anchors[j][0] <= t <= anchors[j+1][0]:
+                before, after = anchors[j], anchors[j+1]
+                break
+        t0, v0 = before
+        t1, v1 = after
+        if t1 == t0:
+            v = v0
+        else:
+            frac = (t - t0) / (t1 - t0)
+            v = v0 + frac * (v1 - v0)
+        out.append([t, v])
+    return out
 
 
 # Per-scene breakpoints: list of [time_in_beats, value] across 32-beat clip
@@ -130,17 +166,19 @@ def main():
         print(f"HOOVER_LEAD = T{hoover_idx}, Trash device = [{trash_idx}]")
         print(f"Target param: {TRASH_PARAM!r}\n")
 
-        # Apply each scene's envelope
-        for scene, bps in SCENE_CURVES.items():
+        # Apply each scene's envelope — densify anchors to 32 steps so the
+        # staircase reads as a smooth ramp at 190 BPM
+        for scene, anchors in SCENE_CURVES.items():
+            dense = densify(anchors)
             try:
                 ch.set_clip_envelope(
                     clip_track=hoover_idx, clip_index=scene,
                     target_track=hoover_idx, target_device=trash_idx,
-                    target_param=TRASH_PARAM, breakpoints=bps,
-                ).result(timeout=10)
-                lo = min(v for _, v in bps)
-                hi = max(v for _, v in bps)
-                print(f"  S{scene:2d}: envelope drawn, range {lo:.2f} - {hi:.2f}  ({len(bps)} bps)")
+                    target_param=TRASH_PARAM, breakpoints=dense,
+                ).result(timeout=15)
+                lo = min(v for _, v in dense)
+                hi = max(v for _, v in dense)
+                print(f"  S{scene:2d}: {len(anchors)} anchors -> {len(dense)} dense steps, range {lo:.2f}-{hi:.2f}")
             except Exception as e:
                 print(f"  S{scene}: FAILED: {e}")
     finally:

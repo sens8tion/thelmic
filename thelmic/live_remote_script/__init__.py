@@ -1479,20 +1479,25 @@ class ThelmicLive(ControlSurface):
         env = clip.create_automation_envelope(param)
         # Sort breakpoints by time
         bps = sorted([(float(bp[0]), float(bp[1])) for bp in breakpoints], key=lambda x: x[0])
-        # Prefer add_breakpoint (interpolated) so values actually animate
-        # at audio rate. Fall back to insert_step (staircase) if not
-        # available on this Live version.
+        # Live 12 only exposes insert_step(time, length, value) — flat
+        # segments. Use a length that spans until the NEXT breakpoint so
+        # consecutive segments tile the timeline. Callers pass densely-
+        # spaced breakpoints to approximate a smooth ramp via this
+        # staircase. Last breakpoint gets a default 1-beat length.
         n_written = 0
         last_err = None
-        for t, v in bps:
+        for i, (t, v) in enumerate(bps):
+            if i + 1 < len(bps):
+                length = max(0.001, bps[i + 1][0] - t)
+            else:
+                length = 1.0
             wrote = False
             for fn_name in ("add_breakpoint", "insert_step"):
                 fn = getattr(env, fn_name, None)
                 if fn is None: continue
                 try:
                     if fn_name == "insert_step":
-                        # length-needed variant: use small fixed length
-                        fn(t, 0.001, v)
+                        fn(t, length, v)
                     else:
                         fn(t, v)
                     n_written += 1
