@@ -34,7 +34,7 @@ from thelmic.live_channel import LiveChannel
 
 TRASH_PARAM = "B2 Trash Tilt Frequency"
 # Tracks to automate. Add more if user exposes Trash on additional lanes.
-TRACKS_TO_AUTOMATE = ("HOOVER_LEAD", "SIREN_FX")
+TRACKS_TO_AUTOMATE = ("HOOVER_LEAD", "SIREN_FX", "ACID_TONGUE")
 
 # Densify anchor breakpoints into N evenly-spaced steps spanning 0..CLIP_LEN
 CLIP_LEN = 32.0
@@ -108,9 +108,20 @@ SIREN_CURVES = {
     15: [[0.0, 0.70], [8.0, 1.00], [16.0, 0.40], [24.0, 1.00], [32.0, 1.00]],
 }
 
+# ACID_TONGUE is a depraved lane — fires only in S8-S15. It plays on
+# the depraved peaks: S12 (ANNIHILATION_UNSEALED) and S15 (NUCLEAR_TERMINAL).
+# Already a filthy squelch by nature, so curves sit high and oscillate
+# rather than ramping from clean to dirty — the 16th-note phrase wants
+# the trash to evolve under it, not bury it.
+ACID_CURVES = {
+    12: [[0.0, 0.40], [8.0, 1.00], [16.0, 0.15], [24.0, 1.00], [32.0, 0.70]],
+    15: [[0.0, 0.70], [8.0, 1.00], [16.0, 0.40], [24.0, 1.00], [32.0, 1.00]],
+}
+
 PER_TRACK_CURVES = {
     "HOOVER_LEAD": HOOVER_CURVES,
     "SIREN_FX":    SIREN_CURVES,
+    "ACID_TONGUE": ACID_CURVES,
 }
 
 
