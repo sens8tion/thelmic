@@ -1,0 +1,88 @@
+// field-osc.genexpr -- the self-morphing Pulse Field oscillator (gen~ codebox).
+//
+// STEREO: each channel runs the same self-morphing engine but with decorrelated
+// autonomous modulators (phase-offset), a width-scaled detune, and independent
+// grit. width 0 = identical L/R (dead centre); width 1 = wide, independently
+// wandering stereo. The waveform perpetually morphs even with params held; the
+// params govern HOW it morphs and its character. Feedback-FM + FM op +
+// waveshaping + high-passed grit = "all of the above".
+//
+// Canonical source; build_device.py embeds it into the [gen~] nested patcher.
+// Pulse Field branch -- self-morphing oscillator core (stereo).
+
+// --- params (set from field-synth.js) ---
+Param root(55, min=8, max=8000);
+Param morph(0.3, min=0, max=1);    // feedback-FM richness (center)
+Param chaos(0.3, min=0, max=1);    // erraticness of the autonomous wander
+Param rate(0.3, min=0, max=1);     // speed of the self-morphing
+Param bright(0.2, min=0, max=1);   // waveshaper drive
+Param fmamt(0.2, min=0, max=1);    // FM operator index
+Param spread(0.2, min=0, max=1);   // inharmonic detune of the FM operator
+Param width(0.5, min=0, max=1);    // stereo decorrelation (0 = mono/centre)
+Param amp(0.0, min=0, max=1);      // master = BPM rhythm envelope
+
+// --- state ---
+History sm_root(55), sm_morph(0.3), sm_chaos(0.3), sm_rate(0.3);
+History sm_bright(0.2), sm_fm(0.2), sm_spread(0.2), sm_amp(0), sm_width(0.5);
+History a1(0), a2(0), a3(0), walk(0.5);
+History phL(0), yfbL(0), mphL(0);
+History phR(0), yfbR(0), mphR(0);
+History lpL1(0), lpL2(0), lpR1(0), lpR2(0);
+
+// --- smooth controls (one-pole) ---
+sc = 0.002;
+sm_root   = sm_root   + sc * (root   - sm_root);
+sm_morph  = sm_morph  + sc * (morph  - sm_morph);
+sm_chaos  = sm_chaos  + sc * (chaos  - sm_chaos);
+sm_rate   = sm_rate   + sc * (rate   - sm_rate);
+sm_bright = sm_bright + sc * (bright - sm_bright);
+sm_fm     = sm_fm     + sc * (fmamt  - sm_fm);
+sm_spread = sm_spread + sc * (spread - sm_spread);
+sm_width  = sm_width  + sc * (width  - sm_width);
+sm_amp    = sm_amp    + 0.02 * (amp  - sm_amp);
+
+// --- shared autonomous modulators at irrational ratios (never realign) ---
+mr = (0.03 + sm_rate * 0.6) / samplerate;
+a1 = wrap(a1 + mr,            0, 1);
+a2 = wrap(a2 + mr * 1.6180340, 0, 1);
+a3 = wrap(a3 + mr * 0.4142136, 0, 1);
+walk = clip(walk + sm_chaos * 0.0008 * (sin(2*pi*a1) * sin(2*pi*a2) - 0.5*sin(2*pi*a3)) + 0.0004 * (0.5 - walk), 0, 1);
+
+wo = sm_width * 0.5;                       // stereo phase offset for R
+modratio = 1 + floor(sm_spread * 4);       // integer harmonic ratios -> less aliasing
+
+// ---------------- LEFT ----------------
+automL = clip(mix(0.5 + 0.5*(0.55*sin(2*pi*a1) + 0.30*sin(2*pi*a2) + 0.15*sin(2*pi*(a1+walk))), walk, 0.4), 0, 1);
+phL  = wrap(phL  + sm_root / samplerate, 0, 1);
+mphL = wrap(mphL + (sm_root * modratio) / samplerate, 0, 1);
+fbL = sm_morph * (0.25 + 0.55*automL) * 0.55;     // kept below the noisy regime
+sL = sin(2*pi*(phL + fbL*yfbL + sm_fm*1.6*sin(2*pi*mphL)));
+yfbL = sL;
+drvL = 1 + sm_bright*6*(0.6 + 0.4*automL);
+shapedL = tanh(drvL*sL) / tanh(drvL);
+outL = shapedL;
+
+// ---------------- RIGHT (phase-offset modulators, detuned, independent grit) -
+automR = clip(mix(0.5 + 0.5*(0.55*sin(2*pi*(a1+wo)) + 0.30*sin(2*pi*(a2+wo*0.7)) + 0.15*sin(2*pi*(a1+wo+walk))), walk, 0.4), 0, 1);
+rootR = sm_root * (1 + sm_width * 0.012);   // up to ~20 cents detune at full width
+phR  = wrap(phR  + rootR / samplerate, 0, 1);
+mphR = wrap(mphR + (rootR * modratio) / samplerate, 0, 1);
+fbR = sm_morph * (0.25 + 0.55*automR) * 0.55;     // kept below the noisy regime
+sR = sin(2*pi*(phR + fbR*yfbR + sm_fm*1.6*sin(2*pi*mphR)));
+yfbR = sR;
+drvR = 1 + sm_bright*6*(0.6 + 0.4*automR);
+shapedR = tanh(drvR*sR) / tanh(drvR);
+outR = shapedR;
+
+// --- tracking low-pass: closed when the dials are low (kills early fizz while
+// the low-rooted body passes), opens with brightness/FM/morph. 2-pole per
+// channel. ---
+open = clip(0.30 + 0.50*sm_bright + 0.30*sm_fm + 0.20*sm_morph, 0, 1);
+fc = 2500 * pow(2, open * 2.6);                 // ~2.5kHz (dark) .. ~15kHz (open)
+c = clip(6.2832 * fc / samplerate, 0.0005, 0.7);
+lpL1 = lpL1 + c*(outL - lpL1); lpL2 = lpL2 + c*(lpL1 - lpL2);
+lpR1 = lpR1 + c*(outR - lpR1); lpR2 = lpR2 + c*(lpR1 - lpR2);
+
+// --- output (BPM rhythm envelope on amp) ---
+out1 = clip(sm_amp * lpL2, -1, 1);
+out2 = clip(sm_amp * lpR2, -1, 1);
