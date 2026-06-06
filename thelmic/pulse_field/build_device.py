@@ -265,6 +265,62 @@ def build_impact(out_path, js_name="impact-synth.js"):
     return out_path
 
 
+WOBBLE_PARAMS = [
+    ("root", 0.0, 1.0, 0.5),       # bass pitch (exp ~30-150Hz)
+    ("tone", 0.0, 1.0, 0.5),       # sub sine <-> reese
+    ("cutoff", 0.0, 1.0, 0.4),     # base filter cutoff
+    ("wob", 0.0, 1.0, 0.6),        # wobble depth
+    ("reso", 0.0, 1.0, 0.45),      # resonance
+    ("density", 0.0, 1.0, 0.4),    # wobble speed
+    ("entropy", 0.0, 1.0, 0.2),    # period (1..16 bars) + variation
+    ("seed", 0.0, 1.0, 0.2),       # regen
+    ("level", 0.0, 1.0, 0.85),
+]
+
+
+def build_wobble(out_path, js_name="impact-synth.js"):
+    """Bass wobble: a reese/sub bass through a resonant lowpass swept by a
+    tempo-locked wobble whose rate follows a stable, seeded per-beat pattern
+    repeating over 1..16 bars (length from entropy). Transport-locked via
+    [phasor~ 1n]. Reuses the generic param-bridge js.
+    """
+    out_path = Path(out_path)
+    b = PatchBuilder("instrument")
+
+    js = b.obj("js " + js_name, 40, 360, 150, 2, 1, outtypes=[""],
+               extra={"saved_object_attributes": {"filename": js_name,
+                                                   "parameter_enable": 0}})
+    phasor = b.obj("phasor~ 1n", 40, 410, 90, 2, 1, outtypes=["signal"])
+    thisdev = b.obj("live.thisdevice", 240, 270, 100, 0, 3,
+                    outtypes=["bang", "", ""])
+    startm = b.obj("t 1", 240, 300, 40, 1, 1, outtypes=[""])
+    metro = b.obj("metro 50", 240, 330, 70, 2, 1, outtypes=["bang"])
+    b.link(thisdev, 0, startm, 0)
+    b.link(startm, 0, metro, 0)
+    b.link(metro, 0, js, 0)
+    b.link(thisdev, 0, js, 1)
+
+    x = 40
+    for (name, lo, hi, init) in WOBBLE_PARAMS:
+        d = b.dial(name, x, 40, lo, hi, init)
+        pp = b.obj("prepend " + name, x, 300, 90, 1, 1, outtypes=[""])
+        b.link(d, 0, pp, 0); b.link(pp, 0, js, 0)
+        x += 70
+
+    gen = b.obj("gen~ @oversample 2", 40, 460, 170, 1, 1, outtypes=["signal"],
+                extra={"patcher": gen_patcher("wobble-osc.genexpr", ins=1, outs=1)})
+    b.link(phasor, 0, gen, 0)
+    b.link(js, 0, gen, 0)
+    lim = b.obj("clip~ -1. 1.", 40, 500, 80, 3, 1)
+    b.link(gen, 0, lim, 0)
+    b.link(lim, 0, PLUGOUT, 0)
+    b.link(lim, 0, PLUGOUT, 1)
+
+    b.save(out_path)
+    shutil.copyfile(SRC_DIR / js_name, out_path.parent / js_name)
+    return out_path
+
+
 if __name__ == "__main__":
     import sys
     out = sys.argv[1] if len(sys.argv) > 1 else "PF Continuum.amxd"

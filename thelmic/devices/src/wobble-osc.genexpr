@@ -1,0 +1,75 @@
+// wobble-osc.genexpr -- the Pulse Field BASS WOBBLE engine (gen~ codebox).
+//
+// A reese/sub bass through a resonant lowpass whose cutoff is swept by a
+// tempo-locked wobble LFO. The wobble RATE changes per beat following a STABLE,
+// deterministic pattern (function of density/entropy/seed) that repeats over a
+// period of 1, 2, 4, 8 or 16 bars (length from entropy). Not a simple static
+// LFO — identifiably rhythmical, and it loops the same until you move a knob or
+// nudge `seed` (regen).
+//
+//   density -> wobble speed (1/4 .. 1/32 wobbles per beat)
+//   entropy -> pattern period length (1..16 bars) + per-beat rate variation
+//   seed    -> regen (a different fixed wobble pattern)
+//
+// in1 = bar phasor ([phasor~ 1n], transport-locked, 0..1 per bar).
+// Pulse Field branch -- bass wobble.
+
+Param root(0.5, min=0, max=1);      // bass pitch (0..1 -> ~30..150 Hz exp)
+Param tone(0.5, min=0, max=1);      // 0 = sub sine, 1 = reese (detuned saws)
+Param cutoff(0.4, min=0, max=1);    // base filter cutoff (exp)
+Param wob(0.6, min=0, max=1);       // wobble depth (cutoff sweep amount)
+Param reso(0.45, min=0, max=1);     // filter resonance
+Param density(0.4, min=0, max=1);   // wobble speed
+Param entropy(0.2, min=0, max=1);   // pattern period (1..16 bars) + variation
+Param seed(0.2, min=0, max=1);      // regen
+Param level(0.85, min=0, max=1);
+
+History sph1(0), sph2(0), sph3(0), lastbar(0), barIdx(0), ic1(0), ic2(0);
+
+ph = in1;
+
+// ---- bar counting for the multi-bar pattern period ----
+barwrap = (ph < lastbar) ? 1 : 0;
+lastbar = ph;
+if (barwrap) { barIdx = barIdx + 1; }
+
+beatInBar = floor(ph * 4);                       // 0..3
+beatPhase = ph * 4 - beatInBar;                  // 0..1 within the beat
+periodBars = pow(2, floor(entropy * 4 + 0.5));   // 1,2,4,8,16
+bidx = barIdx - floor(barIdx / periodBars) * periodBars;   // barIdx % periodBars
+slot = bidx * 4 + beatInBar;                     // beat slot in the period
+
+// ---- per-beat wobble rate (stable, seeded) ----
+hv = sin((slot + 1) * 12.9898 + seed * 101.7 + 4.1) * 43758.5453;
+hsh = hv - floor(hv);                            // deterministic hash [0,1)
+expo = clip(floor(density * 3 + (hsh - 0.5) * entropy * 3 + 0.5), 0, 3);
+R = pow(2, expo);                                // 1,2,4,8 wobbles per beat
+wphase = beatPhase * R - floor(beatPhase * R);
+lfo = (1 - cos(2 * pi * wphase)) * 0.5;          // 0..1 wobble
+
+// ---- bass oscillator: sub anchor + wide-detuned 3-saw reese ----
+rootHz = 30 * pow(5, root);                      // ~30..150 Hz
+sph1 = wrap(sph1 + rootHz / samplerate, 0, 1);
+sph2 = wrap(sph2 + rootHz * 1.013 / samplerate, 0, 1);   // +~22 cents
+sph3 = wrap(sph3 + rootHz * 0.991 / samplerate, 0, 1);   // -~16 cents
+sub = sin(2 * pi * sph1);
+reese = ((2 * sph1 - 1) + (2 * sph2 - 1) + (2 * sph3 - 1)) * 0.333;
+// sub anchors the low end; tone adds reese harmonics -> timbre change, not level
+osc = sub * (1 - 0.5 * tone) + reese * tone;
+
+// ---- resonant lowpass (TPT state-variable) swept by the wobble ----
+cutBase = 60 * pow(120, cutoff);                 // ~60..7200 Hz
+cutHz = clip(cutBase * exp(wob * 3.5 * lfo), 20, samplerate * 0.45);
+g = tan(pi * cutHz / samplerate);
+k = 2 - 1.9 * reso;                              // resonance (res 1 -> k 0.1)
+a1 = 1 / (1 + g * (g + k));
+a2 = g * a1;
+a3 = g * a2;
+v3 = osc - ic2;
+v1 = a1 * ic1 + a2 * v3;
+v2 = ic2 + a2 * ic1 + a3 * v3;
+ic1 = 2 * v1 - ic1;
+ic2 = 2 * v2 - ic2;
+lp = v2;
+
+out1 = clip(level * tanh(lp * 1.3), -1, 1);      // mild drive
