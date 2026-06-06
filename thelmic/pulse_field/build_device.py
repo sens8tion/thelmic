@@ -140,19 +140,21 @@ def build_field_synth(out_path, js_name="field-synth.js"):
     out_path = Path(out_path)
     b = PatchBuilder("instrument")
 
-    # control brain: field -> gen params (single outlet of "name value" msgs)
-    js = b.obj("js " + js_name, 40, 360, 150, 1, 1, outtypes=[""],
+    # control brain: inlet 0 = tick + param msgs; inlet 1 = live.thisdevice init
+    js = b.obj("js " + js_name, 40, 360, 150, 2, 1, outtypes=[""],
                extra={"saved_object_attributes": {"filename": js_name,
                                                    "parameter_enable": 0}})
 
-    # clock: device-load -> metro -> js bang (emits params every tick)
+    # clock: device-load -> metro -> js inlet 0 (tick). live.thisdevice ALSO bangs
+    # js inlet 1 to run LiveAPI init on the low-priority thread.
     thisdev = b.obj("live.thisdevice", 240, 270, 100, 0, 3,
                     outtypes=["bang", "", ""])
     startm = b.obj("t 1", 240, 300, 40, 1, 1, outtypes=[""])
-    metro = b.obj("metro 20", 240, 330, 70, 2, 1, outtypes=["bang"])
+    metro = b.obj("metro 10", 240, 330, 70, 2, 1, outtypes=["bang"])
     b.link(thisdev, 0, startm, 0)
     b.link(startm, 0, metro, 0)
     b.link(metro, 0, js, 0)
+    b.link(thisdev, 0, js, 1)              # init LiveAPI (low-priority)
 
     # automatable params: 8 field dims + root + gain -> [prepend] -> js
     x = 40
