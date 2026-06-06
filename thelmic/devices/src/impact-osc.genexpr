@@ -47,11 +47,13 @@ if (s != lastS) {
     fire = (isBeat == 1) ? 1 : ((density > thr) ? 1 : 0);
 
     if (fire == 1) {
-        // timing displacement: window grows with entropy; off is deterministic
+        // timing displacement: window grows with entropy; off is deterministic.
+        // BEATS stay dead on the grid (the four-on-the-floor anchor) so all bands
+        // line up; only the in-between hits get pushed before/after.
         hv2 = sin((s + 1) * 39.42 + seed * 57.31 + 1.7) * 1733.13;
         off = (hv2 - floor(hv2)) * 2 - 1;               // [-1, 1]
-        w = entropy * 0.5 * steplen;
-        delay = clip(w * (1 + off), 0, steplen - 1);    // 0 at entropy 0 = on grid
+        w = (isBeat == 1) ? 0 : entropy * 0.5 * steplen;
+        delay = clip(w * (1 + off), 0, steplen - 1);
         pend = delay + 1;
     }
 }

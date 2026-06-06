@@ -230,7 +230,7 @@ def build_impact(out_path, js_name="impact-synth.js"):
 
     # transport-locked bar phasor (0..1 per bar); gen derives the 16th grid +
     # a stable per-step pattern from it.
-    phasor = b.obj("phasor~ 1n", 40, 410, 90, 2, 1, outtypes=["signal"])
+    phasor = b.obj("phasor~ 1n @lock 1", 40, 410, 120, 2, 1, outtypes=["signal"])
 
     # clock for the bridge + low-priority init
     thisdev = b.obj("live.thisdevice", 240, 270, 100, 0, 3,
@@ -290,7 +290,7 @@ def build_wobble(out_path, js_name="impact-synth.js"):
     js = b.obj("js " + js_name, 40, 360, 150, 2, 1, outtypes=[""],
                extra={"saved_object_attributes": {"filename": js_name,
                                                    "parameter_enable": 0}})
-    phasor = b.obj("phasor~ 1n", 40, 410, 90, 2, 1, outtypes=["signal"])
+    phasor = b.obj("phasor~ 1n @lock 1", 40, 410, 120, 2, 1, outtypes=["signal"])
     thisdev = b.obj("live.thisdevice", 240, 270, 100, 0, 3,
                     outtypes=["bang", "", ""])
     startm = b.obj("t 1", 240, 300, 40, 1, 1, outtypes=[""])
