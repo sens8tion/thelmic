@@ -1,0 +1,85 @@
+// impact-osc.genexpr -- the Pulse Field IMPACT engine (gen~ codebox).
+//
+// A shaped impact/rhythm-base layer (NOT MIDI). in1 = a bar phasor ([phasor~ 1n]
+// locked to Live's transport) giving 0..1 across the bar; the 16th grid is
+// floor(in1*16). The pattern is DETERMINISTIC and STABLE — a fixed function of
+// (density, entropy, seed) — so it loops the same every bar and only changes
+// when you move a knob or nudge `seed` (= regen). It does NOT drift on its own.
+//
+//   density 0      -> four-on-the-floor (the 4 beats only)
+//   density up     -> adds hits, filling musically (low entropy) or scattered
+//                     across the bar (high entropy)
+//   entropy        -> morphs added-hit placement from musical -> scattered, AND
+//                     displaces timing before/after the grid
+//   seed           -> regen: a different fixed pattern
+//
+// One parametric voice, retuned per band (SUB sine / MID 80-100Hz hit / HIGH
+// ticks+shimmer) via tune/tone/punch/decay.
+// Pulse Field branch -- impact/rhythm base.
+
+Param tune(0.4, min=0, max=1);      // band centre (0..1 -> 20Hz..8kHz exp)
+Param tone(0.0, min=0, max=1);      // 0 = pure sine body, 1 = ticks/shimmer
+Param punch(0.5, min=0, max=1);     // pitch-envelope depth (thump)
+Param decay(0.3, min=0, max=1);     // impact length
+Param density(0.35, min=0, max=1);  // hit count: 0 = four-on-the-floor
+Param entropy(0.0, min=0, max=1);   // placement scatter + before/after timing
+Param seed(0.2, min=0, max=1);      // regen: pick a different fixed pattern
+Param level(0.8, min=0, max=1);
+
+History lastS(-1), cnt(0), steplen(11025);
+History pend(0), env(0), penv(0), oscph(0), nz1(0);
+
+// ---- 16th grid from the transport-locked bar phasor ----
+ph = in1;
+cnt = cnt + 1;
+s = floor(ph * 16);                 // 16th index within the bar (0..15)
+
+if (s != lastS) {
+    steplen = cnt; cnt = 0;         // samples in the step just finished
+    lastS = s;
+
+    // deterministic fire decision (stable per density/entropy/seed)
+    isBeat = (s % 4 == 0) ? 1 : 0;                       // the 4 beats
+    musical = (s % 4 == 2) ? 0.34 : 0.67;               // & = priority, e/a = last
+    hv = sin((s + 1) * 12.9898 + seed * 101.7 + 4.1) * 43758.5453;
+    scat = hv - floor(hv);                              // deterministic hash [0,1)
+    thr = mix(musical, scat, entropy);                  // musical -> scattered
+    fire = (isBeat == 1) ? 1 : ((density > thr) ? 1 : 0);
+
+    if (fire == 1) {
+        // timing displacement: window grows with entropy; off is deterministic
+        hv2 = sin((s + 1) * 39.42 + seed * 57.31 + 1.7) * 1733.13;
+        off = (hv2 - floor(hv2)) * 2 - 1;               // [-1, 1]
+        w = entropy * 0.5 * steplen;
+        delay = clip(w * (1 + off), 0, steplen - 1);    // 0 at entropy 0 = on grid
+        pend = delay + 1;
+    }
+}
+
+// ---- fire the pending impact at its displaced time ----
+trig = 0;
+if (pend > 0) {
+    pend = pend - 1;
+    if (pend <= 0) { trig = 1; }
+}
+if (trig) { env = 1; penv = 1; }
+
+// ---- envelopes ----
+decaySec = mix(0.03, 0.6, decay);
+envCoef = exp(-1.0 / (decaySec * samplerate));
+penvCoef = exp(-1.0 / (0.018 * samplerate));
+env = env * envCoef;
+penv = penv * penvCoef;
+
+// ---- synthesis ----
+base = 20 * pow(400, tune);                   // exp tune: 20Hz (0) .. 8kHz (1)
+freq = base * (1 + punch * 3.0 * penv);       // pitch drop = thump/punch
+oscph = wrap(oscph + freq / samplerate, 0, 1);
+sine = sin(2 * pi * oscph);
+
+n = noise();                                  // audio-rate tick texture (fine to be live)
+hpn = n - nz1;
+nz1 = n;
+
+body = sine * (1 - tone) + hpn * tone;
+out1 = clip(level * env * body, -1, 1);
