@@ -29,6 +29,8 @@ var F = {
 var root = 55.0;
 var gain = 0.85;
 var width = 0.5;
+var tilt = 0.0;     // amplitude tilt across the period (front/flat/back)
+var span = 0.0;     // tilt period: 1,2,4,8 bars
 
 var TICK_MS = 10;
 var freeBeats = 0;
@@ -59,6 +61,8 @@ function setParam(name, value) {
     else if (name === "root") { root = Math.max(8, value); }
     else if (name === "gain") { gain = clamp(value, 0, 1); }
     else if (name === "width") { width = clamp(value, 0, 1); }
+    else if (name === "tilt") { tilt = clamp(value, -1, 1); }
+    else if (name === "span") { span = clamp(value, 0, 1); }
 }
 
 // LOW-PRIORITY init (from live.thisdevice on inlet 1): tempo observer + this
@@ -133,6 +137,8 @@ function tick() {
     emit("fmamt", clamp(0.6 * F.discomfort + 0.4 * F.density, 0, 1));
     emit("spread", clamp(0.8 * instab + 0.2 * F.discomfort, 0, 1));
     emit("width", width);
+    emit("tilt", tilt);
+    emit("span", span);
     emit("amp", gain * gate * accent);
 }
 

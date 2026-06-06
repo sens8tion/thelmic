@@ -180,12 +180,23 @@ def build_field_synth(out_path, js_name="field-synth.js"):
     b.link(gaind, 0, gpp, 0); b.link(gpp, 0, js, 0); x += 70
     widthd = b.dial("width", x, 40, 0.0, 1.0, 0.5)  # stereo decorrelation
     wpp = b.obj("prepend width", x, 300, 90, 1, 1, outtypes=[""])
-    b.link(widthd, 0, wpp, 0); b.link(wpp, 0, js, 0)
+    b.link(widthd, 0, wpp, 0); b.link(wpp, 0, js, 0); x += 70
+    tiltd = b.dial("tilt", x, 40, -1.0, 1.0, 0.0)   # front/flat/back amplitude tilt
+    tpp = b.obj("prepend tilt", x, 300, 90, 1, 1, outtypes=[""])
+    b.link(tiltd, 0, tpp, 0); b.link(tpp, 0, js, 0); x += 70
+    spand = b.dial("span", x, 40, 0.0, 1.0, 0.0)    # tilt period: 1,2,4,8 bars
+    spp = b.obj("prepend span", x, 300, 90, 1, 1, outtypes=[""])
+    b.link(spand, 0, spp, 0); b.link(spp, 0, js, 0)
+
+    # transport-locked bar phasor -> gen in1 (drives the amplitude-tilt period)
+    phasor = b.obj("phasor~ 1n @lock 1", 240, 410, 120, 2, 1, outtypes=["signal"])
 
     # the self-morphing STEREO oscillator (embedded gen code) -> limiters -> Live.
-    # @oversample 4 tames aliasing fizz from the feedback-FM / waveshaper.
+    # @oversample 8 tames aliasing fizz from the feedback-FM / waveshaper.
     gen = b.obj("gen~ @oversample 8", 40, 440, 160, 1, 2,
-                outtypes=["signal", "signal"], extra={"patcher": gen_patcher()})
+                outtypes=["signal", "signal"],
+                extra={"patcher": gen_patcher("field-osc.genexpr", ins=1, outs=2)})
+    b.link(phasor, 0, gen, 0)              # in1 = bar phasor (tilt period)
     b.link(js, 0, gen, 0)
     limL = b.obj("clip~ -1. 1.", 40, 480, 80, 3, 1)
     limR = b.obj("clip~ -1. 1.", 130, 480, 80, 3, 1)
@@ -274,6 +285,8 @@ WOBBLE_PARAMS = [
     ("density", 0.0, 1.0, 0.4),    # wobble speed
     ("entropy", 0.0, 1.0, 0.2),    # period (1..16 bars) + variation
     ("seed", 0.0, 1.0, 0.2),       # regen
+    ("tilt", -1.0, 1.0, 0.0),      # front/flat/back load across span
+    ("span", 0.0, 1.0, 0.0),       # tilt period: 1,2,4,8 bars
     ("level", 0.0, 1.0, 0.85),
 ]
 

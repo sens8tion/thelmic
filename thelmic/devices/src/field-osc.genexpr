@@ -19,6 +19,8 @@ Param bright(0.2, min=0, max=1);   // waveshaper drive
 Param fmamt(0.2, min=0, max=1);    // FM operator index
 Param spread(0.2, min=0, max=1);   // inharmonic detune of the FM operator
 Param width(0.5, min=0, max=1);    // stereo decorrelation (0 = mono/centre)
+Param tilt(0.0, min=-1, max=1);    // amplitude tilt: front(-) / flat(0) / back(+)
+Param span(0.0, min=0, max=1);     // tilt period: 1,2,4,8 bars (in1 = bar phasor)
 Param amp(0.0, min=0, max=1);      // master = BPM rhythm envelope
 
 // --- state ---
@@ -28,6 +30,7 @@ History a1(0), a2(0), a3(0), walk(0.5);
 History phL(0), yfbL(0), mphL(0);
 History phR(0), yfbR(0), mphR(0);
 History lpL1(0), lpL2(0), lpR1(0), lpR2(0);
+History barIdx(0), lastbar(0), tiltSm(1);
 
 // --- smooth controls (one-pole) ---
 sc = 0.002;
@@ -50,6 +53,21 @@ walk = clip(walk + sm_chaos * 0.0008 * (sin(2*pi*a1) * sin(2*pi*a2) - 0.5*sin(2*
 
 wo = sm_width * 0.5;                       // stereo phase offset for R
 modratio = 1 + floor(sm_spread * 4);       // integer harmonic ratios -> less aliasing
+
+// amplitude tilt across a 1/2/4/8-bar period (in1 = transport-locked bar phasor)
+bph = in1;
+bwrap = (bph < lastbar) ? 1 : 0;
+lastbar = bph;
+if (bwrap) { barIdx = barIdx + 1; }
+spanBars = pow(2, floor(span * 3 + 0.5));  // 1,2,4,8
+pbar = barIdx - floor(barIdx / spanBars) * spanBars;
+periodPhase = (pbar + bph) / spanBars;     // 0..1 across the period
+// shaped emphasis: front-load in the 1st quarter (narrow), back-load across the
+// 2nd half (wider). depth = |tilt|.
+tdepth = abs(tilt);
+tshape = (tilt < 0) ? exp(-periodPhase / 0.15) : exp(-(1 - periodPhase) / 0.35);
+tiltEnv = (1 - tdepth) + tdepth * tshape;
+tiltSm = tiltSm + 0.0012 * (tiltEnv - tiltSm);   // ~17ms slew: no click at boundary
 
 // ---------------- LEFT ----------------
 automL = clip(mix(0.5 + 0.5*(0.55*sin(2*pi*a1) + 0.30*sin(2*pi*a2) + 0.15*sin(2*pi*(a1+walk))), walk, 0.4), 0, 1);
@@ -83,6 +101,6 @@ c = clip(6.2832 * fc / samplerate, 0.0005, 0.7);
 lpL1 = lpL1 + c*(outL - lpL1); lpL2 = lpL2 + c*(lpL1 - lpL2);
 lpR1 = lpR1 + c*(outR - lpR1); lpR2 = lpR2 + c*(lpR1 - lpR2);
 
-// --- output (BPM rhythm envelope on amp) ---
-out1 = clip(sm_amp * lpL2, -1, 1);
-out2 = clip(sm_amp * lpR2, -1, 1);
+// --- output (BPM rhythm envelope on amp, amplitude tilt across the period) ---
+out1 = clip(sm_amp * lpL2 * tiltSm, -1, 1);
+out2 = clip(sm_amp * lpR2 * tiltSm, -1, 1);

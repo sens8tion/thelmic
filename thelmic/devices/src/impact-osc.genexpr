@@ -27,7 +27,7 @@ Param seed(0.2, min=0, max=1);      // regen: pick a different fixed pattern
 Param level(0.8, min=0, max=1);
 
 History lastS(-1), cnt(0), steplen(11025);
-History pend(0), env(0), penv(0), oscph(0), nz1(0);
+History pend(0), env(0), penv(0), oscph(0), nz1(0), envSm(0), penvSm(0);
 
 // ---- 16th grid from the transport-locked bar phasor ----
 ph = in1;
@@ -64,7 +64,7 @@ if (pend > 0) {
     pend = pend - 1;
     if (pend <= 0) { trig = 1; }
 }
-if (trig) { env = 1; penv = 1; }
+if (trig) { env = 1; penv = 1; }   // (phase NOT reset: avoids stepping a ringing tail)
 
 // ---- envelopes ----
 decaySec = mix(0.03, 0.6, decay);
@@ -72,10 +72,16 @@ envCoef = exp(-1.0 / (decaySec * samplerate));
 penvCoef = exp(-1.0 / (0.018 * samplerate));
 env = env * envCoef;
 penv = penv * penvCoef;
+// attack slew, length scaled by band: ~5ms for the sub (click-free), fast for
+// the high-band ticks so they stay sharp.
+atkSec = mix(0.005, 0.0004, tune);
+atkCoef = 1 - exp(-1.0 / (atkSec * samplerate));
+envSm = envSm + atkCoef * (env - envSm);
+penvSm = penvSm + atkCoef * (penv - penvSm);   // smooth pitch-env attack: no click
 
 // ---- synthesis ----
 base = 20 * pow(400, tune);                   // exp tune: 20Hz (0) .. 8kHz (1)
-freq = base * (1 + punch * 3.0 * penv);       // pitch drop = thump/punch
+freq = base * (1 + punch * 3.0 * penvSm);     // pitch drop = thump/punch (slewed attack)
 oscph = wrap(oscph + freq / samplerate, 0, 1);
 sine = sin(2 * pi * oscph);
 
@@ -84,4 +90,4 @@ hpn = n - nz1;
 nz1 = n;
 
 body = sine * (1 - tone) + hpn * tone;
-out1 = clip(level * env * body, -1, 1);
+out1 = clip(level * envSm * body, -1, 1);
