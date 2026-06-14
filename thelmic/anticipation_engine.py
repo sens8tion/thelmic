@@ -58,7 +58,10 @@ def compute_anticipation(
     if phrases_until_drop >= 2:
         return _GROOVE
 
-    if stability >= 0.50:
+    # Threshold at 0.40: Oak stability_bias=0.455 and Nott=0.52 both get compression.
+    # Chaos peaks (stability_bias ≤ 0.30) get dissolution.
+    # Caller must pass terrain stability_bias (heat-immune), not dims.stability.
+    if stability >= 0.40:
         return _compression(musical_step, step_in_bar, phrases_until_drop, heat)
     else:
         return _dissolution(musical_step, step_in_bar, phrases_until_drop, heat, pattern_seed)

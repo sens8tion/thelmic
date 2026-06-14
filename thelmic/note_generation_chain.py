@@ -113,7 +113,13 @@ def generate_bank(
         ant = (
             compute_anticipation(
                 ant_step, frame.step_in_bar,
-                phrases_until_drop, dims.stability, heat,
+                phrases_until_drop,
+                # Use terrain stability_bias (not heat-modified dims.stability).
+                # The compression/dissolution mode is a terrain CHARACTER decision —
+                # Oak is "compression territory" regardless of how hot it is.
+                # dims.stability drops too low under heat to reach the 0.50 threshold.
+                signature_rhythm.stability_bias if signature_rhythm else dims.stability,
+                heat,
                 signature_rhythm.base_pattern_seed if signature_rhythm else 0,
             )
             if dims is not None else None
