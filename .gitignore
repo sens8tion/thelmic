@@ -1,3 +1,7 @@
 *.pyc
 __pycache__/
 *.egg-info/
+
+# Claude Code scratch worktrees (nested checkouts, not project source)
+.claude/worktrees/
+**/.claude/worktrees/
