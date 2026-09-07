@@ -570,6 +570,7 @@ class ThelmicLive(ControlSurface):
             return self._set_sample_slices(
                 params["track_index"], params["device_index"],
                 params.get("times"), params.get("clear", True),
+                params.get("reset", False),
             )
         if cmd_type == "create_scene":
             return self._create_scene(params.get("index", -1))
@@ -2557,13 +2558,23 @@ class ThelmicLive(ControlSurface):
             raise ValueError("could not set sample '" + attr + "': " + str(e))
         return {"attr": attr, "value": getattr(owner, name)}
 
-    def _set_sample_slices(self, track_index, device_index, times, clear=True):
+    def _set_sample_slices(self, track_index, device_index, times, clear=True,
+                           reset=False):
         """Replace the slice points with an explicit list.
 
         With slicing_style set to manual this is what makes slice N mean a
         known position rather than "the Nth transient Live happened to find".
         """
         _device, sample = self._sample_or_raise(track_index, device_index)
+        if reset:
+            # hand the slice set back to Live (recomputes for the current style)
+            sample.reset_slices()
+            try:
+                now = [float(s) for s in sample.slices]
+            except Exception:
+                now = None
+            return {"reset": True, "slices": now,
+                    "slice_count": len(now) if now is not None else None}
         removed = 0
         if clear:
             try:
@@ -2577,11 +2588,14 @@ class ThelmicLive(ControlSurface):
                         pass
         inserted, failed = [], []
         for t in (times or []):
+            # insert_slice is bound to a C++ signature taking int slice_time;
+            # passing a float raises rather than coercing.
+            st = int(round(float(t)))
             try:
-                sample.insert_slice(float(t))
-                inserted.append(float(t))
+                sample.insert_slice(st)
+                inserted.append(st)
             except Exception as e:
-                failed.append({"time": float(t), "error": str(e)})
+                failed.append({"time": st, "error": str(e)})
         try:
             now = [float(s) for s in sample.slices]
         except Exception:
@@ -2836,7 +2850,20 @@ class ThelmicLive(ControlSurface):
         """
         if isinstance(node, (list, tuple)):
             return list(node)
-        return list(getattr(node, "children", []) or [])
+        kids = getattr(node, "children", None)
+        if kids is not None:
+            try:
+                return list(kids)
+            except Exception:
+                pass
+        # user_folders is neither: an opaque sequence with no .children.
+        # Iterating it is the only way in.
+        if not isinstance(node, (str, bytes)):
+            try:
+                return list(node)
+            except TypeError:
+                pass
+        return []
 
     def _list_browser_roots(self):
         b = self._browser()
@@ -2856,16 +2883,22 @@ class ThelmicLive(ControlSurface):
                     entry["name"] = val.name
                 except Exception:
                     pass
-            if isinstance(val, (list, tuple)):
-                entry["child_count"] = len(val)
-                entry["is_list_root"] = True
-                if not entry.get("name"):
-                    entry["name"] = attr
-            elif hasattr(val, "children"):
+            if hasattr(val, "children"):
                 try:
                     entry["child_count"] = len(list(val.children))
                 except Exception:
                     pass
+            elif not isinstance(val, (str, bytes)):
+                # sequence roots (user_folders) report length by iteration
+                try:
+                    kids = list(val)
+                except TypeError:
+                    kids = None
+                if kids is not None:
+                    entry["child_count"] = len(kids)
+                    entry["is_sequence_root"] = True
+                    if not entry.get("name"):
+                        entry["name"] = attr
             out.append(entry)
         return {"roots": out}
 

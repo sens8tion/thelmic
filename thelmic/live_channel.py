@@ -615,15 +615,22 @@ class LiveChannel:
         })
 
     def set_sample_slices(self, track_index: int, device_index: int,
-                          times: list, clear: bool = True) -> Future:
+                          times: list | None = None, clear: bool = True,
+                          reset: bool = False) -> Future:
         """Replace the slice points with an explicit list of positions.
+
+        Positions are in sample time (see `get_sample_info` for `length` and
+        `sample_rate`) and are rounded to int — Live's `insert_slice` is bound
+        to a C++ int signature and raises on a float.
 
         With slicing_style set to manual, this is what makes slice N mean a
         known position rather than the Nth transient Live happened to find.
+        Pass `reset=True` to hand the slice set back to Live instead.
         """
         return self._enqueue("set_sample_slices", {
             "track_index": track_index, "device_index": device_index,
-            "times": list(times), "clear": bool(clear),
+            "times": list(times or []), "clear": bool(clear),
+            "reset": bool(reset),
         })
 
     def create_scene(self, index: int = -1) -> Future:
