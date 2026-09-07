@@ -65,6 +65,7 @@ _UI_THREAD_COMMANDS = {
     "get_browser_tree",
     "get_browser_items_at_path",
     "set_device_sidechain_source",
+    "set_device_sidechain_channel",
     "get_device_routing_options",
     "fire_scene",
     "set_scene_tempo",
@@ -408,6 +409,12 @@ class ThelmicLive(ControlSurface):
                 params["track_index"],
                 params["device_index"],
                 params["source_track_index"],
+            )
+        if cmd_type == "set_device_sidechain_channel":
+            return self._set_device_sidechain_channel(
+                params["track_index"],
+                params["device_index"],
+                params["channel"],
             )
         if cmd_type == "get_device_routing_options":
             return self._get_device_routing_options(
@@ -1392,6 +1399,51 @@ class ThelmicLive(ControlSurface):
             "source_name": getattr(target, "display_name", src_name),
         }
 
+    def _set_device_sidechain_channel(self, track_index, device_index, channel):
+        """Set the sidechain CHANNEL (Pre FX / Post FX / Post Mixer / etc.).
+
+        Live's LOM exposes `audio_input_routing_channel` separately from
+        `audio_input_routing_type` (the source track). The CHANNEL selector
+        controls where in the source track's signal path the sidechain
+        taps in — Pre FX gets the raw instrument output before any device
+        chain, Post FX gets the signal after all devices, Post Mixer
+        includes the track fader/pan.
+
+        Pre FX is the right pick for most sidechain pumping because the
+        kick's transient envelope is preserved — Post FX of a heavily-
+        processed kick (Drum Buss + Saturator + compressor) becomes a
+        near-constant signal that pins the comp to the floor.
+        """
+        device = self._device(track_index, device_index)
+        type_attr, type_avail_attr, ch_attr, ch_avail_attr = self._device_routing_attrs(device)
+        if not ch_attr:
+            raise ValueError("Device has no routing-channel attribute")
+        candidates = list(getattr(device, ch_avail_attr, []) or [])
+        target = None
+        for ch in candidates:
+            if getattr(ch, "display_name", "") == channel:
+                target = ch
+                break
+        if target is None:
+            # substring fallback (case-insensitive)
+            for ch in candidates:
+                dn = getattr(ch, "display_name", "")
+                if channel.lower() in dn.lower() or dn.lower() in channel.lower():
+                    target = ch
+                    break
+        if target is None:
+            names = [getattr(ch, "display_name", "?") for ch in candidates]
+            raise ValueError(
+                "No routing channel matches '" + str(channel) + "'. "
+                "Available: " + ", ".join(names)
+            )
+        setattr(device, ch_attr, target)
+        return {
+            "track_index": track_index,
+            "device_index": device_index,
+            "channel": getattr(target, "display_name", str(channel)),
+        }
+
     # ---- track output routing ---------------------------------------
 
     def _track_output_attrs(self, track):
@@ -1487,20 +1539,25 @@ class ThelmicLive(ControlSurface):
         env = clip.create_automation_envelope(param)
         # Sort breakpoints by time
         bps = sorted([(float(bp[0]), float(bp[1])) for bp in breakpoints], key=lambda x: x[0])
-        # Prefer add_breakpoint (interpolated) so values actually animate
-        # at audio rate. Fall back to insert_step (staircase) if not
-        # available on this Live version.
+        # Live 12 only exposes insert_step(time, length, value) — flat
+        # segments. Use a length that spans until the NEXT breakpoint so
+        # consecutive segments tile the timeline. Callers pass densely-
+        # spaced breakpoints to approximate a smooth ramp via this
+        # staircase. Last breakpoint gets a default 1-beat length.
         n_written = 0
         last_err = None
-        for t, v in bps:
+        for i, (t, v) in enumerate(bps):
+            if i + 1 < len(bps):
+                length = max(0.001, bps[i + 1][0] - t)
+            else:
+                length = 1.0   # last step — default 1-beat sustain
             wrote = False
             for fn_name in ("add_breakpoint", "insert_step"):
                 fn = getattr(env, fn_name, None)
                 if fn is None: continue
                 try:
                     if fn_name == "insert_step":
-                        # length-needed variant: use small fixed length
-                        fn(t, 0.001, v)
+                        fn(t, length, v)
                     else:
                         fn(t, v)
                     n_written += 1
