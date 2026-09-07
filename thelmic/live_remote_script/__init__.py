@@ -64,6 +64,9 @@ _UI_THREAD_COMMANDS = {
     "restore_track",
     "get_browser_tree",
     "get_browser_items_at_path",
+    "get_sample_info",
+    "set_sample_property",
+    "set_sample_slices",
     "set_device_sidechain_source",
     "set_device_sidechain_channel",
     "get_device_routing_options",
@@ -554,6 +557,20 @@ class ThelmicLive(ControlSurface):
             return self._get_device_property(
                 params["track_index"], params["device_index"], params["attr"],
             )
+        if cmd_type == "get_sample_info":
+            return self._get_sample_info(
+                params["track_index"], params["device_index"],
+            )
+        if cmd_type == "set_sample_property":
+            return self._set_sample_property(
+                params["track_index"], params["device_index"],
+                params["attr"], params["value"],
+            )
+        if cmd_type == "set_sample_slices":
+            return self._set_sample_slices(
+                params["track_index"], params["device_index"],
+                params.get("times"), params.get("clear", True),
+            )
         if cmd_type == "create_scene":
             return self._create_scene(params.get("index", -1))
         if cmd_type == "delete_scene":
@@ -785,13 +802,32 @@ class ThelmicLive(ControlSurface):
         devices = []
         for i, d in enumerate(track.devices):
             devices.append({"index": i, "name": d.name, "class_name": d.class_name})
-        return {
+        info = {
             "index": track_index,
             "name": track.name,
             "is_midi_track": track.has_midi_input,
             "device_count": len(track.devices),
             "devices": devices,
         }
+        # Mixer state - without this a caller cannot know the "on" value to
+        # restore when gating a track's volume, and has to mix blind.
+        mixer = getattr(track, "mixer_device", None)
+        if mixer is not None:
+            for key in ("volume", "panning"):
+                try:
+                    info[key] = float(getattr(mixer, key).value)
+                except Exception:
+                    pass
+            try:
+                info["sends"] = [float(s.value) for s in mixer.sends]
+            except Exception:
+                pass
+        for key in ("mute", "solo", "arm"):
+            try:
+                info[key] = bool(getattr(track, key))
+            except Exception:
+                pass
+        return info
 
     def _create_midi_track(self, index):
         self._song.create_midi_track(index)
@@ -989,7 +1025,7 @@ class ThelmicLive(ControlSurface):
         if cur is None:
             raise ValueError("unknown root: " + parts[0])
         for p in parts[1:]:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             nxt = None
             for c in children:
                 if getattr(c, "name", "").lower() == p.lower():
@@ -999,7 +1035,7 @@ class ThelmicLive(ControlSurface):
                 raise ValueError("path part not found: " + p)
             cur = nxt
         if item_name:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             target = None
             for c in children:
                 if getattr(c, "name", "").lower() == item_name.lower():
@@ -1602,13 +1638,19 @@ class ThelmicLive(ControlSurface):
     def _get_all_meters(self):
         out = []
         for i, t in enumerate(self._song.tracks):
-            out.append({
-                "track_index": i,
-                "name": t.name,
-                "left":  float(getattr(t, "output_meter_left",  0.0) or 0.0),
-                "right": float(getattr(t, "output_meter_right", 0.0) or 0.0),
-                "level": float(getattr(t, "output_meter_level", 0.0) or 0.0),
-            })
+            row = {"track_index": i, "name": t.name,
+                   "left": 0.0, "right": 0.0, "level": 0.0}
+            # A MIDI track with no instrument RAISES on these rather than
+            # returning None, so getattr's default is not enough - one bad
+            # track must not take down the whole call.
+            for key, attr in (("left", "output_meter_left"),
+                              ("right", "output_meter_right"),
+                              ("level", "output_meter_level")):
+                try:
+                    row[key] = float(getattr(t, attr, 0.0) or 0.0)
+                except Exception:
+                    row["no_audio_output"] = True
+            out.append(row)
         # also master
         try:
             m = self._song.master_track
@@ -1797,7 +1839,7 @@ class ThelmicLive(ControlSurface):
             if cur is None:
                 raise ValueError("unknown root: " + parts[0])
             for p in parts[1:]:
-                children = list(getattr(cur, "children", []) or [])
+                children = self._browser_children(cur)
                 nxt = None
                 for c in children:
                     if getattr(c, "name", "").lower() == p.lower():
@@ -1806,7 +1848,7 @@ class ThelmicLive(ControlSurface):
                     raise ValueError("path part not found: " + p)
                 cur = nxt
             if item_name:
-                children = list(getattr(cur, "children", []) or [])
+                children = self._browser_children(cur)
                 target = None
                 for c in children:
                     if getattr(c, "name", "").lower() == item_name.lower():
@@ -1885,7 +1927,7 @@ class ThelmicLive(ControlSurface):
         if cur is None:
             raise ValueError("unknown root: " + parts[0])
         for p in parts[1:]:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             nxt = None
             for c in children:
                 if getattr(c, "name", "").lower() == p.lower():
@@ -1894,7 +1936,7 @@ class ThelmicLive(ControlSurface):
             if nxt is None:
                 raise ValueError("path part not found: " + p)
             cur = nxt
-        children = list(getattr(cur, "children", []) or [])
+        children = self._browser_children(cur)
         by_name = {getattr(c, "name", "").lower(): c for c in children}
 
         self._song.view.selected_track = track
@@ -2059,11 +2101,36 @@ class ThelmicLive(ControlSurface):
         self._song.view.highlighted_clip_slot = track.clip_slots[slot]
         return {"track_index": track_index, "slot": slot}
 
+    @staticmethod
+    def _resolve_attr_path(obj, attr):
+        """Walk a dotted attribute path, returning (owner, final_name).
+
+        Lets callers reach nested LOM objects that are not devices in their
+        own right — most usefully `sample.slicing_style` and friends on a
+        Simpler, which are otherwise unaddressable.
+        """
+        parts = [p for p in str(attr).split(".") if p]
+        if not parts:
+            raise ValueError("empty attr path")
+        owner = obj
+        for p in parts[:-1]:
+            if not hasattr(owner, p):
+                avail = [a for a in dir(owner) if not a.startswith("_")][:30]
+                raise ValueError(
+                    "attr '" + p + "' not on " + type(owner).__name__
+                    + ". Available: " + ", ".join(avail)
+                )
+            owner = getattr(owner, p)
+            if owner is None:
+                raise ValueError("attr path '" + attr + "' hit None at '" + p + "'")
+        return owner, parts[-1]
+
     def _set_device_property(self, track_index, device_index, attr, value):
         device = self._device(track_index, device_index)
+        device, attr = self._resolve_attr_path(device, attr)
         if not hasattr(device, attr):
             avail = [a for a in dir(device) if not a.startswith("_")][:30]
-            raise ValueError("attr '" + attr + "' not on " + device.name + ". Sample: " + ", ".join(avail))
+            raise ValueError("attr '" + attr + "' not on " + type(device).__name__ + ". Sample: " + ", ".join(avail))
         try:
             # Coerce types where possible — properties can be int or float
             current = getattr(device, attr)
@@ -2104,7 +2171,7 @@ class ThelmicLive(ControlSurface):
         if cur is None:
             raise ValueError("unknown root: " + parts[0])
         for p in parts[1:]:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             nxt = None
             for c in children:
                 if getattr(c, "name", "").lower() == p.lower():
@@ -2113,7 +2180,7 @@ class ThelmicLive(ControlSurface):
                 raise ValueError("path part not found: " + p)
             cur = nxt
         if item_name:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             target = None
             for c in children:
                 if getattr(c, "name", "").lower() == item_name.lower():
@@ -2294,7 +2361,7 @@ class ThelmicLive(ControlSurface):
             if cur is None:
                 raise ValueError("unknown root: " + parts[0])
             for p in parts[1:]:
-                children = list(getattr(cur, "children", []) or [])
+                children = self._browser_children(cur)
                 nxt = None
                 for c in children:
                     if getattr(c, "name", "").lower() == p.lower():
@@ -2303,7 +2370,7 @@ class ThelmicLive(ControlSurface):
                     raise ValueError("path part not found: " + p)
                 cur = nxt
             if item_name:
-                children = list(getattr(cur, "children", []) or [])
+                children = self._browser_children(cur)
                 target = None
                 for c in children:
                     if getattr(c, "name", "").lower() == item_name.lower():
@@ -2372,7 +2439,7 @@ class ThelmicLive(ControlSurface):
         if cur is None:
             raise ValueError("unknown root: " + parts[0])
         for p in parts[1:]:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             nxt = None
             for c in children:
                 if getattr(c, "name", "").lower() == p.lower():
@@ -2381,7 +2448,7 @@ class ThelmicLive(ControlSurface):
                 raise ValueError("path part not found: " + p)
             cur = nxt
         if item_name:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             target = None
             for c in children:
                 if getattr(c, "name", "").lower() == item_name.lower():
@@ -2421,14 +2488,119 @@ class ThelmicLive(ControlSurface):
         self._song.delete_scene(scene_index)
         return {"scene_count": len(list(self._song.scenes))}
 
+    # ---- sample / slicing (Simpler) ---------------------------------
+
+    def _sample_or_raise(self, track_index, device_index):
+        device = self._device(track_index, device_index)
+        sample = getattr(device, "sample", None)
+        if sample is None:
+            raise ValueError(
+                "device '" + device.name + "' (" + device.class_name
+                + ") has no .sample - need a Simpler with a file loaded"
+            )
+        return device, sample
+
+    def _get_sample_info(self, track_index, device_index):
+        """Everything readable about a Simpler's sample, including slices.
+
+        Slice positions come back in whatever unit Live reports them in;
+        `length` and `sample_rate` are returned alongside so the caller can
+        convert between sample time, seconds and beats without guessing.
+        """
+        device, sample = self._sample_or_raise(track_index, device_index)
+        out = {
+            "device_name": device.name,
+            "device_class": device.class_name,
+            "playback_mode": int(getattr(device, "playback_mode", -1)),
+        }
+        for attr in ("length", "sample_rate", "start_marker", "end_marker",
+                     "warping", "warp_mode", "gain", "beats_per_minute",
+                     "slicing_style", "slicing_beat_division",
+                     "file_path", "name"):
+            try:
+                v = getattr(sample, attr)
+                if not isinstance(v, (int, float, bool, str, type(None))):
+                    v = str(v)
+                out[attr] = v
+            except Exception:
+                pass
+        try:
+            out["slices"] = [float(s) for s in sample.slices]
+            out["slice_count"] = len(out["slices"])
+        except Exception as e:
+            out["slices_error"] = str(e)
+        try:
+            out["available_attrs"] = [a for a in dir(sample) if not a.startswith("_")]
+        except Exception:
+            pass
+        return out
+
+    def _set_sample_property(self, track_index, device_index, attr, value):
+        _device, sample = self._sample_or_raise(track_index, device_index)
+        owner, name = self._resolve_attr_path(sample, attr)
+        if not hasattr(owner, name):
+            avail = [a for a in dir(owner) if not a.startswith("_")][:40]
+            raise ValueError(
+                "attr '" + name + "' not on sample. Available: " + ", ".join(avail)
+            )
+        current = getattr(owner, name)
+        try:
+            if isinstance(current, bool):
+                setattr(owner, name, bool(value))
+            elif isinstance(current, int):
+                setattr(owner, name, int(value))
+            elif isinstance(current, float):
+                setattr(owner, name, float(value))
+            else:
+                setattr(owner, name, value)
+        except Exception as e:
+            raise ValueError("could not set sample '" + attr + "': " + str(e))
+        return {"attr": attr, "value": getattr(owner, name)}
+
+    def _set_sample_slices(self, track_index, device_index, times, clear=True):
+        """Replace the slice points with an explicit list.
+
+        With slicing_style set to manual this is what makes slice N mean a
+        known position rather than "the Nth transient Live happened to find".
+        """
+        _device, sample = self._sample_or_raise(track_index, device_index)
+        removed = 0
+        if clear:
+            try:
+                sample.clear_slices()
+            except Exception:
+                for s in list(getattr(sample, "slices", [])):
+                    try:
+                        sample.remove_slice(s)
+                        removed += 1
+                    except Exception:
+                        pass
+        inserted, failed = [], []
+        for t in (times or []):
+            try:
+                sample.insert_slice(float(t))
+                inserted.append(float(t))
+            except Exception as e:
+                failed.append({"time": float(t), "error": str(e)})
+        try:
+            now = [float(s) for s in sample.slices]
+        except Exception:
+            now = None
+        return {
+            "cleared": bool(clear), "removed_individually": removed,
+            "inserted": inserted, "failed": failed, "slices": now,
+            "slice_count": len(now) if now is not None else None,
+        }
+
     def _get_device_property(self, track_index, device_index, attr):
         """Read an arbitrary device attribute by name (e.g. 'gain_reduction',
         'output_meter_left', 'name', 'class_name'). Useful for compressor GR,
         EQ analyser values, etc. Returns the value as float / int / string."""
         device = self._device(track_index, device_index)
+        device, attr = self._resolve_attr_path(device, attr)
         if not hasattr(device, attr):
             avail = [a for a in dir(device) if not a.startswith("_")][:30]
-            raise ValueError("attr '" + attr + "' not on " + device.name + ". Sample: " + ", ".join(avail))
+            raise ValueError("attr '" + attr + "' not on " + type(device).__name__ + ". Sample: " + ", ".join(avail))
         try:
             val = getattr(device, attr)
         except Exception as e:
@@ -2653,6 +2825,19 @@ class ThelmicLive(ControlSurface):
             categories.append({"name": cat_name, "children": children})
         return {"categories": categories}
 
+    @staticmethod
+    def _browser_children(node):
+        """Children of a browser node.
+
+        Most roots are a BrowserItem exposing `.children`, but a few - most
+        importantly `user_folders`, the Places sidebar - are returned by the
+        LOM as a plain list of items. Treating those as childless is why a
+        user-added Place looked empty.
+        """
+        if isinstance(node, (list, tuple)):
+            return list(node)
+        return list(getattr(node, "children", []) or [])
+
     def _list_browser_roots(self):
         b = self._browser()
         out = []
@@ -2671,7 +2856,12 @@ class ThelmicLive(ControlSurface):
                     entry["name"] = val.name
                 except Exception:
                     pass
-            if hasattr(val, "children"):
+            if isinstance(val, (list, tuple)):
+                entry["child_count"] = len(val)
+                entry["is_list_root"] = True
+                if not entry.get("name"):
+                    entry["name"] = attr
+            elif hasattr(val, "children"):
                 try:
                     entry["child_count"] = len(list(val.children))
                 except Exception:
@@ -2710,7 +2900,7 @@ class ThelmicLive(ControlSurface):
         if cur is None:
             raise ValueError("unknown root category: " + parts[0])
         for p in parts[1:]:
-            children = list(getattr(cur, "children", []) or [])
+            children = self._browser_children(cur)
             nxt = None
             for c in children:
                 if getattr(c, "name", "").lower() == p.lower():
@@ -2720,7 +2910,7 @@ class ThelmicLive(ControlSurface):
                 raise ValueError("path part not found: " + p)
             cur = nxt
         items = []
-        for c in getattr(cur, "children", []) or []:
+        for c in self._browser_children(cur):
             items.append({
                 "name": getattr(c, "name", "?"),
                 "uri": getattr(c, "uri", None),

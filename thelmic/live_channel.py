@@ -583,9 +583,47 @@ class LiveChannel:
         })
 
     def get_device_property(self, track_index: int, device_index: int, attr: str) -> Future:
-        """Read any device attribute by name — e.g. 'gain_reduction' on Compressor."""
+        """Read any device attribute by name — e.g. 'gain_reduction' on Compressor.
+
+        Accepts dotted paths ('sample.slicing_style') to reach nested LOM
+        objects that are not devices in their own right.
+        """
         return self._enqueue("get_device_property", {
             "track_index": track_index, "device_index": device_index, "attr": attr,
+        })
+
+    # ------------------------------------------------------------------
+    # Sample / slicing (Simpler)
+    # ------------------------------------------------------------------
+
+    def get_sample_info(self, track_index: int, device_index: int) -> Future:
+        """Sample state for a Simpler: slices, markers, warp, slicing style.
+
+        `length` and `sample_rate` come back alongside `slices` so slice
+        positions can be converted to beats without guessing the unit.
+        """
+        return self._enqueue("get_sample_info", {
+            "track_index": track_index, "device_index": device_index,
+        })
+
+    def set_sample_property(self, track_index: int, device_index: int,
+                            attr: str, value) -> Future:
+        """Set an attribute on a Simpler's sample, e.g. 'slicing_style'."""
+        return self._enqueue("set_sample_property", {
+            "track_index": track_index, "device_index": device_index,
+            "attr": attr, "value": value,
+        })
+
+    def set_sample_slices(self, track_index: int, device_index: int,
+                          times: list, clear: bool = True) -> Future:
+        """Replace the slice points with an explicit list of positions.
+
+        With slicing_style set to manual, this is what makes slice N mean a
+        known position rather than the Nth transient Live happened to find.
+        """
+        return self._enqueue("set_sample_slices", {
+            "track_index": track_index, "device_index": device_index,
+            "times": list(times), "clear": bool(clear),
         })
 
     def create_scene(self, index: int = -1) -> Future:
