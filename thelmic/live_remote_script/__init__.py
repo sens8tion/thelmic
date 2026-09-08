@@ -1803,13 +1803,14 @@ class ThelmicLive(ControlSurface):
         _track, clips = self._arrangement_clips(track_index)
         if not clips:
             return {"track_index": track_index, "applied": [], "note": "no clips"}
+        self._require_clip_fades(clips[0])
         targets = list(enumerate(clips)) if clip_index is None else [
             (int(clip_index), clips[int(clip_index)])]
         applied = []
         for i, c in targets:
             row = {"index": i}
             try:
-                if enabled is not None and hasattr(c, "fades_enabled"):
+                if enabled is not None:
                     c.fades_enabled = bool(enabled)
                     row["fades_enabled"] = c.fades_enabled
                 if fade_in is not None:
@@ -2820,6 +2821,27 @@ class ThelmicLive(ControlSurface):
                 out["envelopes_iter_err"] = str(ex)
         return out
 
+    FADE_ATTRS = ("fades_enabled", "fade_in_time", "fade_out_time")
+
+    @classmethod
+    def _require_clip_fades(cls, clip):
+        """Raise unless the Clip CLASS exposes fade handles.
+
+        Assigning an unknown attribute on a LOM proxy silently creates a
+        plain Python attribute and echoes it back - so a naive write looks
+        like success while Live is never touched. That is exactly how the
+        previous version reported fades it had not set. The check is against
+        type(clip), not the instance, because a prior probe may already have
+        planted a fake attribute on the instance.
+        """
+        missing = [a for a in cls.FADE_ATTRS if not hasattr(type(clip), a)]
+        if missing:
+            raise ValueError(
+                "clip fade handles are not exposed by the Live Object Model "
+                "on this build (missing " + ", ".join(missing) + "); set them "
+                "in Live with Create Fades (Ctrl+Alt+F)"
+            )
+
     def _set_clip_fades(self, track_index, clip_index, fade_in=None, fade_out=None):
         """Audio-clip fade in/out times in SECONDS. clip.fades_enabled
         must be on for them to take effect. MIDI clips don't support this."""
@@ -2828,10 +2850,10 @@ class ThelmicLive(ControlSurface):
         if not slot.has_clip:
             raise ValueError("No clip in slot")
         clip = slot.clip
+        self._require_clip_fades(clip)
         out = {}
         try:
-            if hasattr(clip, "fades_enabled"):
-                clip.fades_enabled = True
+            clip.fades_enabled = True
             if fade_in is not None:
                 clip.fade_in_time = float(fade_in)
                 out["fade_in"] = clip.fade_in_time
