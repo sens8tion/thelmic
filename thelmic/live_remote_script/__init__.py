@@ -109,6 +109,8 @@ _UI_THREAD_COMMANDS = {
     "set_clip_fades",
     "get_clip_props",
     "clear_arrangement_clips",
+    "get_arrangement_clips",
+    "set_arrangement_clip_fades",
     "inspect_clip_envelopes",
     "re_enable_automation",
     "get_device_property",
@@ -485,6 +487,16 @@ class ThelmicLive(ControlSurface):
             )
         if cmd_type == "delete_track":
             return self._delete_track(params["track_index"])
+        if cmd_type == "get_arrangement_clips":
+            return self._get_arrangement_clips(params["track_index"])
+        if cmd_type == "set_arrangement_clip_fades":
+            return self._set_arrangement_clip_fades(
+                params["track_index"], params.get("clip_index"),
+                params.get("fade_in"), params.get("fade_out"),
+                params.get("enabled"),
+            )
+        if cmd_type == "clear_arrangement_clips":
+            return self._clear_arrangement_clips(params.get("track_index"))
         if cmd_type == "get_arrangement_loop":
             return self._get_arrangement_loop()
         if cmd_type == "set_arrangement_loop":
@@ -1741,6 +1753,96 @@ class ThelmicLive(ControlSurface):
         # song.delete_track expects an index
         self._song.delete_track(track_index)
         return {"deleted_track_index": track_index, "tracks_remaining": len(self._song.tracks)}
+
+    # ---- arrangement clips ------------------------------------------
+
+    def _arrangement_clips(self, track_index):
+        track = self._track(track_index)
+        clips = getattr(track, "arrangement_clips", None)
+        if clips is None:
+            raise ValueError("Track.arrangement_clips not exposed by this Live")
+        return track, list(clips)
+
+    def _get_arrangement_clips(self, track_index):
+        """Every clip on this track's arrangement timeline, with fade state.
+
+        Reports the Clip object's attribute list too, so the units and the
+        available fade properties can be confirmed rather than assumed.
+        """
+        _track, clips = self._arrangement_clips(track_index)
+        out = []
+        for i, c in enumerate(clips):
+            row = {"index": i}
+            for attr in ("name", "start_time", "end_time", "length",
+                         "is_audio_clip", "fades_enabled", "fade_in_time",
+                         "fade_out_time", "color_index"):
+                try:
+                    v = getattr(c, attr)
+                    if not isinstance(v, (int, float, bool, str, type(None))):
+                        v = str(v)
+                    row[attr] = v
+                except Exception:
+                    pass
+            out.append(row)
+        res = {"track_index": track_index, "count": len(out), "clips": out}
+        if clips:
+            try:
+                res["available_attrs"] = [a for a in dir(clips[0])
+                                          if not a.startswith("_")]
+            except Exception:
+                pass
+        return res
+
+    def _set_arrangement_clip_fades(self, track_index, clip_index=None,
+                                    fade_in=None, fade_out=None, enabled=None):
+        """Set fade in/out on one arrangement clip, or all of them.
+
+        Live clamps a fade to half the clip, so an over-long request is
+        shortened rather than refused; the value read back is what stuck.
+        """
+        _track, clips = self._arrangement_clips(track_index)
+        if not clips:
+            return {"track_index": track_index, "applied": [], "note": "no clips"}
+        targets = list(enumerate(clips)) if clip_index is None else [
+            (int(clip_index), clips[int(clip_index)])]
+        applied = []
+        for i, c in targets:
+            row = {"index": i}
+            try:
+                if enabled is not None and hasattr(c, "fades_enabled"):
+                    c.fades_enabled = bool(enabled)
+                    row["fades_enabled"] = c.fades_enabled
+                if fade_in is not None:
+                    c.fade_in_time = float(fade_in)
+                    row["fade_in_time"] = c.fade_in_time
+                if fade_out is not None:
+                    c.fade_out_time = float(fade_out)
+                    row["fade_out_time"] = c.fade_out_time
+            except Exception as e:
+                row["error"] = str(e)
+            applied.append(row)
+        return {"track_index": track_index, "applied": applied}
+
+    def _clear_arrangement_clips(self, track_index=None):
+        """Delete arrangement clips - one track, or every track.
+
+        This command name has been in COMMANDS with no implementation, so
+        calling it returned "unhandled UI command".
+        """
+        idxs = (range(len(self._song.tracks)) if track_index is None
+                else [int(track_index)])
+        removed, errors = 0, []
+        for ti in idxs:
+            track = self._track(ti)
+            clips = list(getattr(track, "arrangement_clips", []) or [])
+            for c in clips:
+                try:
+                    track.delete_clip(c)
+                    removed += 1
+                except Exception as e:
+                    errors.append("t" + str(ti) + ": " + str(e))
+                    break
+        return {"removed": removed, "errors": errors[:5]}
 
     # ---- arrangement loop ------------------------------------------
 

@@ -489,6 +489,30 @@ class LiveChannel:
     def delete_track(self, track_index: int) -> Future:
         return self._enqueue("delete_track", {"track_index": track_index})
 
+    # ------------------------------------------------------------------
+    # Arrangement clips
+    # ------------------------------------------------------------------
+
+    def get_arrangement_clips(self, track_index: int) -> Future:
+        """Clips on a track's arrangement timeline, with their fade state."""
+        return self._enqueue("get_arrangement_clips", {"track_index": track_index})
+
+    def set_arrangement_clip_fades(self, track_index: int,
+                                   clip_index: int | None = None,
+                                   fade_in: float | None = None,
+                                   fade_out: float | None = None,
+                                   enabled: bool | None = None) -> Future:
+        """Set fades on one arrangement clip, or all of them when clip_index
+        is None. Live clamps a fade to half the clip length."""
+        return self._enqueue("set_arrangement_clip_fades", {
+            "track_index": track_index, "clip_index": clip_index,
+            "fade_in": fade_in, "fade_out": fade_out, "enabled": enabled,
+        })
+
+    def clear_arrangement_clips(self, track_index: int | None = None) -> Future:
+        """Delete arrangement clips on one track, or across every track."""
+        return self._enqueue("clear_arrangement_clips", {"track_index": track_index})
+
     def get_arrangement_loop(self) -> Future:
         return self._enqueue("get_arrangement_loop", {})
 
