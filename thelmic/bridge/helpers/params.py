@@ -99,16 +99,79 @@ def resolve_semantic_param(device_class_name: str,
     return DEVICE_PARAM_MAP.get(device_class_name, {}).get(semantic)
 
 
-def safe_set_param(ch, track_index: int, device_index: int,
-                    param_name: str, value: float) -> dict:
-    """Set a param and clamp to its actual range — many Live params are normalized
-    0..1 even when their UI shows dB or Hz. Logs the clamp for debugging."""
-    di = ch.get_device_info(track_index, device_index).result(timeout=5)
+def describe_param(ch, track_index: int, device_index: int,
+                   param_name: str, *, timeout: float = 5.0) -> dict:
+    """Source-of-truth read for one device param — the range is never guessed.
+
+    Returns {'index','name','value','min','max','quantized'}. Raises ValueError
+    (listing what IS on the device) when the name doesn't match.
+    """
+    di = ch.get_device_info(track_index, device_index).result(timeout=timeout)
     p = next((p for p in di["parameters"] if p["name"] == param_name), None)
     if p is None:
-        raise ValueError(f"param '{param_name}' not on device")
-    target = max(p["min"], min(p["max"], value))
-    if abs(target - value) > 1e-6:
-        print(f"  [warn] {param_name}: requested {value} clamped to {target} "
-              f"(range {p['min']}..{p['max']})")
-    return ch.set_device_param(track_index, device_index, p["index"], target).result(timeout=3)
+        have = ", ".join(pp["name"] for pp in di["parameters"][:14])
+        raise ValueError(
+            f"param {param_name!r} not on {di.get('class_name', 'device')} "
+            f"(have: {have}{'...' if len(di['parameters']) > 14 else ''})")
+    return {"index": p["index"], "name": p["name"], "value": p["value"],
+            "min": p["min"], "max": p["max"],
+            "quantized": bool(p.get("is_quantized", False))}
+
+
+def set_param(ch, track_index: int, device_index: int, param_name: str,
+              value: float | None = None, *,
+              frac: float | None = None,
+              expect: tuple[float, float] | None = None,
+              timeout: float = 3.0, quiet: bool = False) -> dict:
+    """Canonical range-aware param write — the device's real range is READ first,
+    so a value is never set on a guessed scale.
+
+    This is the primitive to reach for. The recurring bug it kills: Live params
+    don't share one scale (Operator Volume is 0..1, Overdrive Drive is 0..100,
+    Saturator Drive is 0..1-mapped-to-dB, EQ Gain is raw dB). A raw setter happily
+    writes 0.55 to a 0..100 param (= ~0.5%, effectively bypassed) with no warning.
+
+    Specify the target exactly ONE way:
+      • frac=0..1   scale-independent intent. Maps to min + frac*(max-min), so
+                    "70% driven" is frac=0.70 whether the param is 0..1, 0..100,
+                    or a dB range. Quantized params snap to the nearest step.
+      • value=x     absolute. Pair with expect=(lo,hi) to assert the param's real
+                    (min,max); a mismatch RAISES rather than silently setting a
+                    valid-but-wrong-scale number. Out-of-range values are clamped
+                    (with a printed note) when no expect guard is given.
+
+    Returns the describe_param dict plus 'set' (value actually written) and
+    'frac' (its normalized position in range).
+    """
+    if (value is None) == (frac is None):
+        raise ValueError("set_param: pass exactly one of value= or frac=")
+    info = describe_param(ch, track_index, device_index, param_name, timeout=5.0)
+    lo, hi = info["min"], info["max"]
+    if frac is not None:
+        f = max(0.0, min(1.0, float(frac)))
+        target = lo + f * (hi - lo)
+    else:
+        if expect is not None and (abs(lo - expect[0]) > 1e-6 or abs(hi - expect[1]) > 1e-6):
+            raise ValueError(
+                f"{param_name!r} real range is {lo}..{hi}, not the expected "
+                f"{expect[0]}..{expect[1]} — value {value} would be on the wrong scale")
+        target = float(value)
+        if target < lo or target > hi:
+            clamped = max(lo, min(hi, target))
+            if not quiet:
+                print(f"  [clamp] {param_name}: {target} -> {clamped} (range {lo}..{hi})")
+            target = clamped
+    if info["quantized"]:
+        target = float(round(target))
+    ch.set_device_param(track_index, device_index, info["index"], target).result(timeout=timeout)
+    span = (hi - lo) or 1.0
+    info["set"] = target
+    info["frac"] = (target - lo) / span
+    return info
+
+
+def safe_set_param(ch, track_index: int, device_index: int,
+                    param_name: str, value: float) -> dict:
+    """Back-compat shim: absolute write, clamped to the real range. New code should
+    prefer set_param (frac= for scale-independent intent, expect= to assert range)."""
+    return set_param(ch, track_index, device_index, param_name, value=value)

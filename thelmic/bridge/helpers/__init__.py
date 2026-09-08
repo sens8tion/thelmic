@@ -9,7 +9,8 @@ from .eq          import (hz_to_norm, set_eq_band, disable_all_eq_bands,
                           EQ8_HP_12_GUESS, EQ8_HP_48_GUESS,
                           EQ8_LP_12_GUESS, EQ8_LP_48_GUESS)
 from .transport   import hard_reset, arm_take, disarm_take, ms_to_beats
-from .params      import safe_set_param, SemanticParam, resolve_semantic_param
+from .params      import (set_param, describe_param, safe_set_param,
+                          SemanticParam, resolve_semantic_param)
 from .sidechain   import sidechain_pump
 from .midi        import to_clip_notes, repeat_pattern
 from .shading     import (SceneShading, ShadingConfig, apply_shading,
@@ -22,7 +23,8 @@ __all__ = [
     "EQ8_BELL", "EQ8_HIGH_SHELF", "EQ8_LOW_SHELF_GUESS",
     "EQ8_HP_12_GUESS", "EQ8_HP_48_GUESS", "EQ8_LP_12_GUESS", "EQ8_LP_48_GUESS",
     "hard_reset", "arm_take", "disarm_take", "ms_to_beats",
-    "safe_set_param", "SemanticParam", "resolve_semantic_param",
+    "set_param", "describe_param", "safe_set_param",
+    "SemanticParam", "resolve_semantic_param",
     "sidechain_pump",
     "to_clip_notes", "repeat_pattern",
     "SceneShading", "ShadingConfig", "apply_shading",

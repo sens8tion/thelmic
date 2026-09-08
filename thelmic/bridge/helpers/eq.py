@@ -41,8 +41,12 @@ def set_eq_band(ch, track_index: int, eq_device_index: int, band: int, *,
                          hz_to_norm(hz)).result(timeout=3)
     ch.set_device_param(track_index, eq_device_index, idx[f"{band} Gain A"],
                          gain).result(timeout=3)
-    ch.set_device_param(track_index, eq_device_index, idx[f"{band} Resonance A"],
-                         q_norm).result(timeout=3)
+    # Resonance is named "Q A" on Live 12, "Resonance A" on older versions.
+    q_key = next((f"{band} {n} A" for n in ("Q", "Resonance")
+                  if f"{band} {n} A" in idx), None)
+    if q_key is not None:
+        ch.set_device_param(track_index, eq_device_index, idx[q_key],
+                             q_norm).result(timeout=3)
 
 
 def disable_all_eq_bands(ch, track_index: int, eq_device_index: int) -> None:

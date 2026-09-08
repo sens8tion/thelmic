@@ -32,7 +32,7 @@ from thelmic.bridge.helpers import (
     # transport
     hard_reset, arm_take, disarm_take, ms_to_beats,
     # params
-    safe_set_param, SemanticParam, resolve_semantic_param,
+    set_param, describe_param, safe_set_param, SemanticParam, resolve_semantic_param,
     # sidechain
     sidechain_pump,
     # patterns / utilities
@@ -65,7 +65,7 @@ __all__ = [
     "EQ8_BELL", "EQ8_HIGH_SHELF", "EQ8_LOW_SHELF_GUESS",
     "EQ8_HP_12_GUESS", "EQ8_HP_48_GUESS", "EQ8_LP_12_GUESS", "EQ8_LP_48_GUESS",
     "hard_reset", "arm_take", "disarm_take", "ms_to_beats",
-    "safe_set_param", "SemanticParam", "resolve_semantic_param",
+    "set_param", "describe_param", "safe_set_param", "SemanticParam", "resolve_semantic_param",
     "sidechain_pump", "to_clip_notes", "repeat_pattern",
     "Key", "Scale", "Chord", "Voicing",
     "NaturalMinor", "NaturalMajor", "Dorian", "Phrygian", "Mixolydian",
