@@ -111,6 +111,9 @@ _UI_THREAD_COMMANDS = {
     "clear_arrangement_clips",
     "get_arrangement_clips",
     "set_arrangement_clip_fades",
+    "delete_arrangement_clips",
+    "duplicate_arrangement_clip",
+    "set_arrangement_clip_property",
     "inspect_clip_envelopes",
     "re_enable_automation",
     "get_device_property",
@@ -497,6 +500,18 @@ class ThelmicLive(ControlSurface):
             )
         if cmd_type == "clear_arrangement_clips":
             return self._clear_arrangement_clips(params.get("track_index"))
+        if cmd_type == "delete_arrangement_clips":
+            return self._delete_arrangement_clips(
+                params["track_index"], params.get("start_beat"),
+                params.get("end_beat"))
+        if cmd_type == "duplicate_arrangement_clip":
+            return self._duplicate_arrangement_clip(
+                params["track_index"], params["clip_index"],
+                params["dest_beat"])
+        if cmd_type == "set_arrangement_clip_property":
+            return self._set_arrangement_clip_property(
+                params["track_index"], params["clip_index"],
+                params.get("attr"), params.get("value"))
         if cmd_type == "get_arrangement_loop":
             return self._get_arrangement_loop()
         if cmd_type == "set_arrangement_loop":
@@ -1844,6 +1859,89 @@ class ThelmicLive(ControlSurface):
                     errors.append("t" + str(ti) + ": " + str(e))
                     break
         return {"removed": removed, "errors": errors[:5]}
+
+    def _delete_arrangement_clips(self, track_index, start_beat=None,
+                                  end_beat=None):
+        """Delete arrangement clips whose start falls in [start, end) beats.
+
+        The whole-track clear was too blunt for editing: a lane usually needs
+        its opening removed while everything downstream stays exactly where it
+        is. Bounds are in beats and either may be omitted for open-ended.
+        Reports what it removed and what survived, because a silent partial
+        delete is worse than a refusal.
+        """
+        track, clips = self._arrangement_clips(track_index)
+        lo = float(start_beat) if start_beat is not None else float("-inf")
+        hi = float(end_beat) if end_beat is not None else float("inf")
+        doomed, kept = [], []
+        for c in clips:
+            st = float(getattr(c, "start_time", 0.0))
+            (doomed if lo <= st < hi else kept).append((c, st))
+        removed, errors = [], []
+        for c, st in doomed:
+            try:
+                name = getattr(c, "name", "")
+                track.delete_clip(c)
+                removed.append({"start_time": st, "name": name})
+            except Exception as e:
+                errors.append("start %.3f: %s" % (st, e))
+        return {"track_index": track_index, "removed": removed,
+                "removed_count": len(removed),
+                "kept_count": len(kept), "errors": errors[:5]}
+
+    def _duplicate_arrangement_clip(self, track_index, clip_index, dest_beat):
+        """Copy one arrangement clip to another point on the same timeline.
+
+        This is how a clip 'moves': duplicate, then delete the original. The
+        LOM has no way to write a clip's start_time, so without this a lane
+        can only be rebuilt by real-time recording.
+        """
+        track, clips = self._arrangement_clips(track_index)
+        i = int(clip_index)
+        if i < 0 or i >= len(clips):
+            raise ValueError("clip_index %d out of range (%d clips)"
+                             % (i, len(clips)))
+        dup = getattr(track, "duplicate_clip_to_arrangement", None)
+        if dup is None:
+            raise ValueError(
+                "Track.duplicate_clip_to_arrangement not exposed by this Live; "
+                "arrangement clips cannot be copied by the LOM here")
+        dest = float(dest_beat)
+        dup(clips[i], dest)
+        after = list(getattr(track, "arrangement_clips", []) or [])
+        made = [{"start_time": float(getattr(c, "start_time", 0.0)),
+                 "end_time": float(getattr(c, "end_time", 0.0)),
+                 "name": getattr(c, "name", "")}
+                for c in after
+                if abs(float(getattr(c, "start_time", -1e9)) - dest) < 1e-6]
+        return {"track_index": track_index, "source_index": i,
+                "dest_beat": dest, "created": made,
+                "clip_count": len(after)}
+
+    def _set_arrangement_clip_property(self, track_index, clip_index, attr,
+                                       value):
+        """Set one attribute on one arrangement clip, checked against the class.
+
+        Assigning an attribute a Live proxy does not have silently succeeds and
+        reads back, so the class is checked first and an unknown name is an
+        error rather than a fake success.
+        """
+        _track, clips = self._arrangement_clips(track_index)
+        i = int(clip_index)
+        if i < 0 or i >= len(clips):
+            raise ValueError("clip_index %d out of range (%d clips)"
+                             % (i, len(clips)))
+        clip = clips[i]
+        if not attr or not hasattr(type(clip), attr):
+            raise ValueError(
+                "Clip has no attribute %r; available: %s"
+                % (attr, ",".join(sorted(a for a in dir(clip)
+                                         if not a.startswith("_")))[:400]))
+        setattr(clip, attr, value)
+        return {"track_index": track_index, "clip_index": i, "attr": attr,
+                "value": getattr(clip, attr),
+                "name": getattr(clip, "name", ""),
+                "start_time": float(getattr(clip, "start_time", 0.0))}
 
     # ---- arrangement loop ------------------------------------------
 

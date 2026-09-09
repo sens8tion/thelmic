@@ -513,6 +513,41 @@ class LiveChannel:
         """Delete arrangement clips on one track, or across every track."""
         return self._enqueue("clear_arrangement_clips", {"track_index": track_index})
 
+    def delete_arrangement_clips(self, track_index: int,
+                                 start_beat: float | None = None,
+                                 end_beat: float | None = None) -> Future:
+        """Delete the clips on one track whose start falls in [start, end) beats.
+
+        Bounds are in beats, so multiply bars by the signature numerator.
+        Either bound may be None for open-ended. Use this rather than
+        ``clear_arrangement_clips`` whenever the rest of the lane must survive.
+        """
+        return self._enqueue("delete_arrangement_clips", {
+            "track_index": track_index,
+            "start_beat": start_beat, "end_beat": end_beat})
+
+    def duplicate_arrangement_clip(self, track_index: int, clip_index: int,
+                                   dest_beat: float) -> Future:
+        """Copy one arrangement clip to another beat on the same track.
+
+        There is no way to write an arrangement clip's ``start_time``, so
+        moving a clip means duplicating it here and deleting the original.
+        """
+        return self._enqueue("duplicate_arrangement_clip", {
+            "track_index": track_index, "clip_index": clip_index,
+            "dest_beat": dest_beat})
+
+    def set_arrangement_clip_property(self, track_index: int, clip_index: int,
+                                      attr: str, value) -> Future:
+        """Set one attribute on one arrangement clip (``muted``, ``name``, ...).
+
+        The attribute is checked against the Clip class first, so a misspelling
+        raises instead of silently creating a proxy attribute that reads back.
+        """
+        return self._enqueue("set_arrangement_clip_property", {
+            "track_index": track_index, "clip_index": clip_index,
+            "attr": attr, "value": value})
+
     def get_arrangement_loop(self) -> Future:
         return self._enqueue("get_arrangement_loop", {})
 
