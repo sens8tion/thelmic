@@ -113,6 +113,19 @@ SLICE_FADE_IN_MS = 1.0
 SLICE_FADE_OUT_MS = 3.0
 
 
+def op_time_raw(ms: float) -> float:
+    """Operator envelope Decay/Release raw value for a time in ms. The knob maps ms = e^(11 * raw)
+    (60 s at 1.0; fits five display readings exactly). Attack is on a different curve. Raw values
+    that look sensible as linear time are tiny here: 0.30 is 27 ms, 0.12 is 3.7 ms."""
+    return math.log(ms) / 11.0
+
+
+def analog_time_raw(ms: float) -> float:
+    """Analog envelope time raw value for a time in ms: ms ~ 5 * e^(8.05 * raw) (fits attack 0.02 = 6 ms,
+    release 0.20 = 25 ms, decay 0.60 = 626 ms, read off Live's display)."""
+    return math.log(ms / 5.0) / 8.05
+
+
 def simpler(transpose: float, volume_db: float, detune_cents: float = 0.0) -> dict:
     return {
         "Transpose": transpose,     # [-48..48] st
@@ -137,10 +150,11 @@ BOOT_KICK = {
     "Algorithm": 0, "Volume": 0.70,
     "Osc-A Wave": 0,                                    # sine
     "Osc-B On": 0, "Osc-C On": 0, "Osc-D On": 0,        # nothing modulates A -> pure sine
-    "Ae Attack": 0.0, "Ae Decay": 0.30, "Ae Sustain": 0.0, "Ae Release": 0.15,
+    # 200 ms body, 30 ms release: a 0.4-beat note is gone by ~170 ms, before the sub enters at 176
+    "Ae Attack": 0.0, "Ae Decay": op_time_raw(200), "Ae Sustain": 0.0, "Ae Release": op_time_raw(30),
     "Pe On": 1, "Pe Attack": 0.0,
     "Pe Peak": 24.0,                                    # semitones [-48..48] (SKULLKICK used 28)
-    "Pe Decay": 0.12, "Pe Sustain": 0.0, "Pe End": 0.0, "Pe Amount": 1.0,
+    "Pe Decay": op_time_raw(40), "Pe Sustain": 0.0, "Pe End": 0.0, "Pe Amount": 1.0,   # 40 ms drop
 }
 
 # Sine sub. Attack just off zero so a note start never clicks.
@@ -148,7 +162,8 @@ F_HOLE_SUB = {
     "Algorithm": 0, "Volume": 0.75,
     "Osc-A On": 1, "Osc-A Wave": 0,
     "Osc-B On": 0, "Osc-C On": 0, "Osc-D On": 0,
-    "Ae Attack": 0.02, "Ae Decay": 1.0, "Ae Sustain": 1.0, "Ae Release": 0.12,
+    # attack 0.02 reads 0.13 ms; 50 ms release clears 38 ms before the next kick (notes end 88 ms early)
+    "Ae Attack": 0.02, "Ae Decay": 1.0, "Ae Sustain": 1.0, "Ae Release": op_time_raw(50),
     "Pe On": 0,
     "Glide On": 1, "Glide Time": 0.35,                  # in the Operator.json dump; not live-checked here
 }
@@ -167,7 +182,8 @@ RASP_REESE = {
     # UNVERIFIED: HOOVER has no LFO->filter amount (only "O2 PW < LFO"). This name is a guess
     # patterned on "F1 Freq < Env"; if it is wrong it logs [skip] and LFO1 simply drives nothing.
     "F1 Freq < LFO": 0.15,
-    "AEG1 Attack": 0.02, "AEG1 Sustain": 1.0, "AEG1 Rel": 0.20,
+    # attack 0.02 reads 6 ms; 0.20 release was a 25 ms hard cut on every note, 80 ms lets it breathe
+    "AEG1 Attack": 0.02, "AEG1 Sustain": 1.0, "AEG1 Rel": analog_time_raw(80),
 }
 
 # Light FM layer set against the dark bass. Algorithm 0: B modulates A.
@@ -178,7 +194,7 @@ BELL_FM = {
     "B Fine": 12.0,                                     # [0..1000]; believed ratio 3.012 -> slight inharmonic shimmer
     "Osc-B Level": 0.55,
     "Osc-C On": 0, "Osc-D On": 0,
-    "Ae Attack": 0.0, "Ae Decay": 0.45, "Ae Sustain": 0.0, "Ae Release": 0.40,
+    "Ae Attack": 0.0, "Ae Decay": op_time_raw(900), "Ae Sustain": 0.0, "Ae Release": op_time_raw(500),  # ring
 }
 
 
