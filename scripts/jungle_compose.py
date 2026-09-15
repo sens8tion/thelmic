@@ -136,8 +136,10 @@ def units(fns):
 
 
 def break_notes(brk: Break, events, length: float):
-    """Events -> (pitch, start, dur, vel). One hit per onset (the louder wins); each note gated to
-    end GATE_MARGIN before the slice's own end or the next hit, whichever comes first."""
+    """Events -> (pitch, start, dur, vel). One hit per onset (the louder wins). The break Simplers
+    slice in Poly mode, so hits overlap and ring out: a note runs its slice's full length, or its
+    wanted length (roll steps), and is only cut by the next hit on the SAME slice (Retrigger) or
+    the clip end."""
     ev = sorted((e for e in events if -1e-6 <= e[1] < length - 1e-6), key=lambda e: (e[1], -e[2]))
     kept = []
     for e in ev:
@@ -146,8 +148,8 @@ def break_notes(brk: Break, events, length: float):
         kept.append(e)
     out = []
     for k, (i, st, vel, want) in enumerate(kept):
-        nxt = kept[k + 1][1] if k + 1 < len(kept) else length
-        dur = min(brk.natural(i), nxt - st, want if want else 1e9) - GATE_MARGIN
+        nxt = next((e[1] for e in kept[k + 1:] if e[0] == i), length)
+        dur = min(brk.natural(i), nxt - st, length - st, want if want else 1e9) - GATE_MARGIN
         if dur < 0.03:
             continue
         out.append((SLICE_ROOT + i, round(st, 4), round(dur, 4), max(1, min(127, vel))))
