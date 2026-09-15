@@ -62,6 +62,10 @@ NEW_LANES = [
          fx=[uri(EQ8, "EQ Eight", eq=[low_cut(150)]),
              uri(ECHO, "Echo"),
              preset(f"{CORE_FX}/Hybrid Reverb/Hall", "Keys Bastille.adv")]),
+    # one note, over and over, at phrase ends: the rack voices it as a minor chord
+    dict(name="STAB-VEST", after="LIP-SERVICE", instrument=(f"{SKITTER}/Pads", "Cavity Soup Stab (minor).adg"),
+         fx=[uri(EQ8, "EQ Eight", eq=[low_cut(200)]),
+             uri(ECHO, "Echo")]),
 ]
 INSERTS = {
     "TOPSOIL":    [preset(f"{CORE_FX}/Reverb/Room", "High Verb.adv"),
@@ -120,7 +124,36 @@ SETTINGS: list[tuple[str, str, str, float | str]] = [
     ("RASP-BERRY", "Reese Classic", "Flanger", 35.0),
     ("RASP-BERRY", "Reese Classic", "LFO Amount", 40.0),
     ("RASP-BERRY", "Reese Classic", "LFO Rate", "1/2"),
+    # SPACE. Every low cut written through set_eq_band landed about half what was asked, so the breaks
+    # were still filling the kick and sub's octave. These are Live's own displayed frequencies.
+    ("AMEN-DMENT", "EQ Eight", "1 Frequency A", 120.0),
+    ("AMEN-DMENT", "EQ Eight", "2 Frequency A", 300.0),
+    ("AMEN-DMENT", "EQ Eight", "3 Frequency A", 10000.0),
+    ("SWEAT-SHOP", "EQ Eight", "1 Frequency A", 200.0),
+    ("SWEAT-SHOP", "EQ Eight", "2 Frequency A", 300.0),
+    ("TOPSOIL", "EQ Eight", "1 Frequency A", 400.0),
+    ("BOOT-LEG", "EQ Eight", "1 Frequency A", 40.0),
+    ("BOOT-LEG", "EQ Eight", "2 Frequency A", 90.0),
+    ("RASP-BERRY", "EQ Eight", "1 Frequency A", 120.0),
+    ("RASP-BERRY", "EQ Eight", "2 Frequency A", 300.0),
+    ("BELL-END", "EQ Eight", "1 Frequency A", 350.0),
+    ("LIP-SERVICE", "EQ Eight", "1 Frequency A", 250.0),
+    ("HALO-PERIDOL", "EQ Eight", "1 Frequency A", 350.0),
+    # the pad gets out of the bell and lead's way with a dip where they live
+    ("HALO-PERIDOL", "EQ Eight", "2 Frequency A", 2000.0),
+    ("HALO-PERIDOL", "EQ Eight", "2 Gain A", -4.0),
+    # STAB-VEST: nothing under 200 Hz, a short 3/16 ping-pong tail
+    ("STAB-VEST", "EQ Eight", "1 Frequency A", 200.0),
+    ("STAB-VEST", "Echo", "Channel Mode", "Ping Pong"),
+    ("STAB-VEST", "Echo", "Feedback", 28.0),
+    ("STAB-VEST", "Echo", "HP Freq", 500.0),
+    ("STAB-VEST", "Echo", "LP Freq", 8000.0),
+    ("STAB-VEST", "Echo", "Dry Wet", 18.0),
 ]
+
+# Track pan. Kick, sub, breaks and stabs' weight stay centred; the voices that share the top octave
+# sit apart from each other, and the auto-panned lanes are left alone to move.
+PANS = {"BELL-END": -0.25, "LIP-SERVICE": 0.25, "STAB-VEST": -0.12}
 
 # devices taken back out. Filtered Dub Tech (a 5.6 s Hybrid Reverb) fed by an echo made an endless shimmer.
 REMOVE = {"THROW-UP": ["Filtered Dub Tech"]}
@@ -128,7 +161,10 @@ REMOVE = {"THROW-UP": ["Filtered Dub Tech"]}
 # lanes keyed from the kick, on top of jungle_sidechain.DUCKS
 EXTRA_DUCKS = {
     "RASP-UTIN":    dict(gr_db=6.0, ratio=4.0, attack_ms=1.0, release_ms=120.0),
-    "HALO-PERIDOL": dict(gr_db=3.0, ratio=2.0, attack_ms=5.0, release_ms=160.0),
+    # the pad is keyed from the LEAD, not the kick: it steps back whenever the lead is playing and
+    # comes back up in the lead's rests. That is the space, made automatic.
+    "HALO-PERIDOL": dict(gr_db=5.0, ratio=2.5, attack_ms=8.0, release_ms=220.0,
+                         key="LIP-SERVICE", key_peak_db=-4.0),
 }
 
 
@@ -266,6 +302,14 @@ def apply_settings(ch):
                     print(f"  [skip] {track} {dev} {pname} -> {target}: {e!r}")
                 else:
                     time.sleep(2.0)
+    for track, pan in PANS.items():
+        if track not in idx:
+            continue
+        try:
+            ch.set_track_pan(idx[track], float(pan)).result(timeout=5)
+            print(f"  {track:<12} pan{' ' * 33}-> {pan:+.2f}")
+        except Exception as e:
+            print(f"  [skip] pan {track}: {e!r}")
 
 
 def touched(ch):

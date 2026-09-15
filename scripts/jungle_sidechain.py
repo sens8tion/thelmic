@@ -94,9 +94,13 @@ def set_choice(ch, t, d, name, wanted):
 
 
 def apply(ch, idx: dict):
-    """Key a Compressor on every DUCKS lane from KEY_TRACK, set in real units. idx = {track name: index}."""
-    key = idx[KEY_TRACK]
+    """Key a Compressor on every DUCKS lane, set in real units. idx = {track name: index}. A lane keys
+    off KEY_TRACK (the kick) unless its spec names another track in "key" - the pad ducks off the lead,
+    which is how the two share the same octave."""
     for lane, spec in DUCKS.items():
+        key_name = spec.get("key", KEY_TRACK)
+        key_peak = spec.get("key_peak_db", KEY_PEAK_DB)
+        key = idx[key_name]
         t = idx[lane]
         chain = [x["class_name"] for x in ch.get_track_info(t).result(timeout=5)["devices"]]
         if "Compressor2" not in chain:
@@ -106,19 +110,19 @@ def apply(ch, idx: dict):
         d = len(chain) - 1 - chain[::-1].index("Compressor2")
         ch.set_device_sidechain_source(t, d, key).result(timeout=10)
         source = ch.get_device_routing_options(t, d).result(timeout=5)["current_type"]
-        if KEY_TRACK not in source:
-            raise SystemExit(f"{lane}: sidechain source reads {source!r}, not {KEY_TRACK}")
+        if key_name not in source:
+            raise SystemExit(f"{lane}: sidechain source reads {source!r}, not {key_name}")
         for toggle, raw in (("S/C On", 1.0), ("S/C EQ On", 0.0), ("Makeup", 0.0), ("Auto Release On/Off", 0.0)):
             ch.set_device_param(t, d, _param(ch, t, d, toggle)["index"], raw).result(timeout=3)
         model = set_choice(ch, t, d, "Model", "Peak")
-        threshold = KEY_PEAK_DB - spec["gr_db"] / (1.0 - 1.0 / spec["ratio"])
+        threshold = key_peak - spec["gr_db"] / (1.0 - 1.0 / spec["ratio"])
         shown = {name: set_by_display(ch, t, d, name, target)
                  for name, target in (("Ratio", spec["ratio"]), ("Attack", spec["attack_ms"]),
                                       ("Release", spec["release_ms"]), ("Threshold", threshold))}
         knee = _param(ch, t, d, "Knee")["display"]
         print(f"{lane}: Compressor @dev{d} keyed from {source}, model {model}, "
               + ", ".join(f"{k} {v}" for k, v in shown.items()) + f", knee {knee} "
-              f"(aiming for ~{spec['gr_db']:g} dB of duck on a {KEY_PEAK_DB:g} dB kick)")
+              f"(aiming for ~{spec['gr_db']:g} dB of duck on a {key_peak:g} dB {key_name})")
 
 
 def main():

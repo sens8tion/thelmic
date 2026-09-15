@@ -42,7 +42,7 @@ LOOP_S = 32 * 60.0 / 170 + 0.3   # one whole 8-bar loop: every fader pass hears 
 # Representative clip (session row) per lane: its densest / loudest material.
 PROBE_ROW = {"AMEN-DMENT": 15, "SWEAT-SHOP": 12, "TOPSOIL": 0, "BOOT-LEG": 4,
              "F-HOLE": 4, "RASP-BERRY": 4, "RASP-UTIN": 13, "BELL-END": 1,
-             "HALO-PERIDOL": 1, "LIP-SERVICE": 4}
+             "HALO-PERIDOL": 1, "LIP-SERVICE": 4, "STAB-VEST": 5}   # the fill: a stab every bar
 
 # Gain stages in chain order: (device class, param, unit). "db" params move in dB; "norm" params
 # are 0..1 with an unknown curve, stepped along the fader curve and re-measured.
@@ -60,17 +60,18 @@ STAGES = {
     "BELL-END":   [("Operator", "Volume", "norm"), ("Eq8", "Output", "db")],
     "HALO-PERIDOL": [("Eq8", "Output", "db")],
     "LIP-SERVICE":  [("Eq8", "Output", "db")],
+    "STAB-VEST":    [("Eq8", "Output", "db")],
     # THROW-UP is only echo and reverb tails of a hit or two per loop: no steady stage to meter, so
     # only its fader is balanced
 }
 
 BALANCE_ROW = 13        # F-ALL: nearly every lane plays; the master is protected on this row
-BALANCE_ROWS = [(13, ["BOOT-LEG", "F-HOLE", "AMEN-DMENT", "RASP-UTIN", "BELL-END", "SWEAT-SHOP", "TOPSOIL",
-                      "HALO-PERIDOL", "LIP-SERVICE", "THROW-UP"]),
-                (4, ["RASP-BERRY"])]                 # the first reese sits out drop 2
+BALANCE_ROWS = [(13, ["BOOT-LEG", "F-HOLE", "AMEN-DMENT", "RASP-UTIN", "SWEAT-SHOP", "TOPSOIL",
+                      "HALO-PERIDOL", "LIP-SERVICE", "STAB-VEST", "THROW-UP"]),
+                (4, ["RASP-BERRY", "BELL-END"])]     # neither plays in drop 2 any more
 FADER_TARGET = {"BOOT-LEG": 0.82, "F-HOLE": 0.82, "AMEN-DMENT": 0.76, "RASP-BERRY": 0.72, "RASP-UTIN": 0.72,
-                "BELL-END": 0.70, "LIP-SERVICE": 0.70, "SWEAT-SHOP": 0.66, "TOPSOIL": 0.66,
-                "HALO-PERIDOL": 0.64, "THROW-UP": 0.64}
+                "STAB-VEST": 0.72, "BELL-END": 0.68, "LIP-SERVICE": 0.68, "SWEAT-SHOP": 0.66,
+                "TOPSOIL": 0.66, "HALO-PERIDOL": 0.60, "THROW-UP": 0.64}
 REPORT_ROWS = [(4, "BOTTOM FEEDER"), (10, "NOBODY HOME"), (12, "SWEAT EQUITY"), (13, "F-ALL"),
                (15, "TERMINAL VELOCITY")]
 

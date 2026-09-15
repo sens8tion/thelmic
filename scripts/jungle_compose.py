@@ -6,20 +6,20 @@ are 1 bar and sit under the groove they belong to. Launch quantization is 1 bar.
   row  name                         bars  what it is
    0   TOPSOIL ONLY                   8   Apache tops + hands
    1   PRE-AMBLE                      8   + FM bell, strings pad
-   2   DRONE ON                       8   + reese bed, Amen hats, first lead phrases
+   2   DRONE ON                       8   + reese bed, Amen hats (the lead waits for the drop)
    3   WIND-UP MERCHANT               8   build: Amen snares, no kick/sub; rolls into a gap
-   4   BOTTOM FEEDER                  8   drop A, lead theme A
+   4   BOTTOM FEEDER                  8   drop A, the LEAD's row: lead + bell, no pad
    5   BOTTOM FEEDER >> FILL          1   roll + gap
-   6   BOTTOM FEEDER II               8   drop A, reordered, second bass phrase
-   7   CHOP SUEY                      8   drop, heavy block edits, reese stabs
+   6   BOTTOM FEEDER II               8   drop A reordered, the PAD's row: pad + bell, no lead
+   7   CHOP SUEY                      8   drop, heavy block edits, reese stabs; one bell note up top
    8   CHOP SUEY >> FILL              1
    9   HOLE                           1   the bar with no downbeat (launch on a phrase start)
   10   NOBODY HOME                    8   breakdown: reese Fm-Db, lead in front, bell
   11   NOBODY HOME II                 8   breakdown: reese Eb-C, bell, hands return, sub pulse
   12   SWEAT EQUITY                   8   build 2 on Cold Sweat rolls
-  13   F-ALL                          8   drop 2: second reese, lead theme B, Cold Sweat tops
+  13   F-ALL                          8   drop 2: second reese, lead theme B over 4 bars of pad
   14   F-ALL >> FILL                  1
-  15   TERMINAL VELOCITY              8   drop 2, heaviest edits
+  15   TERMINAL VELOCITY              8   drop 2, heaviest edits: bell then pad, no lead
   16   TERMINAL VELOCITY >> FILL      1   longer roll
   17   EXIT WOUND                     8   plain Amen + kick + sub: mix-out
   18   EXIT WOUND >> TOPS             8   tops + bell + lead
@@ -310,6 +310,7 @@ PAD_CHORDS = {                   # voiced Ab4-G5 so the sustain sits in the uppe
     "Cm11":    [67, 70, 75, 77],   # G Bb Eb F
 }
 PROGRESSION = ["Fm9", "Dbmaj9", "Bbm9", "Eb9sus4"]
+PAD_PROGRESSION = [(c, k * 16.0, 16.0) for k, c in enumerate(PROGRESSION)]   # 16 bars
 
 
 def pad(spans, vel=84):
@@ -370,6 +371,29 @@ BELL_MOTIFS = {                  # 2-bar shapes (8 beats), F minor, Ab5-G6; no t
 }
 
 
+# STAB-VEST: one note, always the same one. F is in every chord of the progression, so an F stab is
+# in key over all of it; the rack voices the chord. Stabs are punctuation, not a part: they only land
+# at phrase ends and as pushes into a drop.
+STAB_PITCH = 53                  # F3
+STAB_SHAPES = {                  # offsets inside a 2-bar unit (8 beats)
+    "push":   [(6.75, 0.15, 112), (7.25, 0.15, 118), (7.75, 0.15, 127)],   # three 16ths over the bar line
+    "pair":   [(2.5, 0.2, 110), (3.25, 0.2, 116)],                          # syncopated, mid-unit
+    "single": [(7.5, 0.25, 120)],
+    "answer": [(1.75, 0.15, 108), (2.25, 0.15, 114), (5.75, 0.2, 118)],
+}
+
+
+def stab_notes(plan, length, pitch=STAB_PITCH):
+    """[(unit index, shape name)] -> notes. One pitch throughout: the rhythm is the whole point."""
+    out = []
+    for unit, shape in plan:
+        for off, dur, vel in STAB_SHAPES[shape]:
+            t = unit * UNIT + off
+            if t < length:
+                out.append((pitch, round(t, 4), round(min(dur, length - t), 4), vel))
+    return out
+
+
 def bell_plan(length, windows, vel=104):
     """[(start beat, "motif" or "motif+motif")] -> (notes, clip length). One 2-bar window each."""
     notes = []
@@ -403,8 +427,7 @@ def row_drone_on():
                "BELL-END": bell_plan(64.0, [(0, "offbeat"), (16, "held")]),
                "AMEN-DMENT": break_notes(AMEN, amen, L),
                "RASP-BERRY": [(41, 0.0, 15.5, 80), (37, 16.0, 15.5, 84)],
-               "HALO-PERIDOL": progression(),
-               "LIP-SERVICE": lead(THEME_A, 64.0, window=(32.0, 64.0))}
+               "HALO-PERIDOL": progression()}       # the lead saves itself for the first drop
 
 
 def row_build1():
@@ -415,11 +438,16 @@ def row_build1():
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "TOPSOIL": break_notes(TOP, top, L),
                "BELL-END": bell_plan(32.0, [(0, "offbeat"), (16, "climb")]), "RASP-BERRY": reese,
                "HALO-PERIDOL": pad([("Fm9", 0.0, 16.0), ("Dbmaj9", 16.0, 8.0), ("Eb9sus4", 24.0, 6.5)])[0],
+               "STAB-VEST": stab_notes([(3, "push")], L),       # three stabs across the gap into the drop
                "THROW-UP": break_notes(AMEN, throws([30.375], slice_index=17), L)}
 
 
-def groove_row(amen_fns, sub_cells, bell_windows, *, reese="follow", reese_lane="RASP-BERRY",
-               theme=None, theme_window=(0.0, 1e9), throw_at=(30.96,), sweat=False, top_hats=None):
+def groove_row(amen_fns, sub_cells, bell_windows=(), *, reese="follow", reese_lane="RASP-BERRY",
+               theme=None, theme_window=(0.0, 1e9), throw_at=(30.96,), sweat=(), top_hats=None,
+               pad_spans=None, stabs=None):
+    """One 8-bar groove. Drums, kick and bass are always here; the upper voices are a CAST, chosen per
+    row so that no more than two of bell / pad / lead ever sound in the same bar (check() enforces it).
+    `sweat` lists which 2-bar units the Cold Sweat tops play in, not all four."""
     L = UNIT * 4
     amen = units(amen_fns)
     sub = sub_line(sub_cells, L)
@@ -427,17 +455,26 @@ def groove_row(amen_fns, sub_cells, bell_windows, *, reese="follow", reese_lane=
     if top_hats:
         top += units([lambda u: t_hats(u, top_hats)] * 4)
     lanes = {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
-             reese_lane: reese_line(sub, reese), "BELL-END": bell_plan(64.0, bell_windows),
-             "TOPSOIL": break_notes(TOP, top, L), "HALO-PERIDOL": progression(),
+             reese_lane: reese_line(sub, reese), "TOPSOIL": break_notes(TOP, top, L),
              "THROW-UP": break_notes(AMEN, throws(throw_at), L)}
+    if bell_windows:
+        lanes["BELL-END"] = bell_plan(64.0, bell_windows)
+    if pad_spans:
+        notes, end = pad(pad_spans)
+        lanes["HALO-PERIDOL"] = (notes, L if end <= L else UNIT * 8)   # half-row spans still loop with the row
     if theme:
         lanes["LIP-SERVICE"] = lead(theme, 64.0, window=theme_window)
+    if stabs:
+        lanes["STAB-VEST"] = stab_notes(stabs, L)
     if sweat:
-        lanes["SWEAT-SHOP"] = break_notes(SWEAT, units([lambda u: s_tops(u, 0.75)] * 4), L)
+        ev = []
+        for u in sweat:
+            ev += s_tops(u * UNIT, 0.75)
+        lanes["SWEAT-SHOP"] = break_notes(SWEAT, ev, L)
     return L, lanes
 
 
-def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=False, top_hats=None):
+def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=(), top_hats=None):
     """One bar: `first` (break events up to roll_from), 16th snares for a beat, 32nds to 3.5, gap.
     The pad holds the Eb9sus4 tension; the last roll hit is thrown into the echo."""
     L = BAR
@@ -450,10 +487,16 @@ def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=False, top_
     lanes = {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
              reese_lane: reese_line(sub, "follow"), "TOPSOIL": break_notes(TOP, top, L),
              "HALO-PERIDOL": pad([("Eb9sus4", 0.0, L)]),
+             "STAB-VEST": [(STAB_PITCH, 3.5, 0.2, 122)],        # one stab pushing into whatever comes next
              "THROW-UP": break_notes(AMEN, throws([3.375]), L)}
     if sweat:
         lanes["SWEAT-SHOP"] = break_notes(SWEAT, before(s_tops(0, 0.75), roll_from), L)
     return L, lanes
+
+
+# Chord spans for a row that wants the pad in only part of its 8 bars.
+PAD_FIRST_HALF = [("Fm9", 0.0, 16.0)]
+PAD_SECOND_HALF = [("Bbm9", 16.0, 8.0), ("Eb9sus4", 24.0, 8.0)]
 
 
 def row_hole():
@@ -465,6 +508,7 @@ def row_hole():
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
                "RASP-BERRY": reese_line(sub, "follow"), "TOPSOIL": break_notes(TOP, before(top, L), L),
                "HALO-PERIDOL": pad([("Fm9", 1.0, L - 1.0)]),
+               "STAB-VEST": [(STAB_PITCH, 1.0, 0.25, 118)],     # lands with the snare that breaks the silence
                "THROW-UP": break_notes(AMEN, throws([AMEN.home[2]], slice_index=2), L)}
 
 
@@ -480,7 +524,7 @@ def row_breakdown2():
     L = 32.0
     top = t_hands(0, 0.9) + t_hands(8, 0.9) + t_home(16, 0.85) + t_home(24, 0.85)
     return L, {"RASP-BERRY": [(39, 0.0, 15.5, 92), (36, 16.0, 15.5, 94)],          # Eb, C
-               "BELL-END": bell_plan(64.0, [(14, "held")]),                      # in the lead's rest
+               # no bell here: pad and lead already own the top octave for these 8 bars
                "TOPSOIL": break_notes(TOP, top, L),
                "F-HOLE": [(F1, 16.0 + 4 * k, 0.5, 100) for k in range(4)],       # the floor, just a pulse
                "HALO-PERIDOL": pad([("Eb9sus4", 0.0, 16.0), ("Cm11", 16.0, 16.0)]),
@@ -498,6 +542,7 @@ def row_build2():
                "TOPSOIL": break_notes(TOP, top, L), "BELL-END": bell_plan(32.0, [(8, "climb")]),
                "RASP-BERRY": reese,
                "HALO-PERIDOL": pad([("Dbmaj9", 0.0, 16.0), ("Eb9sus4", 16.0, 14.5)])[0],   # clip = row length
+               "STAB-VEST": stab_notes([(3, "push")], L),
                "THROW-UP": break_notes(AMEN, throws([30.375], slice_index=17), L)}
 
 
@@ -524,41 +569,45 @@ ROWS = [
     ("PRE-AMBLE", row_preamble),
     ("DRONE ON", row_drone_on),
     ("WIND-UP MERCHANT", row_build1),
+    # the drops take turns up top: the lead's row, then the pad's row, then neither
     ("BOTTOM FEEDER", lambda: groove_row([a_home, a_home, a_home, a_edit1], ["A", "A", "A", "A!"],
-                                         [(8, "call+answer"), (40, "fall")], reese="slide", theme=THEME_A)),
+                                         [(8, "call+answer")], reese="slide", theme=THEME_A)),
     ("BOTTOM FEEDER >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0))),
     ("BOTTOM FEEDER II", lambda: groove_row([a_home, a_home, a_reorder, a_edit1], ["B", "B", "B", "B!"],
                                             [(16, "offbeat"), (48, "climb")], reese="octaves",
-                                            throw_at=(14.96, 30.96))),
+                                            pad_spans=PAD_PROGRESSION, throw_at=(14.96, 30.96))),
     ("CHOP SUEY", lambda: groove_row([a_reorder, a_reorder, a_reorder, a_edit2], ["B", "B", "B", "B!"],
-                                     [(32, "held")], reese="stabs", top_hats=0.6, throw_at=(22.96, 30.96))),
+                                     [(32, "held")], reese="stabs", top_hats=0.6, throw_at=(22.96, 30.96),
+                                     stabs=[(1, "pair"), (3, "push")])),
     ("CHOP SUEY >> FILL", lambda: fill_row(block(AMEN, 4, 2, 0), top_hats=0.6)),
     ("HOLE", row_hole),
     ("NOBODY HOME", row_breakdown1),
     ("NOBODY HOME II", row_breakdown2),
     ("SWEAT EQUITY", row_build2),
+    # drop 2: the lead leads F-ALL over four bars of pad; TERMINAL VELOCITY is the drums' row again
     ("F-ALL", lambda: groove_row([a_home, a_reorder, a_home, a_edit1], ["A", "A", "A", "A!"],
-                                 [(8, "fall"), (40, "climb")], reese="slide", reese_lane="RASP-UTIN",
-                                 theme=THEME_B, sweat=True, top_hats=0.6)),
-    ("F-ALL >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), reese_lane="RASP-UTIN", sweat=True, top_hats=0.6)),
+                                 reese="slide", reese_lane="RASP-UTIN", theme=THEME_B,
+                                 pad_spans=PAD_FIRST_HALF, sweat=(1, 3), stabs=[(1, "pair")])),
+    ("F-ALL >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), reese_lane="RASP-UTIN", sweat=(0,))),
     ("TERMINAL VELOCITY", lambda: groove_row([a_edit2, a_reorder, a_edit2, a_edit1], ["B", "B", "B", "B!"],
                                              [(0, "offbeat"), (40, "held")], reese="octaves", reese_lane="RASP-UTIN",
-                                             theme=THEME_B, theme_window=(32.0, 64.0), sweat=True, top_hats=0.6,
-                                             throw_at=(14.96, 30.96))),
+                                             pad_spans=PAD_SECOND_HALF, sweat=(0, 2),
+                                             throw_at=(14.96, 30.96), stabs=[(3, "push")])),
     ("TERMINAL VELOCITY >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), roll_from=1.5, reese_lane="RASP-UTIN",
-                                                   sweat=True, top_hats=0.6)),
+                                                   sweat=(0,))),
     ("EXIT WOUND", row_exit),
     ("EXIT WOUND >> TOPS", row_exit_tops),
 ]
 
 LANES = ["AMEN-DMENT", "SWEAT-SHOP", "TOPSOIL", "BOOT-LEG", "F-HOLE", "RASP-BERRY", "RASP-UTIN",
-         "BELL-END", "HALO-PERIDOL", "LIP-SERVICE", "THROW-UP"]
+         "BELL-END", "HALO-PERIDOL", "LIP-SERVICE", "STAB-VEST", "THROW-UP"]
 NICK = {"AMEN-DMENT": "amen", "SWEAT-SHOP": "sweat", "TOPSOIL": "tops", "BOOT-LEG": "boot",
         "F-HOLE": "sub", "RASP-BERRY": "rasp", "RASP-UTIN": "rasputin", "BELL-END": "bell",
-        "HALO-PERIDOL": "pad", "LIP-SERVICE": "lead", "THROW-UP": "throw"}
+        "HALO-PERIDOL": "pad", "LIP-SERVICE": "lead", "STAB-VEST": "stab", "THROW-UP": "throw"}
 
 # Bars 7-8 and 15-16 (beats 24-32, 56-64) are the drums' disturbance bars: the bell stays out.
 DISTURBANCE_WINDOWS = [(24.0, 32.0), (56.0, 64.0)]
+VOICES = ["BELL-END", "HALO-PERIDOL", "LIP-SERVICE", "STAB-VEST"]   # everything above the bass
 
 
 def lane_value(value, row_length):
@@ -594,6 +643,15 @@ def check(name, L, lanes):
         both = sum(1 for _, s, _, _ in bell for _, ls, ld, _ in lead_notes if ls <= s < ls + ld)
         if both > 2:
             issues.append(f"bell over lead x{both}")
+    # space up top: bell, pad and lead share one octave, so at most two of them may sound in a bar
+    voices = {v: set() for v in VOICES}
+    for v in VOICES:
+        if v in lanes:
+            for _, s, d, _ in tiled(*lane_value(lanes[v], L)):
+                voices[v] |= {int(b) for b in range(int(s // BAR), int((s + d - 1e-6) // BAR) + 1)}
+    crowded = [b for b in range(int(64 // BAR)) if sum(b in voices[v] for v in VOICES) > 2]
+    if crowded:
+        issues.append(f"3 voices up top in bar(s) {[b + 1 for b in crowded]}")
     flag = f"   [warn] {', '.join(issues)}" if issues else ""
     print(f"  {name:<26} {L / 4:>4g} bars | {'  '.join(counts)}{flag}")
     return len(issues)
