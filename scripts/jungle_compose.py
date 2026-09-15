@@ -5,24 +5,24 @@ are 1 bar and sit under the groove they belong to. Launch quantization is 1 bar.
 
   row  name                         bars  what it is
    0   TOPSOIL ONLY                   8   Apache tops + hands
-   1   PRE-AMBLE                      8   + FM bell
-   2   DRONE ON                       8   + reese bed, Amen hats
+   1   PRE-AMBLE                      8   + FM bell, strings pad
+   2   DRONE ON                       8   + reese bed, Amen hats, first lead phrases
    3   WIND-UP MERCHANT               8   build: Amen snares, no kick/sub; rolls into a gap
-   4   BOTTOM FEEDER                  8   drop A
+   4   BOTTOM FEEDER                  8   drop A, lead theme A
    5   BOTTOM FEEDER >> FILL          1   roll + gap
    6   BOTTOM FEEDER II               8   drop A, reordered, second bass phrase
-   7   CHOP SUEY                      8   drop, heavy block edits
+   7   CHOP SUEY                      8   drop, heavy block edits, reese stabs
    8   CHOP SUEY >> FILL              1
    9   HOLE                           1   the bar with no downbeat (launch on a phrase start)
-  10   NOBODY HOME                    8   breakdown: reese Fm-Db, bell in front, no drums
+  10   NOBODY HOME                    8   breakdown: reese Fm-Db, lead in front, bell
   11   NOBODY HOME II                 8   breakdown: reese Eb-C, bell, hands return, sub pulse
   12   SWEAT EQUITY                   8   build 2 on Cold Sweat rolls
-  13   F-ALL                          8   drop 2, Cold Sweat tops layered
+  13   F-ALL                          8   drop 2: second reese, lead theme B, Cold Sweat tops
   14   F-ALL >> FILL                  1
   15   TERMINAL VELOCITY              8   drop 2, heaviest edits
   16   TERMINAL VELOCITY >> FILL      1   longer roll
   17   EXIT WOUND                     8   plain Amen + kick + sub: mix-out
-  18   EXIT WOUND >> TOPS             8   tops + bell
+  18   EXIT WOUND >> TOPS             8   tops + bell + lead
 
 Playing it: a FILL row plays its roll then loops, so launch it in the bar before the phrase you
 want and launch the next groove row while it plays. (No automatic return: Live's LOM does not
@@ -31,16 +31,19 @@ Every lane in a row is written for that row, so whole-row launches never cut a l
 
 How it is written (so the critique round can argue with it):
   - The Amen chop's home loop is 2 bars, so a UNIT is 2 bars. Edits move whole BLOCKS of slices,
-    keeping each slice's offset in its block: the break's micro-timing survives (the snare at
-    3.43 stays early) instead of being quantised.
+    keeping each slice's offset in its block: the break's micro-timing survives.
   - Inside every 8-bar groove: three units repeat verbatim, the fourth disturbs.
-  - Kick and bass: the sub and reese HOLD their notes and the kick carves them out through
-    sidechain compressors keyed from BOOT-LEG, rather than notes stopping around each kick.
-  - Bass is written half time, one pitch move per unit, around F1 in the E1-G1 sweet spot; the
-    reese doubles it an octave up.
-  - The FM bell is a surprise, not a riff. Its clips run 16 bars against 8-bar drums; it plays in
-    two to four 2-bar windows per clip, every window a different motif, and never in the drums'
-    disturbance bars (7-8, 15-16), so only one thing changes at a time. It rests in fills.
+  - Kick and bass: sub and reese HOLD their notes; the kick carves them out through sidechain
+    compressors keyed from BOOT-LEG.
+  - Harmony: a strings pad (HALO-PERIDOL) voiced high moves Fm9 - Dbmaj9 - Bbm9 - Eb9sus4, four
+    bars each, over the sub's F pedal (every chord contains F); fills hold the Eb9sus4 tension.
+  - Lyrical line: a Rhodes lead (LIP-SERVICE) plays 16-bar themes that breathe (rests of 2 bars
+    between phrases), theme A in drop 1, a higher theme B in drop 2, slower lines in the breakdowns.
+  - The FM bell stays a sparse surprise: 16-bar clips, a few different 2-bar motifs, never in the
+    drums' disturbance bars, and placed where the lead rests so the two answer each other.
+  - Reese: its own line per row (a late glide up a fifth, octave flips, offbeat stabs), and a second
+    reese (RASP-UTIN) takes over in drop 2 for a different colour.
+  - Space: dub throws (THROW-UP) catch the last snare of a phrase into echo and reverb tails.
 
     python scripts/jungle_compose.py --dry-run   # note counts + clip checks, no Live
     python scripts/jungle_compose.py             # write the clips into the running set
@@ -64,7 +67,7 @@ FILE_BPM = {"AMEN-DMENT": 160.0, "SWEAT-SHOP": 174.0, "TOPSOIL": 174.0}
 UNIT = 8.0              # beats: 2 bars, the length of the Amen chop's home loop
 BAR = 4.0
 GATE_MARGIN = 0.012     # beats (~4 ms at 170): the 3 ms slice Fade Out ends before the next hit
-LEGATO_GAP = 0.03       # beats between held bass notes
+LEGATO_GAP = 0.03       # beats between held notes
 
 # ----------------------------------------------------------------------
 # Breaks: slice home positions (beats in the break's own grid) and labels
@@ -135,10 +138,9 @@ def units(fns):
 
 
 def break_notes(brk: Break, events, length: float):
-    """Events -> (pitch, start, dur, vel). One hit per onset (the louder wins). The break Simplers
-    slice in Poly mode, so hits overlap and ring out: a note runs its slice's full length, or its
-    wanted length (roll steps), and is only cut by the next hit on the SAME slice (Retrigger) or
-    the clip end."""
+    """Events -> (pitch, start, dur, vel). One hit per onset (the louder wins). Each slice has its own
+    drum pad, so hits overlap and ring out: a note runs its slice's full length, or its wanted length
+    (roll steps), and is only cut by the next hit on the SAME pad or the clip end."""
     ev = sorted((e for e in events if -1e-6 <= e[1] < length - 1e-6), key=lambda e: (e[1], -e[2]))
     kept = []
     for e in ev:
@@ -229,8 +231,16 @@ def t_turnaround(u):
     return block(TOP, 4, 4, u + 4, only={"bongo", "conga"})
 
 
+# THROW-UP: the Amen slices again, but this lane is only heard as echo and reverb tails
+THROW_SNARE = 21                 # the loudest backbeat snare
+
+
+def throws(positions, slice_index=THROW_SNARE, vel=112):
+    return [(slice_index, at, vel, 0.5) for at in positions]
+
+
 # ----------------------------------------------------------------------
-# Synth lanes: (pitch, start, dur, vel)
+# Pitched lanes: (pitch, start, dur, vel)
 # ----------------------------------------------------------------------
 KICK_PITCH = 36                  # the kick pad (C1) of the factory kit on BOOT-LEG
 F1, AB1, BB1, C2, EB1 = 29, 32, 34, 36, 27
@@ -266,9 +276,88 @@ def sub_line(cells, length, vel=112):
     return hold([(p, n * UNIT + s) for n, c in enumerate(cells) if c for p, s in SUB_CELLS[c]], length, vel)
 
 
-def reese_of(sub, vel=96):
-    """The reese doubles the sub an octave up, with the same held notes."""
-    return [(p + 12, s, d, vel) for p, s, d, _ in sub]
+def reese_line(sub, style, vel=96):
+    """The reese follows the sub's roots an octave up, but moves inside each note:
+      follow  - holds the root
+      slide   - glides up a fifth late in the note (overlapping notes, so the patch's Glide bends)
+      octaves - 8ths flipping between the octave and the one above
+      stabs   - offbeat stabs on the root, leaving the sub alone underneath"""
+    out = []
+    for p, s, d, _ in sub:
+        r = p + 12
+        if style == "follow":
+            out.append((r, s, d, vel))
+        elif style == "slide":
+            cut = round(s + d * 0.6, 4)
+            out += [(r, s, round(min(cut - s + 0.12, d), 4), vel), (r + 7, cut, round(s + d - cut, 4), vel - 6)]
+        elif style == "octaves":
+            k, t = 0, s
+            while t < s + d - 0.1:
+                out.append((r + (12 if k % 2 else 0), round(t, 4), round(min(0.45, s + d - t), 4), vel - (10 if k % 2 else 0)))
+                k, t = k + 1, t + 0.5
+        elif style == "stabs":
+            out += [(r, round(s + off, 4), 0.2, vel) for off in (0.5, 1.25, 1.75) if off + 0.2 < d]
+        else:
+            raise ValueError(style)
+    return out
+
+
+PAD_CHORDS = {                   # voiced Ab4-G5 so the sustain sits in the upper mids; every chord holds an F or its colour
+    "Fm9":     [68, 72, 75, 79],   # Ab C Eb G
+    "Dbmaj9":  [65, 68, 72, 75],   # F Ab C Eb
+    "Bbm9":    [68, 72, 73, 77],   # Ab C Db F
+    "Eb9sus4": [68, 70, 73, 77],   # Ab Bb Db F
+    "Cm11":    [67, 70, 75, 77],   # G Bb Eb F
+}
+PROGRESSION = ["Fm9", "Dbmaj9", "Bbm9", "Eb9sus4"]
+
+
+def pad(spans, vel=84):
+    """[(chord, start beat, length beats)] -> (held chord notes, clip length = end of the last chord)."""
+    out, end = [], 0.0
+    for name, s, n in spans:
+        out += [(p, s, round(n - LEGATO_GAP, 4), vel) for p in PAD_CHORDS[name]]
+        end = max(end, s + n)
+    return out, end
+
+
+def progression(bars_each=4, chords=PROGRESSION):
+    return pad([(c, k * bars_each * BAR, bars_each * BAR) for k, c in enumerate(chords)])
+
+
+# Rhodes themes over the progression (16 bars = 64 beats). Chord tones on the strong beats, two-bar
+# rests between phrases, pickups into the next chord; the last note is left hanging over Eb9sus4.
+THEME_A = [
+    (72, 0.0, 1.0), (75, 1.5, 0.5), (77, 2.0, 1.5), (75, 3.5, 0.5), (72, 4.0, 2.5),                # Fm9
+    (68, 15.0, 0.5), (70, 15.5, 0.5),
+    (72, 16.0, 1.5), (68, 17.5, 0.5), (65, 18.0, 2.0), (75, 20.5, 1.0), (73, 21.5, 0.5), (72, 22.0, 2.0),   # Dbmaj9
+    (77, 32.0, 1.0), (80, 33.0, 0.5), (77, 33.5, 0.5), (73, 34.0, 1.5), (72, 35.5, 0.5), (70, 36.0, 2.0),   # Bbm9
+    (73, 46.5, 0.5), (75, 47.0, 0.5), (77, 47.5, 0.5),
+    (80, 48.0, 2.0), (77, 50.0, 1.0), (75, 51.0, 1.0), (73, 52.0, 2.0), (70, 54.5, 1.0),           # Eb9sus4
+    (72, 56.0, 3.0),
+]
+THEME_B = [                      # drop 2: higher, busier, same chords
+    (77, 0.0, 0.5), (80, 0.5, 0.5), (84, 1.0, 1.0), (82, 2.5, 0.5), (80, 3.0, 1.0), (77, 4.0, 2.0),
+    (75, 14.5, 0.5), (77, 15.0, 1.0),
+    (80, 16.0, 1.5), (77, 17.5, 0.5), (75, 18.0, 0.5), (72, 18.5, 1.5), (75, 20.5, 0.5), (77, 21.0, 2.5),
+    (85, 32.0, 1.0), (84, 33.0, 0.5), (80, 33.5, 0.5), (77, 34.0, 1.0), (80, 35.0, 1.0), (82, 36.0, 2.0),
+    (82, 48.0, 1.0), (80, 49.0, 0.5), (77, 49.5, 0.5), (73, 50.0, 1.0), (75, 51.0, 2.0), (77, 53.5, 0.5), (80, 54.0, 2.0),
+    (77, 56.0, 0.5), (75, 56.5, 0.5), (72, 57.0, 3.0),
+]
+THEME_DOWN_1 = [                 # breakdown over Fm9 (4 bars) then Dbmaj9 (4 bars): long, singing notes
+    (72, 0.0, 3.0), (75, 4.0, 2.0), (77, 6.0, 2.0), (80, 8.0, 4.0), (79, 12.0, 2.0), (77, 14.0, 2.0),
+    (77, 16.0, 3.0), (75, 19.0, 1.0), (72, 20.0, 4.0),              # bars 7-8 left to the bell
+]
+THEME_DOWN_2 = [                 # breakdown over Eb9sus4 then Cm11
+    (80, 0.0, 2.0), (77, 2.0, 2.0), (73, 6.0, 2.0), (75, 8.0, 6.0),
+    (79, 16.0, 2.0), (77, 18.0, 1.0), (75, 19.0, 3.0), (70, 24.0, 2.0), (72, 26.0, 5.5),
+]
+
+
+def lead(theme, length, *, window=(0.0, 1e9), vel=96):
+    """A theme (or the part of it inside `window`) -> (notes, clip length)."""
+    a, b = window
+    return [(p, s, d, vel + (8 if s % UNIT == 0 else 0)) for p, s, d in theme if a <= s < b], length
 
 
 BELL_MOTIFS = {                  # 2-bar shapes (8 beats), F minor, Ab5-G6; no two alike
@@ -303,16 +392,19 @@ def row_topsoil_only():
 def row_preamble():
     L = 32.0
     return L, {"TOPSOIL": break_notes(TOP, units([t_home] * 4), L),
-               "BELL-END": bell_plan(64.0, [(8, "call+answer"), (40, "fall")])}
+               "BELL-END": bell_plan(64.0, [(8, "call+answer"), (40, "fall")]),
+               "HALO-PERIDOL": progression()}
 
 
 def row_drone_on():
     L = 32.0
     amen = units([lambda u: a_hats(u, 0.8)] * 4)
     return L, {"TOPSOIL": break_notes(TOP, units([t_home] * 4), L),
-               "BELL-END": bell_plan(64.0, [(16, "held"), (48, "call+answer")]),
+               "BELL-END": bell_plan(64.0, [(0, "offbeat"), (16, "held")]),
                "AMEN-DMENT": break_notes(AMEN, amen, L),
-               "RASP-BERRY": [(41, 0.0, 15.5, 80), (37, 16.0, 15.5, 84)]}
+               "RASP-BERRY": [(41, 0.0, 15.5, 80), (37, 16.0, 15.5, 84)],
+               "HALO-PERIDOL": progression(),
+               "LIP-SERVICE": lead(THEME_A, 64.0, window=(32.0, 64.0))}
 
 
 def row_build1():
@@ -321,10 +413,13 @@ def row_build1():
     top = t_home(0) + t_home(8) + t_home(16) + before(t_home(24), 30.5)
     reese = [(41, 0.0, 15.9, 88), (44, 16.0, 7.9, 92), (48, 24.0, 6.4, 96)]   # roots climb, no sub
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "TOPSOIL": break_notes(TOP, top, L),
-               "BELL-END": bell_plan(32.0, [(0, "offbeat"), (16, "climb")]), "RASP-BERRY": reese}
+               "BELL-END": bell_plan(32.0, [(0, "offbeat"), (16, "climb")]), "RASP-BERRY": reese,
+               "HALO-PERIDOL": pad([("Fm9", 0.0, 16.0), ("Dbmaj9", 16.0, 8.0), ("Eb9sus4", 24.0, 6.5)])[0],
+               "THROW-UP": break_notes(AMEN, throws([30.375], slice_index=17), L)}
 
 
-def groove_row(amen_fns, sub_cells, bell_windows, *, sweat=False, top_hats=None):
+def groove_row(amen_fns, sub_cells, bell_windows, *, reese="follow", reese_lane="RASP-BERRY",
+               theme=None, theme_window=(0.0, 1e9), throw_at=(30.96,), sweat=False, top_hats=None):
     L = UNIT * 4
     amen = units(amen_fns)
     sub = sub_line(sub_cells, L)
@@ -332,15 +427,19 @@ def groove_row(amen_fns, sub_cells, bell_windows, *, sweat=False, top_hats=None)
     if top_hats:
         top += units([lambda u: t_hats(u, top_hats)] * 4)
     lanes = {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
-             "RASP-BERRY": reese_of(sub), "BELL-END": bell_plan(64.0, bell_windows),
-             "TOPSOIL": break_notes(TOP, top, L)}
+             reese_lane: reese_line(sub, reese), "BELL-END": bell_plan(64.0, bell_windows),
+             "TOPSOIL": break_notes(TOP, top, L), "HALO-PERIDOL": progression(),
+             "THROW-UP": break_notes(AMEN, throws(throw_at), L)}
+    if theme:
+        lanes["LIP-SERVICE"] = lead(theme, 64.0, window=theme_window)
     if sweat:
         lanes["SWEAT-SHOP"] = break_notes(SWEAT, units([lambda u: s_tops(u, 0.75)] * 4), L)
     return L, lanes
 
 
-def fill_row(first, *, roll_from=2.0, sweat=False, top_hats=None):
-    """One bar: `first` (break events up to roll_from), 16th snares for a beat, 32nds to 3.5, gap."""
+def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=False, top_hats=None):
+    """One bar: `first` (break events up to roll_from), 16th snares for a beat, 32nds to 3.5, gap.
+    The pad holds the Eb9sus4 tension; the last roll hit is thrown into the echo."""
     L = BAR
     amen = (before(first, roll_from) + roll(A_SNARE_16, roll_from, roll_from + 1.0, 0.25, 96, 112)
             + roll(A_SNARE_32, roll_from + 1.0, 3.5, 0.125, 112, 127))
@@ -349,35 +448,44 @@ def fill_row(first, *, roll_from=2.0, sweat=False, top_hats=None):
     if top_hats:
         top += before(t_hats(0, top_hats), roll_from)
     lanes = {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
-             "RASP-BERRY": reese_of(sub), "TOPSOIL": break_notes(TOP, top, L)}
+             reese_lane: reese_line(sub, "follow"), "TOPSOIL": break_notes(TOP, top, L),
+             "HALO-PERIDOL": pad([("Eb9sus4", 0.0, L)]),
+             "THROW-UP": break_notes(AMEN, throws([3.375]), L)}
     if sweat:
         lanes["SWEAT-SHOP"] = break_notes(SWEAT, before(s_tops(0, 0.75), roll_from), L)
     return L, lanes
 
 
 def row_hole():
-    """The bar with no downbeat: every lane silent until the snare at 0.99."""
+    """The bar with no downbeat: every lane silent until the snare at 0.99, which is thrown."""
     L = BAR
     amen = hole(block(AMEN, 0, 4, 0), 0.0, 0.95)
     sub = [(F1, 1.0, round(L - 1.0 - LEGATO_GAP, 4), 112)]
     top = hole(t_home(0), 0.0, 0.95)
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
-               "RASP-BERRY": reese_of(sub), "TOPSOIL": break_notes(TOP, before(top, L), L)}
+               "RASP-BERRY": reese_line(sub, "follow"), "TOPSOIL": break_notes(TOP, before(top, L), L),
+               "HALO-PERIDOL": pad([("Fm9", 1.0, L - 1.0)]),
+               "THROW-UP": break_notes(AMEN, throws([AMEN.home[2]], slice_index=2), L)}
 
 
 def row_breakdown1():
     L = 32.0
     return L, {"RASP-BERRY": [(41, 0.0, 15.5, 90), (37, 16.0, 15.5, 90)],          # Fm, Db
-               "BELL-END": bell_plan(64.0, [(0, "call+answer"), (16, "held"), (32, "fall"), (48, "climb")])}
+               "BELL-END": bell_plan(32.0, [(24, "call+answer")]),                # answers the lead
+               "HALO-PERIDOL": pad([("Fm9", 0.0, 16.0), ("Dbmaj9", 16.0, 16.0)]),
+               "LIP-SERVICE": lead(THEME_DOWN_1, 32.0)}
 
 
 def row_breakdown2():
     L = 32.0
     top = t_hands(0, 0.9) + t_hands(8, 0.9) + t_home(16, 0.85) + t_home(24, 0.85)
     return L, {"RASP-BERRY": [(39, 0.0, 15.5, 92), (36, 16.0, 15.5, 94)],          # Eb, C
-               "BELL-END": bell_plan(64.0, [(0, "answer"), (16, "offbeat"), (40, "call")]),
+               "BELL-END": bell_plan(64.0, [(14, "held")]),                      # in the lead's rest
                "TOPSOIL": break_notes(TOP, top, L),
-               "F-HOLE": [(F1, 16.0 + 4 * k, 0.5, 100) for k in range(4)]}       # the floor, just a pulse
+               "F-HOLE": [(F1, 16.0 + 4 * k, 0.5, 100) for k in range(4)],       # the floor, just a pulse
+               "HALO-PERIDOL": pad([("Eb9sus4", 0.0, 16.0), ("Cm11", 16.0, 16.0)]),
+               "LIP-SERVICE": lead(THEME_DOWN_2, 32.0),
+               "THROW-UP": break_notes(AMEN, throws([30.96]), L)}
 
 
 def row_build2():
@@ -388,21 +496,27 @@ def row_build2():
     reese = [(41, 0.0, 15.9, 88), (37, 16.0, 7.9, 92), (39, 24.0, 6.4, 96)]   # F Db Eb -> F on the drop
     return L, {"SWEAT-SHOP": break_notes(SWEAT, sweat, L), "AMEN-DMENT": break_notes(AMEN, amen, L),
                "TOPSOIL": break_notes(TOP, top, L), "BELL-END": bell_plan(32.0, [(8, "climb")]),
-               "RASP-BERRY": reese}
+               "RASP-BERRY": reese,
+               "HALO-PERIDOL": pad([("Dbmaj9", 0.0, 16.0), ("Eb9sus4", 16.0, 14.5)])[0],   # clip = row length
+               "THROW-UP": break_notes(AMEN, throws([30.375], slice_index=17), L)}
 
 
 def row_exit():
     L = 32.0
     amen = units([a_home] * 4)
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L),
-               "F-HOLE": sub_line(["A", "A", "A", "A"], L), "TOPSOIL": break_notes(TOP, units([t_home] * 4), L)}
+               "F-HOLE": sub_line(["A", "A", "A", "A"], L), "TOPSOIL": break_notes(TOP, units([t_home] * 4), L),
+               "HALO-PERIDOL": pad([("Fm9", 0.0, 32.0)], vel=72),
+               "THROW-UP": break_notes(AMEN, throws([30.96]), L)}
 
 
 def row_exit_tops():
     L = 32.0
     amen = a_tops(0) + a_tops(8) + a_tops(16, 0.9) + a_tops(24, 0.8)
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "TOPSOIL": break_notes(TOP, units([t_home] * 4), L),
-               "BELL-END": bell_plan(64.0, [(8, "call+answer"), (40, "held")])}
+               "BELL-END": bell_plan(64.0, [(40, "held")]),
+               "HALO-PERIDOL": progression(),
+               "LIP-SERVICE": lead(THEME_A, 64.0, window=(0.0, 32.0))}
 
 
 ROWS = [
@@ -411,31 +525,37 @@ ROWS = [
     ("DRONE ON", row_drone_on),
     ("WIND-UP MERCHANT", row_build1),
     ("BOTTOM FEEDER", lambda: groove_row([a_home, a_home, a_home, a_edit1], ["A", "A", "A", "A!"],
-                                         [(8, "call+answer"), (40, "fall")])),
+                                         [(8, "call+answer"), (40, "fall")], reese="slide", theme=THEME_A)),
     ("BOTTOM FEEDER >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0))),
     ("BOTTOM FEEDER II", lambda: groove_row([a_home, a_home, a_reorder, a_edit1], ["B", "B", "B", "B!"],
-                                            [(16, "offbeat"), (48, "climb")])),
+                                            [(16, "offbeat"), (48, "climb")], reese="octaves",
+                                            throw_at=(14.96, 30.96))),
     ("CHOP SUEY", lambda: groove_row([a_reorder, a_reorder, a_reorder, a_edit2], ["B", "B", "B", "B!"],
-                                     [(32, "held")], top_hats=0.6)),
+                                     [(32, "held")], reese="stabs", top_hats=0.6, throw_at=(22.96, 30.96))),
     ("CHOP SUEY >> FILL", lambda: fill_row(block(AMEN, 4, 2, 0), top_hats=0.6)),
     ("HOLE", row_hole),
     ("NOBODY HOME", row_breakdown1),
     ("NOBODY HOME II", row_breakdown2),
     ("SWEAT EQUITY", row_build2),
     ("F-ALL", lambda: groove_row([a_home, a_reorder, a_home, a_edit1], ["A", "A", "A", "A!"],
-                                 [(8, "fall"), (40, "climb")], sweat=True, top_hats=0.6)),
-    ("F-ALL >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), sweat=True, top_hats=0.6)),
+                                 [(8, "fall"), (40, "climb")], reese="slide", reese_lane="RASP-UTIN",
+                                 theme=THEME_B, sweat=True, top_hats=0.6)),
+    ("F-ALL >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), reese_lane="RASP-UTIN", sweat=True, top_hats=0.6)),
     ("TERMINAL VELOCITY", lambda: groove_row([a_edit2, a_reorder, a_edit2, a_edit1], ["B", "B", "B", "B!"],
-                                             [(0, "offbeat"), (40, "held")], sweat=True, top_hats=0.6)),
-    ("TERMINAL VELOCITY >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), roll_from=1.5, sweat=True,
-                                                   top_hats=0.6)),
+                                             [(0, "offbeat"), (40, "held")], reese="octaves", reese_lane="RASP-UTIN",
+                                             theme=THEME_B, theme_window=(32.0, 64.0), sweat=True, top_hats=0.6,
+                                             throw_at=(14.96, 30.96))),
+    ("TERMINAL VELOCITY >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), roll_from=1.5, reese_lane="RASP-UTIN",
+                                                   sweat=True, top_hats=0.6)),
     ("EXIT WOUND", row_exit),
     ("EXIT WOUND >> TOPS", row_exit_tops),
 ]
 
-LANES = ["AMEN-DMENT", "SWEAT-SHOP", "TOPSOIL", "BOOT-LEG", "F-HOLE", "RASP-BERRY", "BELL-END"]
+LANES = ["AMEN-DMENT", "SWEAT-SHOP", "TOPSOIL", "BOOT-LEG", "F-HOLE", "RASP-BERRY", "RASP-UTIN",
+         "BELL-END", "HALO-PERIDOL", "LIP-SERVICE", "THROW-UP"]
 NICK = {"AMEN-DMENT": "amen", "SWEAT-SHOP": "sweat", "TOPSOIL": "tops", "BOOT-LEG": "boot",
-        "F-HOLE": "sub", "RASP-BERRY": "rasp", "BELL-END": "bell"}
+        "F-HOLE": "sub", "RASP-BERRY": "rasp", "RASP-UTIN": "rasputin", "BELL-END": "bell",
+        "HALO-PERIDOL": "pad", "LIP-SERVICE": "lead", "THROW-UP": "throw"}
 
 # Bars 7-8 and 15-16 (beats 24-32, 56-64) are the drums' disturbance bars: the bell stays out.
 DISTURBANCE_WINDOWS = [(24.0, 32.0), (56.0, 64.0)]
@@ -446,9 +566,15 @@ def lane_value(value, row_length):
     return value if isinstance(value, tuple) else (value, row_length)
 
 
+def tiled(notes, length, total=64.0):
+    """A looping clip's notes repeated out to `total` beats, so clips of different lengths line up."""
+    reps = max(1, int(round(total / length)))
+    return [(p, s + k * length, d, v) for k in range(reps) for p, s, d, v in notes]
+
+
 def check(name, L, lanes):
-    """Clip hygiene: no note past its clip end, and no bell note starting in a groove row's
-    disturbance bars. (Kick and bass separate through sidechain compression, not note timing.)"""
+    """Clip hygiene: no note past its clip end; no bell note starting in a groove row's disturbance bars;
+    report how often the bell sounds over the lead (they are meant to take turns)."""
     issues, counts = [], []
     for lane in LANES:
         if lane not in lanes:
@@ -457,12 +583,17 @@ def check(name, L, lanes):
         over = sum(1 for _, s, d, _ in notes if s + d > length + 1e-6)
         if over:
             issues.append(f"{NICK[lane]} past clip end x{over}")
-        counts.append(f"{NICK[lane]} {len(notes)}" + ("" if length == L else f" ({length / 4:g} bars)"))
-    if "BOOT-LEG" in lanes and "BELL-END" in lanes:
-        bell, _ = lane_value(lanes["BELL-END"], L)
+        counts.append(f"{NICK[lane]} {len(notes)}" + ("" if length == L else f" ({length / 4:g})"))
+    bell = tiled(*lane_value(lanes["BELL-END"], L)) if "BELL-END" in lanes else []
+    if "BOOT-LEG" in lanes and bell:
         clash = sum(1 for _, s, _, _ in bell for a, b in DISTURBANCE_WINDOWS if a <= s < b)
         if clash:
             issues.append(f"bell in disturbance bars x{clash}")
+    if bell and "LIP-SERVICE" in lanes:
+        lead_notes = tiled(*lane_value(lanes["LIP-SERVICE"], L))
+        both = sum(1 for _, s, _, _ in bell for _, ls, ld, _ in lead_notes if ls <= s < ls + ld)
+        if both > 2:
+            issues.append(f"bell over lead x{both}")
     flag = f"   [warn] {', '.join(issues)}" if issues else ""
     print(f"  {name:<26} {L / 4:>4g} bars | {'  '.join(counts)}{flag}")
     return len(issues)
@@ -487,8 +618,8 @@ def compose(ch, tracks: dict):
     for name in ("SWEAT-SHOP", "TOPSOIL"):     # 174-BPM breaks: -40 cents plays them at exactly 170
         try:
             set_param(ch, tracks[name], 0, "Detune", value=-40.0)
-        except Exception as e:
-            print(f"  [skip] Detune on {name}: {e}")
+        except Exception:
+            pass                                # drum kits carry the detune on every pad instead
     for i, (row, L, lanes) in enumerate(rows):
         for lane in LANES:
             t = tracks[lane]
@@ -525,7 +656,7 @@ def main(argv=None):
         names = {ch.get_track_info(i).result(timeout=5)["name"]: i for i in range(n)}
         missing = [t for t in LANES if t not in names]
         if missing:
-            raise SystemExit(f"missing tracks {missing}: run scripts/jungle_build.py first")
+            raise SystemExit(f"missing tracks {missing}: run scripts/jungle_space.py (new lanes) first")
         compose(ch, names)
     finally:
         ch.stop()

@@ -41,7 +41,8 @@ LOOP_S = 32 * 60.0 / 170 + 0.3   # one whole 8-bar loop: every fader pass hears 
 
 # Representative clip (session row) per lane: its densest / loudest material.
 PROBE_ROW = {"AMEN-DMENT": 15, "SWEAT-SHOP": 12, "TOPSOIL": 0, "BOOT-LEG": 4,
-             "F-HOLE": 4, "RASP-BERRY": 13, "BELL-END": 1}
+             "F-HOLE": 4, "RASP-BERRY": 4, "RASP-UTIN": 13, "BELL-END": 1,
+             "HALO-PERIDOL": 1, "LIP-SERVICE": 4}
 
 # Gain stages in chain order: (device class, param, unit). "db" params move in dB; "norm" params
 # are 0..1 with an unknown curve, stepped along the fader curve and re-measured.
@@ -55,12 +56,21 @@ STAGES = {
     "BOOT-LEG":   [("Eq8", "Output", "db")],
     "F-HOLE":     [("Eq8", "Output", "db")],
     "RASP-BERRY": [("Eq8", "Output", "db"), ("Compressor2", "Output", "db")],
+    "RASP-UTIN":  [("Eq8", "Output", "db"), ("Compressor2", "Output", "db")],
     "BELL-END":   [("Operator", "Volume", "norm"), ("Eq8", "Output", "db")],
+    "HALO-PERIDOL": [("Eq8", "Output", "db")],
+    "LIP-SERVICE":  [("Eq8", "Output", "db")],
+    # THROW-UP is only echo and reverb tails of a hit or two per loop: no steady stage to meter, so
+    # only its fader is balanced
 }
 
-BALANCE_ROW = 13        # F-ALL: every lane plays
-FADER_TARGET = {"BOOT-LEG": 0.82, "F-HOLE": 0.82, "AMEN-DMENT": 0.76, "RASP-BERRY": 0.72,
-                "BELL-END": 0.72, "SWEAT-SHOP": 0.68, "TOPSOIL": 0.68}
+BALANCE_ROW = 13        # F-ALL: nearly every lane plays; the master is protected on this row
+BALANCE_ROWS = [(13, ["BOOT-LEG", "F-HOLE", "AMEN-DMENT", "RASP-UTIN", "BELL-END", "SWEAT-SHOP", "TOPSOIL",
+                      "HALO-PERIDOL", "LIP-SERVICE", "THROW-UP"]),
+                (4, ["RASP-BERRY"])]                 # the first reese sits out drop 2
+FADER_TARGET = {"BOOT-LEG": 0.82, "F-HOLE": 0.82, "AMEN-DMENT": 0.76, "RASP-BERRY": 0.72, "RASP-UTIN": 0.72,
+                "BELL-END": 0.70, "LIP-SERVICE": 0.70, "SWEAT-SHOP": 0.66, "TOPSOIL": 0.66,
+                "HALO-PERIDOL": 0.64, "THROW-UP": 0.64}
 REPORT_ROWS = [(4, "BOTTOM FEEDER"), (10, "NOBODY HOME"), (12, "SWEAT EQUITY"), (13, "F-ALL"),
                (15, "TERMINAL VELOCITY")]
 
@@ -177,27 +187,29 @@ def balance_faders(ch, idx):
     lanes = list(FADER_TARGET)
     faders = {lane: ch.get_track_info(idx[lane]).result(timeout=5)["volume"] for lane in lanes}
     before = dict(faders)
-    for pass_n in range(4):
-        ch.stop_all_clips().result(timeout=3)
-        time.sleep(0.25)
-        ch.fire_scene(BALANCE_ROW).result(timeout=3)
-        time.sleep(WARMUP_S + 0.5)
-        peaks = sample_peaks(ch, LOOP_S)
-        worst = 0.0
-        for lane in lanes:
-            pk = peaks.get(lane, 0.0)
-            if pk <= 0:
-                continue
-            err = norm_to_db(FADER_TARGET[lane]) - norm_to_db(pk)
-            worst = max(worst, abs(err))
-            if abs(err) > 0.5:
-                faders[lane] = max(0.05, min(1.0, db_to_norm(norm_to_db(faders[lane]) + err)))
-                ch.set_track_volume(idx[lane], faders[lane]).result(timeout=3)
-        print(f"  pass {pass_n + 1}: master {peaks.get('Master', 0):.3f}; "
-              + "  ".join(f"{lane.split('-')[0][:5]} {peaks.get(lane, 0):.2f}" for lane in lanes)
-              + f"   worst error {worst:.1f} dB")
-        if worst <= 0.5:
-            break
+    for row, row_lanes in BALANCE_ROWS:
+        print(f"  row {row}:")
+        for pass_n in range(4):
+            ch.stop_all_clips().result(timeout=3)
+            time.sleep(0.25)
+            ch.fire_scene(row).result(timeout=3)
+            time.sleep(WARMUP_S + 0.5)
+            peaks = sample_peaks(ch, LOOP_S)
+            worst = 0.0
+            for lane in row_lanes:
+                pk = peaks.get(lane, 0.0)
+                if pk <= 0:
+                    continue
+                err = norm_to_db(FADER_TARGET[lane]) - norm_to_db(pk)
+                worst = max(worst, abs(err))
+                if abs(err) > 0.5:
+                    faders[lane] = max(0.05, min(1.0, db_to_norm(norm_to_db(faders[lane]) + err)))
+                    ch.set_track_volume(idx[lane], faders[lane]).result(timeout=3)
+            print(f"    pass {pass_n + 1}: master {peaks.get('Master', 0):.3f}; "
+                  + "  ".join(f"{lane.split('-')[0][:5]} {peaks.get(lane, 0):.2f}" for lane in row_lanes)
+                  + f"   worst error {worst:.1f} dB")
+            if worst <= 0.5:
+                break
     # master: pull every fader down together until the sum fits
     for _ in range(4):
         ch.stop_all_clips().result(timeout=3)

@@ -43,6 +43,8 @@ def parse_display(text: str) -> float:
     if not m:
         raise ValueError(f"no number in display {text!r}")
     v = float(m.group())
+    if "khz" in t:
+        v *= 1000.0
     if re.search(r"\d\s*s$", t):            # seconds, not ms
         v *= 1000.0
     return v

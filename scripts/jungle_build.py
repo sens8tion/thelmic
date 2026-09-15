@@ -13,6 +13,9 @@ by exact track name; a track that already has devices is left alone unless --reb
 
 The synth lanes load factory Suite presets: hand-set synth patches clicked and cut notes short.
 
+A second pass, scripts/jungle_space.py, adds to this set: the THROW-UP, RASP-UTIN, HALO-PERIDOL and
+LIP-SERVICE lanes, reverb and auto-pan on the tops, and the reese's movement. Run it after this one.
+
 Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). The sliced Simpler is only the
 starting point: jungle_drumkits then moves every slice onto its own Drum Rack pad, so hits ring out
 per pad (Gate mode: a short note truncates a hit, for roll steps). jungle_sidechain then keys a
