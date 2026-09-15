@@ -46,9 +46,10 @@ PROBE_ROW = {"AMEN-DMENT": 15, "SWEAT-SHOP": 12, "TOPSOIL": 0, "BOOT-LEG": 4,
 # Gain stages in chain order: (device class, param, unit). "db" params move in dB; "norm" params
 # are 0..1 with an unknown curve, stepped along the fader curve and re-measured.
 STAGES = {
-    "AMEN-DMENT": [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db"), ("GlueCompressor", "Output", "db")],
-    "SWEAT-SHOP": [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db")],
-    "TOPSOIL":    [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db")],
+    # break lanes are Drum Racks (a Simpler per slice pad): the EQ after the rack is the trim stage
+    "AMEN-DMENT": [("Eq8", "Output", "db"), ("GlueCompressor", "Output", "db")],
+    "SWEAT-SHOP": [("Eq8", "Output", "db")],
+    "TOPSOIL":    [("Eq8", "Output", "db")],
     # factory instruments on the synth lanes: the patch's own level is left alone and the EQ after it
     # is the trim stage (F-HOLE gets a flat EQ Eight for exactly that)
     "BOOT-LEG":   [("Eq8", "Output", "db")],
