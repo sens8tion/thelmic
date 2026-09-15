@@ -3,19 +3,20 @@
 Builds into the CURRENT Live set through the LOM bridge, idempotently (find-or-create
 by exact track name; a track that already has devices is left alone unless --rebuild):
 
-  AMEN-DMENT  Simpler(amen, 26 manual slices)  -> Drum Buss -> Redux -> EQ8 -> Glue
-  SWEAT-SHOP  Simpler(Cold Sweat, 21 slices)   -> Drum Buss -> EQ8
-  TOPSOIL     Simpler(Apache, 28 slices)       -> EQ8 -> Redux
+  AMEN-DMENT  Drum Rack(amen, 26 slice pads)   -> Drum Buss -> Redux -> EQ8 -> Glue
+  SWEAT-SHOP  Drum Rack(Cold Sweat, 21 pads)   -> Drum Buss -> EQ8
+  TOPSOIL     Drum Rack(Apache, 28 pads)       -> EQ8 -> Redux
   BOOT-LEG    Rollin Breaks Kit (Skitter and Step, kick on C1) -> EQ8 -> Utility(mono)
-  F-HOLE      Basic Sub Sine (Core Library)    -> Utility(mono) -> EQ8 (flat: level trim)
+  F-HOLE      Basic Sub Sine (Core Library)    -> Utility(mono) -> EQ8 (flat: level trim) -> Compressor(SC from BOOT-LEG)
   RASP-BERRY  Reese Classic (Core Library)     -> EQ8 -> Utility(bass mono) -> Compressor(SC from BOOT-LEG)
   BELL-END    Bells FM Simple (Operator preset) -> Echo -> Reverb -> EQ8
 
 The synth lanes load factory Suite presets: hand-set synth patches clicked and cut notes short.
 
-Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). Poly slicing, so hits overlap
-and ring out (Retrigger: re-hitting a slice cuts only its own previous voice); Trigger Mode = gate,
-so a short note truncates a slice (roll steps).
+Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). The sliced Simpler is only the
+starting point: jungle_drumkits then moves every slice onto its own Drum Rack pad, so hits ring out
+per pad (Gate mode: a short note truncates a hit, for roll steps). jungle_sidechain then keys a
+Compressor on F-HOLE and RASP-BERRY from the kick, set in real units from Live's displayed values.
 
 Composition is NOT here. After build(), main() runs scripts/jungle_compose.py:compose(ch, tracks)
 if that file exists, where tracks = {track name: track index}. A composer can import
@@ -214,7 +215,7 @@ ROLES = [
          # no Saturator: the factory rack is already driven, and stacking more is what the gain rule forbids
          fx=[(EQ8, "Eq8", [low_cut(120, steep=True), bell(300, -3.0)]),   # the sub owns the bottom
              (UTILITY, "StereoGain", {"Bass Mono": 1})],
-         volume=0.62, sidechain_from="BOOT-LEG"),
+         volume=0.62),                                 # sidechain: jungle_sidechain, after the tracks exist
 
     dict(name="BELL-END", kind="preset", preset=BELL_PRESET, klass="Operator",
          fx=[(ECHO, "Echo", {"Link": 1, "L Sync": 1, "L 16th": 3,       # 3 sixteenths = dotted 8th
@@ -532,6 +533,17 @@ def build(ch, *, rebuild: bool = False, confident_eq: bool = False) -> dict[str,
         t = tracks[role["name"]]
         print(f"\n== {role['name']} (track {t}) ==")
         build_role(ch, t, role, tracks, confident_eq=confident_eq, return_count=return_count)
+
+    import jungle_drumkits
+    import jungle_sidechain
+    print()
+    print("== drum kits: a pad per slice ==")
+    for role in ROLES:
+        if role["kind"] == "simpler":
+            jungle_drumkits.convert(ch, tracks[role["name"]], role["name"])
+    print()
+    print("== sidechain: sub and reese keyed from the kick ==")
+    jungle_sidechain.apply(ch, tracks)
 
     ch.set_launch_quantization(LAUNCH_QUANT_BARS).result(timeout=3)
     scenes = ensure_scenes(ch, MIN_SCENES)
