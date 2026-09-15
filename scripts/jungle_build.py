@@ -11,8 +11,9 @@ by exact track name; a track that already has devices is left alone unless --reb
   RASP-BERRY  Analog reese -> Saturator -> EQ8 -> Utility(bass mono) -> Compressor(SC from BOOT-LEG)
   BELL-END    Operator FM bell                 -> Echo -> Reverb -> EQ8
 
-Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). Mono slicing, so each
-slice chokes the last; Trigger Mode = gate, so a short note truncates a slice (stutters).
+Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). Poly slicing, so hits overlap
+and ring out (Retrigger: re-hitting a slice cuts only its own previous voice); Trigger Mode = gate,
+so a short note truncates a slice (roll steps).
 
 Composition is NOT here. After build(), main() runs scripts/jungle_compose.py:compose(ch, tracks)
 if that file exists, where tracks = {track name: track index}. A composer can import
@@ -72,7 +73,8 @@ PLACEHOLDER_NAME = "0-MIDI"     # matches JUNK_TRACK_RE on purpose: the next pur
 SIMPLER_CLASS = "OriginalSimpler"
 PLAYBACK_SLICING = 2            # device.playback_mode
 SLICING_STYLE_MANUAL = 3        # sample.slicing_style
-SLICING_PLAYBACK_MONO = 0       # device.slicing_playback_mode: each slice chokes the last
+SLICING_PLAYBACK_POLY = 1       # device.slicing_playback_mode: a voice per slice (mono choked every tail)
+SLICER_VOICES = 16              # device.voices: room for a busy chop's overlapping tails
 
 # Browser URIs
 OPERATOR = "query:Synths#Operator"
@@ -438,7 +440,9 @@ def setup_simpler(ch, t, role) -> int:
     res = ch.set_sample_slices(t, 0, times=frames).result(timeout=20)
     if res.get("failed"):
         print(f"    [warn] {len(res['failed'])} slice insert(s) failed, first: {res['failed'][:3]}")
-    ch.set_device_property(t, 0, "slicing_playback_mode", SLICING_PLAYBACK_MONO).result(timeout=5)
+    ch.set_device_property(t, 0, "slicing_playback_mode", SLICING_PLAYBACK_POLY).result(timeout=5)
+    ch.set_device_property(t, 0, "voices", SLICER_VOICES).result(timeout=5)
+    ch.set_device_property(t, 0, "retrigger", True).result(timeout=5)
 
     si = ch.get_sample_info(t, 0).result(timeout=10)
     n = si.get("slice_count")
@@ -628,7 +632,7 @@ def dry_run(*, rebuild: bool, confident_eq: bool):
             print(f"      file {role['file_bpm']:g} BPM ({st:+.2f} st to {TEMPO:g}); {len(frames)} manual slices,"
                   f" notes {SLICE_ROOT}..{SLICE_ROOT + len(frames) - 1}, last slice @ frame {frames[-1]}")
             print(f"      playback_mode={PLAYBACK_SLICING} slicing_style={SLICING_STYLE_MANUAL}"
-                  f" slicing_playback_mode={SLICING_PLAYBACK_MONO}; assert slice_count == {len(frames)}")
+                  f" slicing_playback_mode={SLICING_PLAYBACK_POLY} voices={SLICER_VOICES}; assert slice_count == {len(frames)}")
         else:
             print(f"    {role['klass']} <- {role['uri']}")
         print(f"      {_fmt_params(role['instrument'])}")
