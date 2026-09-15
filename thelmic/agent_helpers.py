@@ -20,8 +20,10 @@ import time
 # Re-export bridge mechanical helpers
 from thelmic.bridge.helpers import (
     find_track, find_device, ensure_device, health_check,
-    hz_to_norm, set_eq_band, disable_all_eq_bands,
-    EQ8_BELL, EQ8_HIGH_SHELF, EQ8_LOW_SHELF_GUESS,
+    hz_to_norm, norm_to_hz, set_eq_band, set_band_frequency, disable_all_eq_bands,
+    EQ8_HP_48, EQ8_HP_12, EQ8_LOW_SHELF, EQ8_BELL, EQ8_NOTCH, EQ8_HIGH_SHELF,
+    EQ8_LP_12, EQ8_LP_48, EQ8_FREQ_LOW_HZ, EQ8_FREQ_HIGH_HZ,
+    EQ8_LOW_SHELF_GUESS,
     EQ8_HP_12_GUESS, EQ8_HP_48_GUESS, EQ8_LP_12_GUESS, EQ8_LP_48_GUESS,
     hard_reset, arm_take, disarm_take, ms_to_beats,
     safe_set_param,
@@ -67,8 +69,11 @@ from thelmic.aesthetics.dnb_jungle.transforms import (
 __all__ = [
     # bridge
     "find_track", "find_device", "ensure_device", "health_check",
-    "hz_to_norm", "set_eq_band", "disable_all_eq_bands",
-    "EQ8_BELL", "EQ8_HIGH_SHELF", "EQ8_LOW_SHELF_GUESS",
+    "hz_to_norm", "norm_to_hz", "set_eq_band", "set_band_frequency",
+    "disable_all_eq_bands",
+    "EQ8_HP_48", "EQ8_HP_12", "EQ8_LOW_SHELF", "EQ8_BELL", "EQ8_NOTCH",
+    "EQ8_HIGH_SHELF", "EQ8_LP_12", "EQ8_LP_48",
+    "EQ8_FREQ_LOW_HZ", "EQ8_FREQ_HIGH_HZ", "EQ8_LOW_SHELF_GUESS",
     "EQ8_HP_12_GUESS", "EQ8_HP_48_GUESS", "EQ8_LP_12_GUESS", "EQ8_LP_48_GUESS",
     "hard_reset", "arm_take", "disarm_take", "ms_to_beats",
     "safe_set_param", "sidechain_pump",

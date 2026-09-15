@@ -9,11 +9,9 @@ from __future__ import annotations
 import os, sys, math, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from thelmic.live_channel import LiveChannel
-
-
-def hz_to_norm(hz):
-    hz = max(30.0, min(22000.0, hz))
-    return math.log(hz / 30.0) / math.log(22000.0 / 30.0)
+# The one measured Hz→raw curve. This file used to carry its own copy that
+# bottomed out at 30 Hz, which put every frequency it wrote about an octave low.
+from thelmic.bridge.helpers.eq import hz_to_norm
 
 
 def to_db(v):

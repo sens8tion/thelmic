@@ -26,13 +26,16 @@ from thelmic.bridge.helpers import (
     # discovery
     find_track, find_device, ensure_device, health_check,
     # eq
-    hz_to_norm, set_eq_band, disable_all_eq_bands,
-    EQ8_BELL, EQ8_HIGH_SHELF, EQ8_LOW_SHELF_GUESS,
+    hz_to_norm, norm_to_hz, set_eq_band, set_band_frequency, disable_all_eq_bands,
+    EQ8_HP_48, EQ8_HP_12, EQ8_LOW_SHELF, EQ8_BELL, EQ8_NOTCH, EQ8_HIGH_SHELF,
+    EQ8_LP_12, EQ8_LP_48, EQ8_FREQ_LOW_HZ, EQ8_FREQ_HIGH_HZ,
+    EQ8_LOW_SHELF_GUESS,
     EQ8_HP_12_GUESS, EQ8_HP_48_GUESS, EQ8_LP_12_GUESS, EQ8_LP_48_GUESS,
     # transport
     hard_reset, arm_take, disarm_take, ms_to_beats,
     # params
     set_param, describe_param, safe_set_param, SemanticParam, resolve_semantic_param,
+    parse_display, param_with_display, set_by_display,
     # sidechain
     sidechain_pump,
     # patterns / utilities
@@ -61,11 +64,15 @@ __all__ = [
     "LiveChannel", "MediatedSession", "open_session",
     "SessionLog", "LoggingChannel",
     "find_track", "find_device", "ensure_device", "health_check",
-    "hz_to_norm", "set_eq_band", "disable_all_eq_bands",
-    "EQ8_BELL", "EQ8_HIGH_SHELF", "EQ8_LOW_SHELF_GUESS",
+    "hz_to_norm", "norm_to_hz", "set_eq_band", "set_band_frequency",
+    "disable_all_eq_bands",
+    "EQ8_HP_48", "EQ8_HP_12", "EQ8_LOW_SHELF", "EQ8_BELL", "EQ8_NOTCH",
+    "EQ8_HIGH_SHELF", "EQ8_LP_12", "EQ8_LP_48",
+    "EQ8_FREQ_LOW_HZ", "EQ8_FREQ_HIGH_HZ", "EQ8_LOW_SHELF_GUESS",
     "EQ8_HP_12_GUESS", "EQ8_HP_48_GUESS", "EQ8_LP_12_GUESS", "EQ8_LP_48_GUESS",
     "hard_reset", "arm_take", "disarm_take", "ms_to_beats",
     "set_param", "describe_param", "safe_set_param", "SemanticParam", "resolve_semantic_param",
+    "parse_display", "param_with_display", "set_by_display",
     "sidechain_pump", "to_clip_notes", "repeat_pattern",
     "Key", "Scale", "Chord", "Voicing",
     "NaturalMinor", "NaturalMajor", "Dorian", "Phrygian", "Mixolydian",

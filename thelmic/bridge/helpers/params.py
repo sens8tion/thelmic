@@ -6,6 +6,10 @@ intent (DRIVE, CUTOFF, RESONANCE, ...) and the bridge resolves to the
 correct param on whatever device class is at hand.
 """
 from __future__ import annotations
+import math
+import re
+import time
+from concurrent.futures import TimeoutError as FuturesTimeout
 from enum import Enum
 from typing import Optional
 
@@ -175,3 +179,97 @@ def safe_set_param(ch, track_index: int, device_index: int,
     """Back-compat shim: absolute write, clamped to the real range. New code should
     prefer set_param (frac= for scale-independent intent, expect= to assert range)."""
     return set_param(ch, track_index, device_index, param_name, value=value)
+
+
+# ----------------------------------------------------------------------
+# Reading a parameter the way Live shows it
+#
+# Raw values are scale-less: 0.5 on EQ8's Frequency is "469 Hz", on its Q it is
+# "1.34". The per-parameter "display" string the remote script returns is Live's
+# own UI text, and it is the only honest way to learn what a raw value means —
+# every unit curve in this repo is measured against it, never guessed.
+# ----------------------------------------------------------------------
+
+_NUM = re.compile(r"-?\d+(?:\.\d+)?")
+BISECT_STEPS = 16
+
+
+def parse_display(text: str) -> float:
+    """Live's display string → a number in its base unit.
+
+    '-15.0 dB' -> -15.0, '4.00 : 1' -> 4.0, '120 Hz' -> 120.0, '5.00 kHz' -> 5000.0,
+    '1.00 ms' -> 1.0, '1.20 s' -> 1200.0 (ms), 'inf' -> inf.
+    """
+    t = text.strip().lower()
+    if "inf" in t:
+        return -math.inf if t.startswith("-") else math.inf
+    m = _NUM.search(t)
+    if not m:
+        raise ValueError(f"no number in display {text!r}")
+    v = float(m.group())
+    if "khz" in t:
+        v *= 1000.0
+    if re.search(r"\d\s*s$", t):            # seconds, not ms
+        v *= 1000.0
+    return v
+
+
+def param_with_display(ch, track_index: int, device_index: int, param_name: str,
+                       *, timeout: float = 5.0, attempts: int = 3) -> dict:
+    """describe_param, but the entry is guaranteed to carry Live's 'display' text.
+
+    get_device_info is a fat read (EQ8 alone answers with ~90 parameters) and the
+    bridge does drop one now and then, so a timeout is retried rather than taking
+    the caller down mid-write.
+    """
+    for attempt in range(attempts):
+        try:
+            di = ch.get_device_info(track_index, device_index).result(timeout=timeout)
+            break
+        except FuturesTimeout:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
+    p = next((p for p in di["parameters"] if p["name"] == param_name), None)
+    if p is None:
+        have = ", ".join(pp["name"] for pp in di["parameters"][:14])
+        raise ValueError(
+            f"param {param_name!r} not on {di.get('class_name', 'device')} "
+            f"(have: {have}{'...' if len(di['parameters']) > 14 else ''})")
+    if "display" not in p:
+        raise RuntimeError(
+            "the bridge returns no display strings: deploy the remote script "
+            "(scripts/deploy_remote_script.py) and restart Live")
+    return p
+
+
+def set_by_display(ch, track_index: int, device_index: int, param_name: str,
+                   target: float, *, steps: int = BISECT_STEPS,
+                   timeout: float = 3.0) -> str:
+    """Bisect the raw value until Live DISPLAYS `target`; returns the display.
+
+    For any parameter whose curve is unknown or version-dependent. It costs one
+    round trip per step, so prefer a measured mapping (see helpers/eq.py) and
+    keep this for verification and fallback.
+    """
+    p = param_with_display(ch, track_index, device_index, param_name)
+    lo, hi = float(p["min"]), float(p["max"])
+
+    def shown(raw):
+        ch.set_device_param(track_index, device_index, p["index"], raw).result(timeout=timeout)
+        return parse_display(
+            param_with_display(ch, track_index, device_index, param_name)["display"])
+
+    v_lo, v_hi = shown(lo), shown(hi)
+    if not min(v_lo, v_hi) <= target <= max(v_lo, v_hi):
+        raise ValueError(f"{param_name}: target {target} is outside what it "
+                         f"displays ({v_lo} .. {v_hi})")
+    rising = v_hi > v_lo
+    for _ in range(steps):
+        mid = (lo + hi) / 2
+        if (shown(mid) < target) == rising:
+            lo = mid
+        else:
+            hi = mid
+    shown((lo + hi) / 2)
+    return param_with_display(ch, track_index, device_index, param_name)["display"]
