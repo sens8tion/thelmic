@@ -233,7 +233,7 @@ def t_turnaround(u):
 # ----------------------------------------------------------------------
 # Synth lanes: (pitch, start, dur, vel)
 # ----------------------------------------------------------------------
-KICK_PITCH = 41                  # F2 body (87 Hz) sits above the sub's F1 (44 Hz)
+KICK_PITCH = 36                  # the kick pad (C1) of the factory kit on BOOT-LEG
 F1, AB1, BB1, C2, EB1 = 29, 32, 34, 36, 27
 
 SUB_CELLS = {                    # one 2-bar unit each; notes answer the kicks at 0, 2.5, 4.5, 6.5

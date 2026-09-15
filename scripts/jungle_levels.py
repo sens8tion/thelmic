@@ -37,6 +37,7 @@ MASTER_CEILING = 0.85
 POLL_S = 0.04
 WARMUP_S = 0.7
 WINDOW_S = 3.0
+LOOP_S = 32 * 60.0 / 170 + 0.3   # one whole 8-bar loop: every fader pass hears the same material
 
 # Representative clip (session row) per lane: its densest / loudest material.
 PROBE_ROW = {"AMEN-DMENT": 15, "SWEAT-SHOP": 12, "TOPSOIL": 0, "BOOT-LEG": 4,
@@ -48,10 +49,11 @@ STAGES = {
     "AMEN-DMENT": [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db"), ("GlueCompressor", "Output", "db")],
     "SWEAT-SHOP": [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db")],
     "TOPSOIL":    [("OriginalSimpler", "Volume", "db"), ("Eq8", "Output", "db")],
-    "BOOT-LEG":   [("Operator", "Volume", "norm"), ("Eq8", "Output", "db")],
-    "F-HOLE":     [("Operator", "Volume", "norm")],
-    "RASP-BERRY": [("UltraAnalog", "Volume", "norm"), ("Saturator", "Output", "norm"),
-                   ("Eq8", "Output", "db"), ("Compressor2", "Output", "db")],
+    # factory instruments on the synth lanes: the patch's own level is left alone and the EQ after it
+    # is the trim stage (F-HOLE gets a flat EQ Eight for exactly that)
+    "BOOT-LEG":   [("Eq8", "Output", "db")],
+    "F-HOLE":     [("Eq8", "Output", "db")],
+    "RASP-BERRY": [("Eq8", "Output", "db"), ("Compressor2", "Output", "db")],
     "BELL-END":   [("Operator", "Volume", "norm"), ("Eq8", "Output", "db")],
 }
 
@@ -179,7 +181,7 @@ def balance_faders(ch, idx):
         time.sleep(0.25)
         ch.fire_scene(BALANCE_ROW).result(timeout=3)
         time.sleep(WARMUP_S + 0.5)
-        peaks = sample_peaks(ch, 5.0)
+        peaks = sample_peaks(ch, LOOP_S)
         worst = 0.0
         for lane in lanes:
             pk = peaks.get(lane, 0.0)
@@ -201,7 +203,7 @@ def balance_faders(ch, idx):
         time.sleep(0.25)
         ch.fire_scene(BALANCE_ROW).result(timeout=3)
         time.sleep(WARMUP_S + 0.5)
-        master = sample_peaks(ch, 5.0).get("Master", 0.0)
+        master = sample_peaks(ch, LOOP_S).get("Master", 0.0)
         if master <= MASTER_CEILING:
             print(f"  master {master:.3f} <= {MASTER_CEILING}")
             break

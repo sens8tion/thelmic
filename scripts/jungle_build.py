@@ -3,13 +3,15 @@
 Builds into the CURRENT Live set through the LOM bridge, idempotently (find-or-create
 by exact track name; a track that already has devices is left alone unless --rebuild):
 
-  AMEN-DMENT  Simpler(amen, 24 manual slices)  -> Drum Buss -> Redux -> EQ8 -> Glue
-  SWEAT-SHOP  Simpler(Cold Sweat, 19 slices)   -> Drum Buss -> EQ8
-  TOPSOIL     Simpler(Apache, 26 slices)       -> EQ8 -> Redux
-  BOOT-LEG    Operator sine kick               -> EQ8 -> Utility(mono)
-  F-HOLE      Operator sine sub (F1 = 43.65 Hz) -> Utility(mono)
-  RASP-BERRY  Analog reese -> Saturator -> EQ8 -> Utility(bass mono) -> Compressor(SC from BOOT-LEG)
-  BELL-END    Operator FM bell                 -> Echo -> Reverb -> EQ8
+  AMEN-DMENT  Simpler(amen, 26 manual slices)  -> Drum Buss -> Redux -> EQ8 -> Glue
+  SWEAT-SHOP  Simpler(Cold Sweat, 21 slices)   -> Drum Buss -> EQ8
+  TOPSOIL     Simpler(Apache, 28 slices)       -> EQ8 -> Redux
+  BOOT-LEG    Rollin Breaks Kit (Skitter and Step, kick on C1) -> EQ8 -> Utility(mono)
+  F-HOLE      Basic Sub Sine (Core Library)    -> Utility(mono) -> EQ8 (flat: level trim)
+  RASP-BERRY  Reese Classic (Core Library)     -> EQ8 -> Utility(bass mono) -> Compressor(SC from BOOT-LEG)
+  BELL-END    Bells FM Simple (Operator preset) -> Echo -> Reverb -> EQ8
+
+The synth lanes load factory Suite presets: hand-set synth patches clicked and cut notes short.
 
 Break tracks: slice N plays on MIDI note SLICE_ROOT + N (36 + N). Poly slicing, so hits overlap
 and ring out (Retrigger: re-hitting a slice cuts only its own previous voice); Trigger Mode = gate,
@@ -141,61 +143,15 @@ def simpler(transpose: float, volume_db: float, detune_cents: float = 0.0) -> di
 
 # Amen at 160 -> 170 BPM is +1.05 st by ratio, so Transpose +1 repitches it up to tempo.
 AMEN_SIMPLER = simpler(transpose=1, volume_db=-6.0)
-# Cold Sweat / Apache at 174 -> 170 is -0.4 st: close enough to leave at 0.
-SWEAT_SIMPLER = simpler(transpose=0, volume_db=-9.0)
-TOPSOIL_SIMPLER = simpler(transpose=0, volume_db=-12.0)
+# Cold Sweat / Apache at 174 -> 170: -40 cents plays them at exactly 170 (174 * 2**(-40/1200)).
+SWEAT_SIMPLER = simpler(transpose=0, volume_db=-9.0, detune_cents=-40.0)
+TOPSOIL_SIMPLER = simpler(transpose=0, volume_db=-12.0, detune_cents=-40.0)
 
-# Clean sine kick: SKULLKICK's param names, no distortion anywhere on the lane.
-BOOT_KICK = {
-    "Algorithm": 0, "Volume": 0.70,
-    "Osc-A Wave": 0,                                    # sine
-    "Osc-B On": 0, "Osc-C On": 0, "Osc-D On": 0,        # nothing modulates A -> pure sine
-    # 200 ms body, 30 ms release: a 0.4-beat note is gone by ~170 ms, before the sub enters at 176
-    "Ae Attack": 0.0, "Ae Decay": op_time_raw(200), "Ae Sustain": 0.0, "Ae Release": op_time_raw(30),
-    "Pe On": 1, "Pe Attack": 0.0,
-    "Pe Peak": 24.0,                                    # semitones [-48..48] (SKULLKICK used 28)
-    "Pe Decay": op_time_raw(40), "Pe Sustain": 0.0, "Pe End": 0.0, "Pe Amount": 1.0,   # 40 ms drop
-}
-
-# Sine sub. Attack just off zero so a note start never clicks.
-F_HOLE_SUB = {
-    "Algorithm": 0, "Volume": 0.75,
-    "Osc-A On": 1, "Osc-A Wave": 0,
-    "Osc-B On": 0, "Osc-C On": 0, "Osc-D On": 0,
-    # attack 0.02 reads 0.13 ms; 50 ms release clears 38 ms before the next kick (notes end 88 ms early)
-    "Ae Attack": 0.02, "Ae Decay": 1.0, "Ae Sustain": 1.0, "Ae Release": op_time_raw(50),
-    "Pe On": 0,
-    "Glide On": 1, "Glide Time": 0.35,                  # in the Operator.json dump; not live-checked here
-}
-
-# Reese on Analog, HOOVER's param names: two saws beating against each other, no PWM swirl,
-# no pitch bend. Volume low so the Saturator downstream gets a cool input.
-RASP_REESE = {
-    "Volume": 0.55,
-    "OSC1 On/Off": 1, "OSC1 Shape": 1, "OSC1 Octave": 0, "OSC1 Detune": 0.45, "OSC1 Level": 0.70,
-    "OSC2 On/Off": 1, "OSC2 Shape": 1, "OSC2 Octave": 0, "OSC2 Detune": 0.55, "OSC2 Level": 0.70,
-    "PEG1 Amount": 0.0, "PEG2 Amount": 0.0,             # no hoover bend
-    "Unison On/Off": 1, "Unison Voices": 1, "Unison Detune": 0.12,
-    "F1 On/Off": 1, "F1 Type": 1, "F1 Freq": 0.45, "F1 Resonance": 0.20,
-    "F1 Freq < Env": 0.0,                               # steady filter, no envelope "wow"
-    "LFO1 On/Off": 1, "LFO1 Shape": 0, "LFO1 Speed": 0.20,
-    # UNVERIFIED: HOOVER has no LFO->filter amount (only "O2 PW < LFO"). This name is a guess
-    # patterned on "F1 Freq < Env"; if it is wrong it logs [skip] and LFO1 simply drives nothing.
-    "F1 Freq < LFO": 0.15,
-    # attack 0.02 reads 6 ms; 0.20 release was a 25 ms hard cut on every note, 80 ms lets it breathe
-    "AEG1 Attack": 0.02, "AEG1 Sustain": 1.0, "AEG1 Rel": analog_time_raw(80),
-}
-
-# Light FM layer set against the dark bass. Algorithm 0: B modulates A.
-BELL_FM = {
-    "Algorithm": 0, "Volume": 0.60,
-    "Osc-A Wave": 0,
-    "Osc-B On": 1, "B Coarse": 3.0,
-    "B Fine": 12.0,                                     # [0..1000]; believed ratio 3.012 -> slight inharmonic shimmer
-    "Osc-B Level": 0.55,
-    "Osc-C On": 0, "Osc-D On": 0,
-    "Ae Attack": 0.0, "Ae Decay": op_time_raw(900), "Ae Sustain": 0.0, "Ae Release": op_time_raw(500),  # ring
-}
+# Factory Suite presets for the synth lanes: (browser path, item name).
+KICK_KIT = ("packs/Skitter and Step/Drums", "Rollin Breaks Kit.adg")                 # its kick is pad C1 (36)
+SUB_PRESET = ("packs/Core Library/Racks/Instrument Racks/Bass", "Basic Sub Sine.adg")
+REESE_PRESET = ("packs/Core Library/Racks/Instrument Racks/Bass", "Reese Classic.adg")
+BELL_PRESET = ("packs/Core Library/Devices/Instruments/Operator/Mallets", "Bells FM Simple.adv")
 
 
 # ----------------------------------------------------------------------
@@ -244,25 +200,23 @@ ROLES = [
              (REDUX, "Redux2", {"Bit Depth": 10, "Dry/Wet": 0.30})],
          volume=0.65, sends={0: 0.15}),
 
-    dict(name="BOOT-LEG", kind="device", uri=OPERATOR, klass="Operator", instrument=BOOT_KICK,
+    dict(name="BOOT-LEG", kind="preset", preset=KICK_KIT, klass="InstrumentGroupDevice",
          fx=[(EQ8, "Eq8", [low_cut(40, steep=True), bell(90, 2.0)]),
              (UTILITY, "StereoGain", {"Mono": 1})],
          volume=0.78),
 
-    dict(name="F-HOLE", kind="device", uri=OPERATOR, klass="Operator", instrument=F_HOLE_SUB,
-         fx=[(UTILITY, "StereoGain", {"Mono": 1})],            # keep the sub clean: mono only
+    dict(name="F-HOLE", kind="preset", preset=SUB_PRESET, klass="InstrumentGroupDevice",
+         fx=[(UTILITY, "StereoGain", {"Mono": 1}),             # keep the sub clean: mono only
+             (EQ8, "Eq8", [])],                                # flat: the level-trim stage for jungle_levels
          volume=0.82),
 
-    dict(name="RASP-BERRY", kind="device", uri=ANALOG,
-         klass="Analog",                                        # believed class_name 'UltraAnalog'
-         instrument=RASP_REESE,
-         # Saturator Drive is 0..1 dB-mapped (~0.5 = 0 dB), so 0.55 is a light push.
-         fx=[(SATURATOR, "Saturator", {"Drive": 0.55, "Output": Frac(0.85), "Dry/Wet": 0.60}),
-             (EQ8, "Eq8", [low_cut(120, steep=True), bell(300, -3.0)]),   # the sub owns the bottom
+    dict(name="RASP-BERRY", kind="preset", preset=REESE_PRESET, klass="InstrumentGroupDevice",
+         # no Saturator: the factory rack is already driven, and stacking more is what the gain rule forbids
+         fx=[(EQ8, "Eq8", [low_cut(120, steep=True), bell(300, -3.0)]),   # the sub owns the bottom
              (UTILITY, "StereoGain", {"Bass Mono": 1})],
          volume=0.62, sidechain_from="BOOT-LEG"),
 
-    dict(name="BELL-END", kind="device", uri=OPERATOR, klass="Operator", instrument=BELL_FM,
+    dict(name="BELL-END", kind="preset", preset=BELL_PRESET, klass="Operator",
          fx=[(ECHO, "Echo", {"Link": 1, "L Sync": 1, "L 16th": 3,       # 3 sixteenths = dotted 8th
                              "Feedback": 0.35,
                              "Filter On": 1,                            # HP/LP below only act when on
@@ -496,10 +450,17 @@ def build_role(ch, t, role, tracks: dict, *, confident_eq: bool, return_count: i
     else:
         if role["kind"] == "simpler":
             setup_simpler(ch, t, role)
+        elif role["kind"] == "preset":
+            path, item = role["preset"]
+            before = ch.get_track_info(t).result(timeout=5)["device_count"]
+            ch.load_item_at_path(t, path, item).result(timeout=30)
+            info = _wait_for_device(ch, t, before, timeout_s=15.0)
+            got = info["devices"][0]["class_name"] if info["devices"] else None
+            if got != role["klass"]:
+                print(f"    [warn] expected {role['klass']} at dev0 after loading {item}, got {got!r}")
+            print(f"   + {item} @dev0")
         else:
-            dev = load_device_checked(ch, t, role["uri"], role["klass"])
-            print(f"   + {role['klass']} @dev{dev}")
-            apply_params(ch, t, dev, role["instrument"], "instrument")
+            raise ValueError(f"unknown role kind {role['kind']!r}")
 
         for uri, klass, params in role["fx"]:
             try:
@@ -650,8 +611,9 @@ def dry_run(*, rebuild: bool, confident_eq: bool):
             print(f"      playback_mode={PLAYBACK_SLICING} slicing_style={SLICING_STYLE_MANUAL}"
                   f" slicing_playback_mode={SLICING_PLAYBACK_POLY} voices={SLICER_VOICES}; assert slice_count == {len(frames)}")
         else:
-            print(f"    {role['klass']} <- {role['uri']}")
-        print(f"      {_fmt_params(role['instrument'])}")
+            print(f"    {role['klass']} <- preset {'/'.join(role['preset'])}")
+        if role.get("instrument"):
+            print(f"      {_fmt_params(role['instrument'])}")
         for uri, klass, params in role["fx"]:
             print(f"    -> {klass} <- {uri}")
             if isinstance(params, list):
