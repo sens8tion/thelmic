@@ -1108,14 +1108,21 @@ class ThelmicLive(ControlSurface):
         device = self._device(track_index, device_index)
         params = []
         for i, p in enumerate(device.parameters):
-            params.append({
+            entry = {
                 "index": i,
                 "name": p.name,
                 "value": p.value,
                 "min": p.min,
                 "max": p.max,
                 "is_quantized": p.is_quantized,
-            })
+            }
+            # What Live's UI shows ("27.1 ms", "4.0 : 1"): the only honest way to learn what a raw
+            # 0..1 value means for envelope times, fades, thresholds and the like.
+            try:
+                entry["display"] = str(p)
+            except Exception:
+                pass
+            params.append(entry)
         return {
             "track_index": track_index,
             "device_index": device_index,
@@ -2420,25 +2427,32 @@ class ThelmicLive(ControlSurface):
     def _set_drum_pad_chain_device_property(self, track_index, device_index, note,
                                               chain_device_index, property_name, value):
         dev = self._drum_pad_chain_device(track_index, device_index, note, chain_device_index)
-        # Coerce primitives. playback_mode is int; loop flags are bool.
+        # Dotted paths reach nested LOM objects, e.g. "sample.start_marker" on a pad's Simpler.
+        owner, name = self._resolve_attr_path(dev, property_name)
+        # Check the CLASS, not the instance: a LOM proxy accepts assignment of attributes that do
+        # not exist, so a bare setattr "succeeds" with Live untouched.
+        if not hasattr(type(owner), name):
+            avail = [a for a in dir(type(owner)) if not a.startswith("_")][:40]
+            raise ValueError("attr '" + name + "' not on " + type(owner).__name__
+                             + ". Available: " + ", ".join(avail))
+        current = getattr(owner, name)
         try:
-            v = value
-            if isinstance(value, bool):
+            if isinstance(current, bool):
                 v = bool(value)
-            elif isinstance(value, (int, float)):
-                # try int first
-                try:
-                    v = int(value)
-                except (TypeError, ValueError):
-                    v = float(value)
-            setattr(dev, property_name, v)
+            elif isinstance(current, int):
+                v = int(value)
+            elif isinstance(current, float):
+                v = float(value)
+            else:
+                v = value
+            setattr(owner, name, v)
         except Exception as e:
             raise RuntimeError("setattr " + str(property_name) + " failed: " + str(e))
         return {
             "track_index": track_index, "device_index": device_index,
             "note": int(note), "chain_device_index": int(chain_device_index),
             "property_name": property_name,
-            "value": getattr(dev, property_name, None),
+            "value": getattr(owner, name, None),
         }
 
     def _set_drum_pad_chain_device_param(self, track_index, device_index, note,
@@ -2461,14 +2475,26 @@ class ThelmicLive(ControlSurface):
         dev = self._drum_pad_chain_device(track_index, device_index, note, chain_device_index)
         params = []
         for i, p in enumerate(dev.parameters):
-            params.append({"index": i, "name": p.name, "value": p.value,
-                           "min": p.min, "max": p.max})
+            entry = {"index": i, "name": p.name, "value": p.value, "min": p.min, "max": p.max}
+            try:
+                entry["display"] = str(p)
+            except Exception:
+                pass
+            params.append(entry)
         # Pull common known properties (best-effort, ignore missing)
         props = {}
         for pname in ("playback_mode", "playback_loop", "loop_on", "trigger_mode"):
             if hasattr(dev, pname):
                 try:
                     props[pname] = getattr(dev, pname)
+                except Exception:
+                    pass
+        sample = getattr(dev, "sample", None)
+        if sample is not None:
+            for sname in ("start_marker", "end_marker", "length", "warping", "file_path"):
+                try:
+                    sv = getattr(sample, sname)
+                    props["sample." + sname] = sv if isinstance(sv, (int, float, bool, str)) else str(sv)
                 except Exception:
                     pass
         return {
