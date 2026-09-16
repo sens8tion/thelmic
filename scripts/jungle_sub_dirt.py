@@ -7,7 +7,8 @@ the 808's EQ and before LEVEL:
 
 Both Dry/Wets start at 0%: the lane sounds exactly as before until they're turned up. Turn them TOGETHER (map
 one knob to both): the Cabinet's dry signal is the Amp's output, so a Cabinet up on its own colours the clean 808
-too. Nothing is launched or stopped. Idempotent: existing devices are re-set, not doubled.
+too. Nothing is launched or stopped. Settings are applied only to a device this run adds: a device already on
+the track is left exactly as the user has it (a rerun once reset the user's Dry/Wets to 0%).
 
     python scripts/jungle_sub_dirt.py
 """
@@ -38,9 +39,10 @@ def chain(ch, t):
 
 
 def place(ch, t, uri, name, before):
-    """The device called `name`, loaded if missing, sitting just before the device called `before`."""
+    """(index, added): the device called `name`, loaded if missing, sitting just before the device called `before`."""
     have = next((d["index"] for d in chain(ch, t) if d["name"] == name), None)
-    if have is None:
+    added = have is None
+    if added:
         n = len(chain(ch, t))
         ch.load_device(t, uri).result(timeout=30)
         end = time.monotonic() + 20
@@ -52,7 +54,7 @@ def place(ch, t, uri, name, before):
         ch.move_device(t, have, target).result(timeout=10)
     elif have < target - 1:
         ch.move_device(t, have, target - 1).result(timeout=10)
-    return next(d["index"] for d in chain(ch, t) if d["name"] == name)
+    return next(d["index"] for d in chain(ch, t) if d["name"] == name), added
 
 
 def main():
@@ -64,8 +66,8 @@ def main():
         t = index_of(ch, SUB)
         before = "Compressor" if any(d["name"] == "Compressor" for d in chain(ch, t)) else "LEVEL"
         for uri, name, settings in (("query:AudioFx#Amp", "Amp", AMP), ("query:AudioFx#Cabinet", "Cabinet", CAB)):
-            d = place(ch, t, uri, name, before)
-            for pname, target in settings:
+            d, added = place(ch, t, uri, name, before)
+            for pname, target in (settings if added else ()):
                 try:
                     (set_string if isinstance(target, str) else set_number)(ch, t, d, pname, target)
                 except Exception as e:
