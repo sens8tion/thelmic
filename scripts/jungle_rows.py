@@ -7,8 +7,8 @@ repeating a loop. Between sections everything turns over together.
 
   rows (Live)  section   spine (1, 2, 4, "and" of 3)   main break           16th carrier          sub
   1-3          arrivals  SPINE-TINGLER (Bonzo Kit)     AMEN-DMENT (Amen)    THROW-UP: Amen hats   F-HOLE
-  4-6          court     SPINAL-TAP (Vintage Madman)   COLD-CUTS (Cold Sweat) TOPSOIL: Apache     SUB-POENA
-  7-9          print     SPINELESS (909, two-step)     CHOPPER (Apache)     SWEAT-SHOP: Cold Sweat SUB-LIMINAL
+  9-11         court     SPINAL-TAP (Vintage Madman)   COLD-CUTS (Cold Sweat) TOPSOIL: Apache     SUB-POENA
+  17-19        print     SPINELESS (909, two-step)     CHOPPER (Apache)     SWEAT-SHOP: Cold Sweat SUB-LIMINAL
 
 - Spine hits play at 100% (the "and" of 3 at the section's chance; the two-step always).
 - The main break fills every other 16th at the chance a contrasting reference section shows there: its
@@ -309,12 +309,12 @@ ROWS = [
     (0, "WAITING ROOM", drums("arrivals", "carrier_amen", 11, CHOP_A)),
     (1, "ARRIVALS", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_ARRIVALS}),
     (2, "DEPARTURES", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_DEPARTURES}),
-    (3, "THE DOCK", drums("court", "carrier_apache", 22)),
-    (4, "SUB-POENA SERVED", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_SERVED}),
-    (5, "COURT OF APPEAL", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_APPEAL}),
-    (6, "SMALL PRINT", drums("print", "carrier_sweat", 33)),
-    (7, "SUBLIMINAL MESSAGE", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_MESSAGE}),
-    (8, "COMING DOWN", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_COMING_DOWN}),
+    (8, "THE DOCK", drums("court", "carrier_apache", 22)),
+    (9, "SUB-POENA SERVED", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_SERVED}),
+    (10, "COURT OF APPEAL", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_APPEAL}),
+    (16, "SMALL PRINT", drums("print", "carrier_sweat", 33)),
+    (17, "SUBLIMINAL MESSAGE", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_MESSAGE}),
+    (18, "COMING DOWN", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_COMING_DOWN}),
 ]
 CARRIERS = {
     "carrier_amen": with_chance([(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)]),
@@ -324,7 +324,7 @@ CARRIERS = {
 }
 # clips the previous drum model left on lanes these rows no longer use (the Amen chops B and C, the old
 # two-step kick lane - the spine carries it now)
-STALE = [("AMEN-DMENT", s) for s in range(3, 9)] + [("BOOT-LEG", 7), ("BOOT-LEG", 8)]
+STALE: list = []   # the old-model clips were cleared on 2026-09-16, before the rows moved into octaves
 
 
 def lane_value(value):
