@@ -17,6 +17,11 @@ Stages (each caches an npz into the scratch dir so the next one is cheap):
     python scripts/reaper_bass.py spec       # register fractions + harmonic comb (reese test)
     python scripts/reaper_bass.py kick       # kick onsets, post-kick sub windows, duck in dB
     python scripts/reaper_bass.py report     # print the whole numeric report
+    python scripts/reaper_bass.py bell       # onset-aligned attack: partials, pitch ping, click
+    python scripts/reaper_bass.py recipe     # fit a synth recipe through the same measurements
+    python scripts/reaper_bass.py timbre     # per-section sub timbre fingerprint + ANOVA
+    python scripts/reaper_bass.py riff       # 16th-note riff periods, run lengths, changes
+    python scripts/reaper_bass.py bars       # bar-level change points -> reaper_cache/bass_bars.npz
     python scripts/reaper_bass.py all        # everything in order
 """
 from __future__ import annotations
@@ -1066,6 +1071,1382 @@ def stage_report():
     print("=" * 78)
 
 
+# ----------------------------------------------------------------------
+# 8. the bell in the attack
+# ----------------------------------------------------------------------
+# Every measurement below is a number. Snippets of the reference live only in memory for the
+# length of one FFT; nothing is written, played or kept. The synthetic notes used for the
+# control and the recipe fit are generated from scratch (sine / FM formulas), not from the file.
+PRE_S, POST_S = 2000, 4000                 # snippet = onset -250 ms .. +500 ms at 8 kHz
+SNIP = PRE_S + POST_S
+B_WINS = [(0, 20), (20, 50), (50, 100), (100, 200), (200, 400)]
+B_PRE = (-150, -90)
+KP = 8                                     # partials 1..8
+ZC_BINS = [0, 10, 20, 30, 45, 60, 80, 100, 130, 170, 220, 300]
+HZB = [(20, 60), (60, 120), (120, 250), (250, 500), (500, 1000), (1000, 2000), (2000, 3900)]
+HZW = [(-60, -10), (0, 5), (5, 20), (20, 50), (50, 100), (200, 400)]
+NF = 8192
+SCAN_R = np.round(np.arange(0.5, 10.0001, 0.05), 3)
+
+
+def _edge_taper(n, frac=0.08):
+    w = np.ones(n)
+    m = max(1, int(n * frac))
+    r = 0.5 - 0.5 * np.cos(np.pi * np.arange(m) / m)
+    w[:m] = r
+    w[-m:] = r[::-1]
+    return w
+
+
+_TAPER = _edge_taper(SNIP)                 # only touches -250..-190 and +440..+500 ms
+_FREQ = np.fft.fftfreq(SNIP, 1.0 / SR8)
+_RF = np.fft.rfftfreq(NF, 1.0 / SR8)
+
+
+def _ms(a):
+    return PRE_S + int(round(a * SR8 / 1000.0))
+
+
+def demod_power(S, centres, sigma):
+    """Gaussian complex demodulation of a snippet spectrum at each centre frequency -> power
+    envelope (n_centres x SNIP). Time resolution sigma_t = 1 / (2 pi sigma)."""
+    c = np.atleast_1d(np.asarray(centres, float))[:, None]
+    s = np.broadcast_to(np.atleast_1d(np.asarray(sigma, float)), (c.shape[0],))[:, None]
+    G = np.exp(-0.5 * ((_FREQ[None, :] - c) / s) ** 2)
+    y = np.fft.ifft(S[None, :] * G, axis=1)
+    return y.real ** 2 + y.imag ** 2
+
+
+def partial_levels(snip, f0):
+    """Partials k*f0 (k=1..8), sigma = f0/4 (neighbours 35 dB down), each re the note's own
+    sustained fundamental (200-400 ms). -> (levels KP x windows, pre KP, envelope KP x 300, S)."""
+    S = np.fft.fft(snip * _TAPER)
+    env = demod_power(S, f0 * np.arange(1, KP + 1), f0 / 4.0)
+    env /= env[0, _ms(200):_ms(400)].mean() + 1e-30
+    lev = np.array([[env[k, _ms(a):_ms(b)].mean() for a, b in B_WINS] for k in range(KP)])
+    pre = env[:, _ms(B_PRE[0]):_ms(B_PRE[1])].mean(1)
+    return lev, pre, env[:, ::20].copy(), S
+
+
+def zc_track(S, f0, lo=0.6, hi=1.9, fref=None, amp_ms=(200, 400)):
+    """Period-by-period pitch from upward zero crossings of the note band-passed to lo..hi x f0.
+    -> (period mid-times ms re onset, semitone offsets re the 200-400 ms pitch, that pitch)."""
+    af = np.abs(_FREQ)
+    L, H = lo * f0, hi * f0
+    m = np.clip((af - 0.8 * L) / (0.2 * L), 0, 1) * np.clip((1.2 * H - af) / (0.2 * H), 0, 1)
+    y = np.fft.ifft(S * m).real
+    a0 = _ms(-5)
+    seg = y[a0:_ms(420)]
+    idx = np.where((seg[:-1] < 0) & (seg[1:] >= 0))[0]
+    if len(idx) < 8:
+        return None
+    zc = idx + (-seg[idx]) / (seg[idx + 1] - seg[idx] + 1e-30)
+    per = np.diff(zc) / SR8
+    mid = ((zc[:-1] + zc[1:]) / 2 + a0 - PRE_S) * 1000.0 / SR8
+    amp = np.array([np.abs(seg[int(zc[i]):int(np.ceil(zc[i + 1])) + 1]).max() for i in range(len(per))])
+    late = (mid >= amp_ms[0]) & (mid < amp_ms[1])
+    if late.sum() < 2:
+        return None
+    if fref is None:
+        if late.sum() < 3:
+            return None
+        fref = 1.0 / np.median(per[late])
+    ok = amp >= 0.1 * np.median(amp[late])
+    return mid[ok], 12 * np.log2((1.0 / per[ok]) / fref), fref
+
+
+def zc_summary(mid, off):
+    b = np.full(len(ZC_BINS) - 1, np.nan)
+    for i in range(len(ZC_BINS) - 1):
+        s = (mid >= ZC_BINS[i]) & (mid < ZC_BINS[i + 1])
+        if s.any():
+            b[i] = off[s].mean()
+    e = (mid >= 0) & (mid < 35)
+    start = off[e].mean() if e.any() else np.nan
+    sel = (mid >= 0) & (mid < 300)
+    mm, oo = mid[sel], off[sel]
+    settle = np.nan
+    if len(oo):
+        bad = np.where(np.abs(oo) >= 0.7)[0]
+        if not len(bad):
+            settle = 0.0
+        elif bad[-1] + 1 < len(mm):
+            settle = float(mm[bad[-1] + 1])
+    c = (mid >= 250) & (mid < 285)
+    ctrl = off[c].mean() if c.any() else np.nan
+    return b, start, settle, ctrl
+
+
+def psd_win(snip, a, b):
+    s = snip[_ms(a):_ms(b)]
+    w = np.hanning(len(s) + 2)[1:-1]
+    X = np.fft.rfft(s * w, NF)
+    return 2.0 * (X.real ** 2 + X.imag ** 2) / (SR8 * np.sum(w ** 2))     # power per Hz
+
+
+def hz_bands(snip, f0):
+    df = SR8 / NF
+    late = psd_win(snip, 200, 400)
+    ref = late[(_RF >= 0.75 * f0) & (_RF <= 1.25 * f0)].sum() * df + 1e-30
+    out = np.zeros((len(HZB), len(HZW)))
+    for j, (a, b) in enumerate(HZW):
+        p = late if (a, b) == (200, 400) else psd_win(snip, a, b)
+        for i, (lo, hi) in enumerate(HZB):
+            out[i, j] = p[(_RF >= lo) & (_RF < hi)].sum() * df / ref
+    return out, ref
+
+
+def synth_note(f0, att_ms, N=0.0, tau_p=10.0, r=1.0, I0=0.0, tau_I=20.0, I_s=0.0,
+               L_h=None, tau_h=20.0, N2=0.0, tau_p2=80.0, r2=2.0, I2=0.0):
+    """A synthetic note from formulas (never from the reference): sine carrier, optional pitch
+    envelope +N st decaying with tau_p ms, static ratio-1 modulation I_s, a decaying modulator at
+    ratio r with index I0 and tau_I ms, and/or a decaying 1/k harmonic layer at L_h dB."""
+    tt = (np.arange(SNIP) - PRE_S) / SR8
+    tp = np.maximum(tt, 0.0)
+    semi = N * np.exp(-tp / (tau_p / 1000.0)) + N2 * np.exp(-tp / (tau_p2 / 1000.0))
+    f = f0 * 2 ** (semi / 12.0)
+    ph = 2 * np.pi * np.cumsum(f) / SR8
+    ph -= ph[PRE_S]
+    I = I0 * np.exp(-tp / (tau_I / 1000.0))
+    s = np.sin(ph + I_s * np.sin(ph) + I2 * np.sin(r2 * ph) + I * np.sin(r * ph))
+    if L_h is not None:
+        g = 10 ** (L_h / 20.0) * np.exp(-tp / (tau_h / 1000.0))
+        s = s + g * sum(np.sin(k * ph) / k for k in range(2, KP + 1))
+    return s * np.clip(tt / max(att_ms / 1000.0, 1e-4), 0.0, 1.0)
+
+
+def bell_onsets(x):
+    """Fresh bass-note onsets: a voiced run after >= 96 ms unvoiced, a stable settled pitch, a
+    >= 9 dB rise in the 25-400 Hz envelope, refined to 2.5 ms."""
+    d = load_f0()
+    t = d["t"].astype(np.float64)
+    v = d["voiced"].astype(bool)
+    midi = d["midi"].astype(np.float64)
+    lo = block_rms(fft_band(x, SR8, 25, 400), 20)
+    hf = block_rms(fft_band(x, SR8, 2000, 3950), 20)
+    L = 20 * np.log10(lo + 1e-7)
+    Ls = np.convolve(L, np.ones(3) / 3, "same")
+    Hd = 20 * np.log10(hf + 1e-7)
+    Hs = np.convolve(Hd, np.ones(3) / 3, "same")
+    EB, nb = 400.0, len(L)
+    hr = np.full(nb, -99.0)
+    hr[:-4] = Hs[4:] - Hs[:-4]
+    cand = np.where((hr >= 9) & (hr >= np.roll(hr, 1)) & (hr >= np.roll(hr, -1)))[0]
+    hits = []
+    for j in cand:
+        if not hits or j - hits[-1] >= 12:
+            hits.append(int(j))
+    hits = np.array(hits)
+    runs, i, n, prev_end = [], 0, len(v), -100
+    while i < n:
+        if v[i]:
+            j = i
+            while j + 1 < n and v[j + 1]:
+                j += 1
+            runs.append((i, j, i - prev_end - 1))
+            prev_end, i = j, j + 1
+        else:
+            i += 1
+    out = []
+    for i, j, gap in runs:
+        if gap < 4:
+            continue
+        a, b = i + 6, min(j, i + 17)
+        if b - a < 3:
+            continue
+        mm = midi[a:b + 1]
+        if mm.std() > 0.6:
+            continue
+        f0 = 440.0 * 2 ** ((np.median(mm) - 69) / 12)
+        jc = int(t[i] * EB)
+        s0, s1 = max(jc - 40, 60), min(jc + 24, nb - 60)
+        if s1 <= s0:
+            continue
+        js = s0 + int(np.argmax(Ls[s0 + 4:s1 + 4] - Ls[s0:s1]))
+        pre = float(np.median(L[js - 24:js - 4]))
+        pk = float(L[js:js + 40].max())
+        if pk - pre < 9:
+            continue
+        Aw = 10 ** (L[js - 10:js + 40] / 20)
+        ap, ak = 10 ** (pre / 20), 10 ** (pk / 20)
+        jon = js - 10 + int(np.argmax(Aw >= ap + 0.25 * (ak - ap)))
+        i10 = int(np.argmax(Aw >= ap + 0.10 * (ak - ap)))
+        i90 = int(np.argmax(Aw >= ap + 0.90 * (ak - ap)))
+        att = max((i90 - i10) * 2.5, 0.5)
+        hf_rise = float(Hs[jon - 4:jon + 8].max() - np.median(Hd[jon - 40:jon - 8]))
+        drums = int(((hits > jon + 6) & (hits < jon + 160)).sum()) if len(hits) else 0
+        out.append((jon * 20, f0, (j - i + 1) * 0.024, pk - pre, hf_rise, drums, att, t[i]))
+    O = np.array(out)
+    keep = [0]
+    for k in range(1, len(O)):
+        if O[k, 0] - O[keep[-1], 0] >= 800:
+            keep.append(k)
+    return O[keep], hits / EB
+
+
+def stage_bell():
+    x = np.load(os.path.join(CACHE, "mono8k.npy")).astype(np.float32)
+    O, hit_t = bell_onsets(x)
+    bounds = load_sections()
+    print(f"fresh bass-note onsets (>=96 ms unvoiced before, >=9 dB rise, stable pitch): {len(O)}")
+    print(f"  HF (2-4 kHz) drum hits across the file: {len(hit_t)} ({len(hit_t) / (len(x) / SR8) * 60:.0f}/min)")
+    O = O[(O[:, 2] >= 0.42) & (O[:, 0] - PRE_S >= 0) & (O[:, 0] + POST_S <= len(x))]
+    print(f"  notes lasting >= 420 ms (needed for the 200-400 ms reference): {len(O)}")
+    print(f"  attack 10-90% rise time: median {np.median(O[:, 6]):.1f} ms, IQR "
+          f"{np.percentile(O[:, 6], 25):.1f}-{np.percentile(O[:, 6], 75):.1f} ms")
+    print(f"  onset rise: median {np.median(O[:, 3]):.1f} dB; HF rise at onset: median "
+          f"{np.median(O[:, 4]):.1f} dB; share with an HF drum transient AT the onset (>= 9 dB): "
+          f"{np.mean(O[:, 4] >= 9) * 100:.0f}%")
+    R = {k: [] for k in ("lev", "pre", "env", "lev_s", "env_s", "zcn", "zcw", "start_n", "start_w",
+                         "settle", "ctrl", "scan_e", "scan_l", "scan_p", "hz", "hz_s", "psd_e",
+                         "psd_l", "psd_a", "psd_s", "f0", "sec", "bell", "clean", "drums", "att", "t")}
+    for s_on, f0, dur, rise, hfr, drums, att, tc in O:
+        s_on = int(s_on)
+        snip = x[s_on - PRE_S:s_on + POST_S].astype(np.float64)
+        lev, pre, env, S = partial_levels(snip, f0)
+        zn = zc_track(S, f0, 0.6, 1.9)
+        zw = zc_track(S, f0, 0.6, 3.5)
+        if zn is None or abs(12 * np.log2(zn[2] / f0)) > 1.0:
+            continue
+        sine = synth_note(zn[2], att)
+        lev_s, _, env_s, _ = partial_levels(sine, zn[2])
+        f0 = zn[2]                                        # the zero-crossing pitch is finer than YIN
+        lev, pre, env, S = partial_levels(snip, f0)
+        bn, st_n, settle, ctrl = zc_summary(zn[0], zn[1])
+        if zw is not None:
+            bw, st_w, _, _ = zc_summary(zw[0], zw[1])
+        else:
+            bw, st_w = np.full(len(ZC_BINS) - 1, np.nan), np.nan
+        env_r = demod_power(S, np.r_[f0, SCAN_R * f0], np.r_[0.1 * f0, 0.1 * SCAN_R * 0 + 0.1 * f0])
+        fund = env_r[0, _ms(200):_ms(400)].mean() + 1e-30
+        sc = env_r[1:] / fund
+        hz, _ = hz_bands(snip, f0)
+        hz_s, _ = hz_bands(sine, f0)
+        late = psd_win(snip, 200, 400)
+        ref = late[(_RF >= 0.75 * f0) & (_RF <= 1.25 * f0)].sum() + 1e-30
+        up = np.arange(1, KP)
+        up_e = lev[up, :2].mean(1).sum()                  # partials 2..8 over 0-50 ms
+        base = max(lev[up, 4].sum(), pre[up].sum(), lev_s[up, :2].mean(1).sum())
+        R["lev"].append(lev); R["pre"].append(pre); R["env"].append(env)
+        R["lev_s"].append(lev_s); R["env_s"].append(env_s)
+        R["zcn"].append(bn); R["zcw"].append(bw); R["start_n"].append(st_n); R["start_w"].append(st_w)
+        R["settle"].append(settle); R["ctrl"].append(ctrl)
+        R["scan_e"].append(sc[:, _ms(0):_ms(80)].mean(1)); R["scan_l"].append(sc[:, _ms(200):_ms(400)].mean(1))
+        R["scan_p"].append(sc[:, _ms(-160):_ms(-100)].mean(1))
+        R["hz"].append(hz); R["hz_s"].append(hz_s)
+        R["psd_e"].append(psd_win(snip, 0, 80) / ref); R["psd_l"].append(late / ref)
+        R["psd_a"].append(psd_win(snip, 0, 20) / ref); R["psd_s"].append(psd_win(sine, 0, 20) / (
+            psd_win(sine, 200, 400)[(_RF >= 0.75 * f0) & (_RF <= 1.25 * f0)].sum() + 1e-30))
+        R["f0"].append(f0); R["bell"].append(10 * np.log10(up_e / base))
+        R["sec"].append(int(np.searchsorted(bounds, s_on / SR8, "right") - 1))
+        R["clean"].append(hfr < 9); R["drums"].append(drums); R["att"].append(att); R["t"].append(s_on / SR8)
+    Z = {k: np.array(v) for k, v in R.items()}
+    np.savez(scratch("bell.npz"), **Z)
+    print(f"  measured {len(Z['f0'])} notes ({int(Z['clean'].sum())} with no HF drum hit at the onset); "
+          f"median pitch {np.median(Z['f0']):.1f} Hz")
+    bell_report()
+
+
+def _dbm(a, axis=0):
+    return 10 * np.log10(np.median(a, axis=axis) + 1e-30)
+
+
+def bell_report():
+    Z = dict(np.load(scratch("bell.npz")))
+    G = load_notes()
+    cl = Z["clean"].astype(bool)
+    n_all, n_cl = len(cl), int(cl.sum())
+    print("=" * 78)
+    print(f"[9] THE BELL IN THE ATTACK - {n_all} onsets, {n_cl} clean (no 2-4 kHz hit at the onset)")
+    print("=" * 78)
+    for label, m in (("clean", cl), ("on a drum hit", ~cl)):
+        if m.sum() < 10:
+            continue
+        L = _dbm(Z["lev"][m])
+        Ls = _dbm(Z["lev_s"][m])
+        P = _dbm(Z["pre"][m])
+        print(f"\n[9.1] partial level per window, dB re the note's own sustained fundamental "
+              f"[{label}, n={int(m.sum())}]")
+        print("   k   " + "".join(f"{f'{a}-{b}ms':>11s}" for a, b in B_WINS) + "    pre(bg)")
+        for k in range(KP):
+            print(f"  {k + 1:2d}   " + "".join(f"{v:11.1f}" for v in L[k]) + f"   {P[k]:8.1f}")
+        if label == "clean":
+            print("  same pipeline on a clean sine note with the same pitch and attack time "
+                  "(measurement floor / onset splatter):")
+            for k in range(KP):
+                print(f"  {k + 1:2d}   " + "".join(f"{v:11.1f}" for v in Ls[k]))
+            print("  excess over the clean sine (dB), attack windows only, floored at the background:")
+            for k in range(1, KP):
+                ex = [L[k, w] - max(Ls[k, w], P[k]) for w in range(len(B_WINS))]
+                print(f"  {k + 1:2d}   " + "".join(f"{v:+11.1f}" for v in ex))
+
+    m = cl
+    # ratio scan: which ratios light up in the attack
+    se, sl, sp = _dbm(Z["scan_e"][m]), _dbm(Z["scan_l"][m]), _dbm(Z["scan_p"][m])
+    print(f"\n[9.2] ratio scan (sigma = 0.1 x f0), 0-80 ms vs 200-400 ms vs pre, dB re sustained fundamental")
+    print("  local peaks of the ATTACK curve (>= 2 dB above the +-0.3 ratio neighbourhood median):")
+    print("   ratio   attack   sustain   pre    attack-sustain   nearest integer   off by")
+    pk = []
+    for i in range(3, len(SCAN_R) - 3):
+        lo_, hi_ = max(0, i - 6), min(len(SCAN_R), i + 7)
+        if se[i] == se[lo_:hi_].max() and se[i] - np.median(se[lo_:hi_]) >= 2.0:
+            pk.append(i)
+            ni = round(SCAN_R[i])
+            print(f"  {SCAN_R[i]:6.2f}  {se[i]:7.1f}  {sl[i]:8.1f}  {sp[i]:6.1f}   {se[i] - sl[i]:+10.1f}"
+                  f"        {ni:5d}          {SCAN_R[i] - ni:+.2f}")
+    print("  attack - sustain at integer vs half-integer ratios (dB):")
+    ints = [np.argmin(np.abs(SCAN_R - k)) for k in range(1, 10)]
+    halfs = [np.argmin(np.abs(SCAN_R - (k + 0.5))) for k in range(1, 10)]
+    print("   k      " + "".join(f"{k:>7d}" for k in range(1, 10)))
+    print("   k      " + "".join(f"{se[i] - sl[i]:+7.1f}" for i in ints))
+    print("   k+0.5  " + "".join(f"{se[i] - sl[i]:+7.1f}" for i in halfs))
+    print("   attack level at k     " + "".join(f"{se[i]:7.1f}" for i in ints))
+    print("   attack level at k+0.5 " + "".join(f"{se[i]:7.1f}" for i in halfs))
+    # inharmonic candidates the coordinator named
+    for rr in (1.41, 2.76, 3.5, 5.4):
+        i = int(np.argmin(np.abs(SCAN_R - rr)))
+        print(f"   ratio {rr:4.2f}: attack {se[i]:6.1f} dB, sustain {sl[i]:6.1f}, pre {sp[i]:6.1f}")
+
+    # decay per partial
+    E = np.median(Z["env"][m], axis=0)
+    Es = np.median(Z["env_s"][m], axis=0)
+    tms = (np.arange(E.shape[1]) * 20 - PRE_S) / 8.0
+    print(f"\n[9.3] decay of each partial (median envelope, sigma_t = 1/(2 pi f0/4) ~ {1000 / (2 * np.pi * np.median(Z['f0']) / 4):.0f} ms)")
+    print("   k   peak dB   at ms   floor dB   T-10 ms   T-20 ms   | clean-sine T-20 (resolution floor)")
+    decay = []
+    for k in range(KP):
+        e = 10 * np.log10(E[k] + 1e-30)
+        es = 10 * np.log10(Es[k] + 1e-30)
+        w = (tms >= -10) & (tms <= 150)
+        ip = np.where(w)[0][int(np.argmax(e[w]))]
+        floor = max(10 * np.log10(np.median(Z["lev"][m][:, k, 4]) + 1e-30),
+                    10 * np.log10(np.median(Z["pre"][m][:, k]) + 1e-30))
+        def tdrop(curve, i0, dbd):
+            after = np.where((np.arange(len(curve)) > i0) & (curve <= curve[i0] - dbd))[0]
+            return tms[after[0]] - tms[i0] if len(after) else np.nan
+        t10, t20 = tdrop(e, ip, 10), tdrop(e, ip, 20)
+        ips = np.where(w)[0][int(np.argmax(es[w]))]
+        t20s = tdrop(es, ips, 20)
+        decay.append((k + 1, e[ip], tms[ip], floor, t10, t20, t20s))
+        lim = " (floor within 20 dB)" if e[ip] - floor < 20 else ""
+        print(f"  {k + 1:2d}  {e[ip]:7.1f}  {tms[ip]:6.1f}  {floor:8.1f}   {t10:7.1f}   {t20:7.1f}{lim:22s}| {t20s:6.1f}")
+
+    # pitch envelope
+    print(f"\n[9.4] pitch at note start, period by period (semitones re the 200-400 ms pitch)")
+    bins = [f"{ZC_BINS[i]}-{ZC_BINS[i + 1]}" for i in range(len(ZC_BINS) - 1)]
+    print("   ms           " + "".join(f"{b:>8s}" for b in bins))
+    for label, arr in (("narrow p50", Z["zcn"][m]), ("wide   p50", Z["zcw"][m])):
+        print(f"   {label}   " + "".join(f"{v:8.2f}" for v in np.nanmedian(arr, 0)))
+    print("   narrow p25    " + "".join(f"{v:8.2f}" for v in np.nanpercentile(Z["zcn"][m], 25, 0)))
+    print("   narrow p75    " + "".join(f"{v:8.2f}" for v in np.nanpercentile(Z["zcn"][m], 75, 0)))
+    print("   n notes       " + "".join(f"{int(v):8d}" for v in np.sum(~np.isnan(Z["zcn"][m]), 0)))
+    st, ctrl = Z["start_n"][m], Z["ctrl"][m]
+    stw = Z["start_w"][m]
+    ok = ~np.isnan(st)
+    okc = ~np.isnan(ctrl)
+    print(f"   start offset (0-35 ms): median {np.nanmedian(st):+.2f} st (wide band {np.nanmedian(stw):+.2f}); "
+          f"p25 {np.nanpercentile(st, 25):+.2f}, p75 {np.nanpercentile(st, 75):+.2f}, p90 {np.nanpercentile(st, 90):+.2f}")
+    for th in (0.5, 1.0, 2.0, 3.0, 5.0):
+        print(f"     share starting >= +{th:.1f} st sharp: {np.mean(st[ok] >= th) * 100:5.1f}%   "
+              f"(control, mid-note 250-285 ms: {np.mean(ctrl[okc] >= th) * 100:5.1f}%; "
+              f"flat <= -{th:.1f}: {np.mean(st[ok] <= -th) * 100:4.1f}%)")
+    sett = Z["settle"][m]
+    print(f"   settle time (last period >= 0.7 st off): median {np.nanmedian(sett):.0f} ms, "
+          f"p75 {np.nanpercentile(sett, 75):.0f} ms; among notes starting >= +1 st: median "
+          f"{np.nanmedian(sett[ok & (np.nan_to_num(st) >= 1)]):.0f} ms")
+    # the 96 ms glides: how many sit on a fresh note start?
+    Gz = np.load(scratch("notes.npz"))["glides"]
+    tons = Z["t"]
+    d = load_f0()
+    v = d["voiced"].astype(bool)
+    ft = d["t"]
+    starts = ft[np.where(v & ~np.r_[False, v[:-1]])[0]]
+    near = np.array([np.any((starts >= g0 - 0.10) & (starts <= g0 + 0.03)) for g0 in Gz[:, 0]])
+    print(f"   glides (from [1b]) that begin within 100 ms after a voiced start: {near.mean() * 100:.0f}% "
+          f"of {len(Gz)}; of those {np.mean(Gz[near, 4] < 0) * 100:.0f}% fall (median span "
+          f"{np.median(Gz[near, 4]):+.2f} st, {np.median(Gz[near, 1] - Gz[near, 0]) * 1000:.0f} ms); "
+          f"the rest fall {np.mean(Gz[~near, 4] < 0) * 100:.0f}% (median span {np.median(Gz[~near, 4]):+.2f} st)")
+
+    # click vs tone
+    H = _dbm(Z["hz"][m])
+    Hs = _dbm(Z["hz_s"][m])
+    print(f"\n[9.5] click vs tone: band power per window, dB re the sustained fundamental (reference / clean sine)")
+    print("   band Hz      " + "".join(f"{f'{a}..{b}':>14s}" for a, b in HZW))
+    for i, (lo, hi) in enumerate(HZB):
+        print(f"   {lo:>4d}-{hi:<5d}  " + "".join(f"{H[i, j]:7.1f}/{Hs[i, j]:<6.1f}" for j in range(len(HZW))))
+    ex = np.median(Z["psd_a"][m] / 1.0, 0) - np.median(Z["psd_s"][m], 0)
+    exl = np.median(Z["psd_e"][m] - Z["psd_l"][m], 0)
+    sel = (_RF >= 100) & (_RF <= 3900)
+    kern = np.ones(9) / 9
+    exs = np.convolve(np.maximum(ex, 0), kern, "same")
+    exls = np.convolve(np.maximum(exl, 0), kern, "same")
+    fpk = _RF[sel][int(np.argmax(exs[sel]))]
+    fpk2 = _RF[sel][int(np.argmax(exls[sel]))]
+    cen = (np.maximum(ex, 0)[sel] * _RF[sel]).sum() / (np.maximum(ex, 0)[sel].sum() + 1e-30)
+    pos = np.maximum(ex, 0)[sel] + 1e-12
+    flat = np.exp(np.mean(np.log(pos))) / np.mean(pos)
+    print(f"   0-20 ms excess over a clean sine, 100-3900 Hz: peak at {fpk:.0f} Hz, centroid {cen:.0f} Hz, "
+          f"spectral flatness {flat:.3f} (1 = white click, -> 0 = tonal)")
+    print(f"   0-80 ms excess over the note's own 200-400 ms spectrum: peak at {fpk2:.0f} Hz "
+          f"(= {fpk2 / np.median(Z['f0'][m]):.2f} x median f0)")
+    df = SR8 / NF
+    att_hi = np.median([(Z["psd_a"][m][i][_RF >= 150].sum() - Z["psd_s"][m][i][_RF >= 150].sum()) * df
+                        for i in range(int(m.sum()))])
+    att_all = np.median([Z["psd_a"][m][i].sum() * df for i in range(int(m.sum()))])
+    print(f"   attack (0-20 ms) power above 150 Hz beyond a clean sine: {10 * np.log10(max(att_hi, 1e-12)):+.1f} dB "
+          f"re sustained fundamental; total 0-20 ms power {10 * np.log10(att_all):+.1f} dB")
+    # absolute-Hz vs ratio-locked: where does the 0-80 ms excess concentrate?
+    f0s = Z["f0"][m]
+    grid_r = np.arange(0.5, 30, 0.05)
+    exr = np.median([np.interp(grid_r * f0s[i], _RF, Z["psd_e"][m][i] - Z["psd_l"][m][i])
+                     for i in range(int(m.sum()))], 0)
+    for nm, curve, ax in (("absolute Hz", exl, _RF), ("ratio f/f0", exr, grid_r)):
+        c = np.convolve(np.maximum(curve, 0), np.ones(5) / 5, "same")
+        lim = (ax >= (100 if nm == "absolute Hz" else 1.5)) & (ax <= (1500 if nm == "absolute Hz" else 25))
+        cc = c[lim]
+        print(f"   peakiness of the 0-80 ms excess on a {nm:11s} axis: max/median = "
+              f"{10 * np.log10(cc.max() / (np.median(cc) + 1e-30)):.1f} dB at {ax[lim][int(np.argmax(cc))]:.2f}")
+
+    # consistency
+    bell = Z["bell"]
+    print(f"\n[9.6] consistency - bell index = partials 2-8 over 0-50 ms, dB above the loudest of "
+          f"(their own sustain, the background, a clean sine's onset splatter)")
+    print(f"   all {n_all}: median {np.median(bell):+.1f} dB; clean: median {np.median(bell[cl]):+.1f} dB, "
+          f"p10 {np.percentile(bell[cl], 10):+.1f}, p25 {np.percentile(bell[cl], 25):+.1f}, "
+          f"p75 {np.percentile(bell[cl], 75):+.1f}, p90 {np.percentile(bell[cl], 90):+.1f}")
+    for th in (0, 3, 6, 10):
+        print(f"   share of clean notes with bell index >= {th:2d} dB: {np.mean(bell[cl] >= th) * 100:5.1f}%")
+    print("   per section (clean onsets):  sec  n   bell p50   share>=6dB   start-pitch p50   share>=+1st   att ms")
+    secs = Z["sec"]
+    per = []
+    for s in np.unique(secs):
+        mm = cl & (secs == s)
+        if mm.sum() < 5:
+            continue
+        stv = Z["start_n"][mm]
+        per.append((s, mm.sum(), np.median(bell[mm]), np.mean(bell[mm] >= 6), np.nanmedian(stv),
+                    np.nanmean(np.nan_to_num(stv, nan=-9) >= 1), np.median(Z["att"][mm])))
+        print(f"   S{s + 1:02d} {int(mm.sum()):4d}   {np.median(bell[mm]):+7.1f}   {np.mean(bell[mm] >= 6) * 100:9.0f}%"
+              f"   {np.nanmedian(stv):+13.2f}   {np.nanmean(np.nan_to_num(stv, nan=-9) >= 1) * 100:10.0f}%"
+              f"   {np.median(Z['att'][mm]):6.1f}")
+    np.savez(scratch("bell_summary.npz"), L=_dbm(Z["lev"][cl]), P=_dbm(Z["pre"][cl]),
+             Z=np.nanmedian(Z["zcn"][cl], 0), f0=np.median(Z["f0"][cl]), att=np.median(Z["att"][cl]),
+             decay=np.array(decay), per=np.array(per))
+
+
+def zc_signature(S, f0):
+    """Discriminates a pitch SWEEP from an FM sideband: (narrow start st, wide start st, share of
+    0-45 ms periods more than 0.7 st FLAT, monotone-falling flag)."""
+    zn = zc_track(S, f0, 0.6, 1.9)
+    zw = zc_track(S, f0, 0.6, 3.5)
+    if zn is None or zw is None:
+        return np.nan, np.nan, np.nan, np.nan
+    sn = zc_summary(zn[0], zn[1])[1]
+    sw = zc_summary(zw[0], zw[1])[1]
+    e = (zn[0] >= 0) & (zn[0] < 45)
+    if e.sum() < 2:
+        return sn, sw, np.nan, np.nan
+    o = zn[1][e]
+    return sn, sw, float(np.mean(o < -0.7)), float(np.all(np.diff(o) <= 0.5))
+
+
+def stage_recipe():
+    """Fit the smallest synth that, pushed through the SAME measurement code, lands on the
+    reference medians. Only formula-generated notes are synthesised."""
+    B = np.load(scratch("bell_summary.npz"))
+    Zb = dict(np.load(scratch("bell.npz")))
+    cl = Zb["clean"].astype(bool)
+    Lref, Pref, Zref = B["L"], B["P"], B["Z"]
+    Zwref = np.nanmedian(Zb["zcw"][cl], 0)
+    Href = _dbm(Zb["hz"][cl])
+    f0 = float(B["f0"])
+    floor = 10 ** (Pref / 10)
+    hz_floor = 10 ** (Href[:, 0] / 10)                     # background from the -60..-10 ms window
+    zvalid, zwvalid = ~np.isnan(Zref), ~np.isnan(Zwref)
+    HB, HW = [1, 2, 3, 4], [1, 2, 3]                       # 60-1000 Hz x (0-5, 5-20, 20-50 ms)
+
+    def score(**kw):
+        s = synth_note(f0, **kw)
+        lev, _, _, S = partial_levels(s, f0)
+        Lm = 10 * np.log10(lev + floor[:, None] + 1e-30)
+        e_db = np.sqrt(np.mean((Lm - Lref) ** 2))
+        hz = hz_bands(s, f0)[0]
+        Hm = 10 * np.log10(hz[np.ix_(HB, HW)] + hz_floor[HB][:, None] + 1e-30)
+        e_hz = np.sqrt(np.mean((Hm - Href[np.ix_(HB, HW)]) ** 2))
+        zn = zc_track(S, f0, 0.6, 1.9)
+        zw = zc_track(S, f0, 0.6, 3.5)
+        if zn is None or zw is None:
+            return 1e9, e_db, 9.0, e_hz
+        zb = zc_summary(zn[0], zn[1])[0]
+        zwb = zc_summary(zw[0], zw[1])[0]
+        v, vw = zvalid & ~np.isnan(zb), zwvalid & ~np.isnan(zwb)
+        e_st = np.sqrt(np.mean(np.r_[(zb[v] - Zref[v]) ** 2, (zwb[vw] - Zwref[vw]) ** 2]))
+        return (e_db / 2.0) ** 2 + (e_st / 0.5) ** 2 + (e_hz / 4.0) ** 2, e_db, e_st, e_hz
+
+    def search(grid, fixed):
+        best = None
+        for g in grid:
+            kw = dict(fixed)
+            kw.update(g)
+            J, e_db, e_st, e_hz = score(**kw)
+            if best is None or J < best[0]:
+                best = (J, e_db, e_st, e_hz, kw)
+        return best
+
+    print(f"target: median clean note, f0 {f0:.1f} Hz (n={int(cl.sum())})")
+    res = {}
+    atts = [0.2, 1, 2, 4, 8, 16, 32]
+    Iss = [0.0, 0.15, 0.3, 0.45]
+    res["sine"] = search([dict(att_ms=a, I_s=i) for a in atts for i in Iss], {})
+    base = {k: res["sine"][4][k] for k in ("att_ms", "I_s")}
+    Ns = [0, 3, 6, 9, 12, 15, 18, 21, 24, 30, 36, 48]
+    taus = [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 25, 35, 50]
+    N2s = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0]
+    tau2s = [40, 60, 90, 130, 200]
+    res["pitch env"] = search([dict(N=n, tau_p=tp) for n in Ns for tp in taus], base)
+    fixed = dict(base, **{k: res["pitch env"][4][k] for k in ("N", "tau_p")})
+    b2 = search([dict(N2=n2, tau_p2=t2) for n2 in N2s for t2 in tau2s], fixed)
+    b2 = search([dict(N=n, tau_p=tp) for n in Ns for tp in taus],
+                {k: v for k, v in b2[4].items() if k not in ("N", "tau_p")})
+    res["pitch env, two-stage"] = b2
+    rs = [0.5, 1.0, 1.5, 2.0, 2.76, 3.0, 3.5, 4.0, 5.0, 5.4, 7.0]
+    I0s = list(np.arange(0.0, 6.01, 0.5))
+    tIs = [3, 5, 8, 12, 18, 25, 35, 50, 70, 100, 150]
+    res["FM modulator"] = search([dict(r=r, I0=i, tau_I=ti) for r in rs for i in I0s for ti in tIs], base)
+    Lhs = list(range(-30, 7, 3))
+    res["harmonic layer"] = search([dict(L_h=l, tau_h=th) for l in Lhs for th in tIs], base)
+    I2s = [0.0, 0.25, 0.5, 0.75, 1.0]
+    # rival explanation: no pitch envelope at all - a decaying modulator plus a static one
+    cur = dict(base, **{k: res["FM modulator"][4][k] for k in ("r", "I0", "tau_I")})
+    b = None
+    for _ in range(2):
+        b = search([dict(r2=r2, I2=i2) for r2 in (1.0, 2.0, 3.0) for i2 in I2s],
+                   {k: v for k, v in cur.items() if k not in ("r2", "I2")})
+        cur = b[4]
+        b = search([dict(r=r, I0=i, tau_I=ti) for r in rs for i in I0s for ti in tIs],
+                   {k: v for k, v in cur.items() if k not in ("r", "I0", "tau_I")})
+        cur = b[4]
+    res["two FM modulators, no pitch env"] = b
+    # recipe candidate: pitch envelope + static modulator (+ optional decaying modulator)
+    cur = dict(res["pitch env, two-stage"][4])
+    for _ in range(2):
+        b = search([dict(r2=r2, I2=i2) for r2 in (1.0, 2.0, 3.0) for i2 in I2s],
+                   {k: v for k, v in cur.items() if k not in ("r2", "I2")})
+        cur = b[4]
+        b = search([dict(N=n, tau_p=tp) for n in Ns for tp in taus],
+                   {k: v for k, v in cur.items() if k not in ("N", "tau_p")})
+        cur = b[4]
+        b = search([dict(N2=n2, tau_p2=t2) for n2 in N2s for t2 in tau2s],
+                   {k: v for k, v in cur.items() if k not in ("N2", "tau_p2")})
+        cur = b[4]
+        b = search([dict(att_ms=a, I_s=i) for a in atts for i in Iss],
+                   {k: v for k, v in cur.items() if k not in ("att_ms", "I_s")})
+        cur = b[4]
+    res["pitch env + static modulator"] = b
+    b = search([dict(r=r, I0=i, tau_I=ti) for r in rs for i in I0s for ti in tIs], cur)
+    res["pitch env + static + decaying modulator"] = b
+    print("\nmodel                                     rms dB partials  rms st pitch  rms dB click bands    J")
+    for k, (J, e_db, e_st, e_hz, kw) in res.items():
+        print(f"  {k:40s}  {e_db:10.2f}     {e_st:10.2f}    {e_hz:10.2f}      {J:7.2f}")
+        print("      " + ", ".join(f"{a}={round(float(v), 3)}" for a, v in kw.items()))
+    Jb = res["sine"][0]
+    print("\nsingle-component improvement over a plain sine (same attack + static ratio-1 modulation):")
+    for k in ("pitch env", "pitch env, two-stage", "FM modulator", "harmonic layer"):
+        print(f"  {k:22s}  J {Jb:.2f} -> {res[k][0]:.2f}  ({(1 - res[k][0] / Jb) * 100:.0f}% of the misfit removed)")
+
+    # sweep-vs-sideband discriminator, reference vs the two rival explanations
+    x = np.load(os.path.join(CACHE, "mono8k.npy"), mmap_mode="r")
+    sig = []
+    for tt, ff in zip(Zb["t"][cl], Zb["f0"][cl]):
+        s0 = int(round(tt * SR8))
+        snip = np.asarray(x[s0 - PRE_S:s0 + POST_S], np.float64)
+        sig.append(zc_signature(np.fft.fft(snip * _TAPER), ff))
+    sig = np.array(sig)
+    print("\nSWEEP or SIDEBAND?        narrow start   wide start   wide-narrow   flat periods 0-45 ms   monotone fall")
+    print(f"  reference (median)        {np.nanmedian(sig[:, 0]):+7.2f}      {np.nanmedian(sig[:, 1]):+7.2f}"
+          f"      {np.nanmedian(sig[:, 1] - sig[:, 0]):+6.2f}        {np.nanmean(sig[:, 2]) * 100:6.1f}%"
+          f"              {np.nanmean(sig[:, 3]) * 100:5.1f}%")
+    for k in ("pitch env + static modulator", "two FM modulators, no pitch env"):
+        s = synth_note(f0, **res[k][4])
+        g = zc_signature(np.fft.fft(s * _TAPER), f0)
+        print(f"  {k[:24]:24s}  {g[0]:+7.2f}      {g[1]:+7.2f}      {g[1] - g[0]:+6.2f}        "
+              f"{g[2] * 100:6.1f}%              {g[3] * 100:5.1f}%")
+
+    full = res["pitch env + static + decaying modulator"]
+    kw = full[4] if full[0] < 0.85 * res["pitch env + static modulator"][0] else res["pitch env + static modulator"][4]
+    s = synth_note(f0, **kw)
+    lev, _, env, S = partial_levels(s, f0)
+    Lm = 10 * np.log10(lev + floor[:, None] + 1e-30)
+    print("\nRECIPE (chosen): " + ", ".join(f"{a}={round(float(v), 3)}" for a, v in kw.items()))
+    print("fitted synth through the same pipeline (dB re sustained fundamental, background added) | reference:")
+    print("   k   " + "".join(f"{f'{a}-{b}ms':>11s}" for a, b in B_WINS))
+    for k in range(KP):
+        print(f"  {k + 1:2d}   " + "".join(f"{v:11.1f}" for v in Lm[k]) + "   | " +
+              " ".join(f"{v:6.1f}" for v in Lref[k]))
+    zn = zc_track(S, f0, 0.6, 1.9)
+    zw = zc_track(S, f0, 0.6, 3.5)
+    print("   narrow pitch bins synth " + " ".join(f"{v:6.2f}" for v in zc_summary(zn[0], zn[1])[0]))
+    print("   narrow pitch bins ref   " + " ".join(f"{v:6.2f}" for v in Zref))
+    print("   wide   pitch bins synth " + " ".join(f"{v:6.2f}" for v in zc_summary(zw[0], zw[1])[0]))
+    print("   wide   pitch bins ref   " + " ".join(f"{v:6.2f}" for v in Zwref))
+    hz = hz_bands(s, f0)[0]
+    Hm = 10 * np.log10(hz + hz_floor[:, None] + 1e-30)
+    print("   click bands, ref / synth+background:  " + "".join(f"{f'{a}..{b}':>14s}" for a, b in HZW[1:4]))
+    for i, (lo, hi) in enumerate(HZB):
+        print(f"   {lo:>4d}-{hi:<5d}                            " + "".join(
+            f"{Href[i, j]:7.1f}/{Hm[i, j]:<6.1f}" for j in (1, 2, 3)))
+    tt = np.array([0, 2, 5, 10, 15, 20, 30, 45, 60, 100, 150, 200])
+    semi = kw.get("N", 0) * np.exp(-tt / kw.get("tau_p", 1)) + kw.get("N2", 0) * np.exp(-tt / kw.get("tau_p2", 1))
+    print("   pitch envelope of the recipe (st above the note): " + "  ".join(f"{a}ms {v:+.1f}" for a, v in zip(tt, semi)))
+    print(f"   start frequency at the median note: {f0 * 2 ** (semi[0] / 12):.0f} Hz -> {f0:.0f} Hz")
+    np.savez(scratch("recipe.npz"), names=np.array(list(res)),
+             scores=np.array([[v[0], v[1], v[2], v[3]] for v in res.values()]),
+             chosen=np.array([f"{a}={v}" for a, v in kw.items()]))
+
+
+# ----------------------------------------------------------------------
+# 10. timbre per section
+# ----------------------------------------------------------------------
+def stage_timbre():
+    x = np.load(os.path.join(CACHE, "mono8k.npy")).astype(np.float32)
+    N = load_notes(merged=True)
+    bounds = load_sections()
+    T = timbre_rows(x, N, bounds, 0.25, 0.06, 0.15)
+    cols = ["h2", "h3", "h4", "h5", "h6", "h7", "h8", "odd-even", "THD", "floor@h2", "floor@h5"]
+    np.savez(scratch("timbre.npz"), T=T, cols=np.array(cols))
+    print(f"{len(T)} notes (plateaus >= 250 ms, conf > 0.7), sustain from +60 ms for up to 400 ms")
+    secs = T[:, 2].astype(int)
+    midi = T[:, 3]
+    F = T[:, 4:15]
+    h1x = T[:, 15]
+    groups = [s for s in np.unique(secs) if (secs == s).sum() >= 8]
+    msk = np.isin(secs, groups)
+    secs, midi, F, h1x = secs[msk], midi[msk], F[msk], h1x[msk]
+    print(f"octave sanity: the fundamental stands {np.median(h1x):.1f} dB above its half-integer neighbours "
+          f"(p10 {np.percentile(h1x, 10):.1f} dB); notes where it does not clear 6 dB: {np.mean(h1x < 6) * 100:.1f}%")
+    print(f"{len(F)} notes in {len(groups)} sections with >= 8 notes")
+
+    def anova(y, g):
+        ok = ~np.isnan(y)
+        y, g = y[ok], g[ok]
+        u, inv = np.unique(g, return_inverse=True)
+        n = np.bincount(inv)
+        mu = np.bincount(inv, y) / n
+        gm = y.mean()
+        ssb = (n * (mu - gm) ** 2).sum()
+        ssw = ((y - mu[inv]) ** 2).sum()
+        dfb, dfw = len(u) - 1, len(y) - len(u)
+        return (ssb / dfb) / (ssw / dfw), ssb / (ssb + ssw), inv, y
+
+    rng = np.random.default_rng(7)
+    print("\nfeature     F raw   eta2   perm p   | slope dB/oct (within)   F pitch-adjusted  eta2 adj"
+          "   | within-sec SD  between-sec SD (of medians)  half-split r")
+    stats = {}
+    for j, c in enumerate(cols):
+        y = F[:, j]
+        Fr, e2, inv, yy = anova(y, secs)
+        cnt = 0
+        for _ in range(500):
+            Fp, _, _, _ = anova(y, rng.permutation(secs))
+            cnt += Fp >= Fr
+        beta = within_slope(y, midi, secs)
+        ya = y - beta * (midi - np.nanmean(midi))
+        Fa, e2a, _, _ = anova(ya, secs)
+        ok = ~np.isnan(ya)
+        u = np.unique(secs[ok])
+        med = np.array([np.median(ya[ok][secs[ok] == s]) for s in u])
+        wsd = np.sqrt(np.mean([np.var(ya[ok][secs[ok] == s]) for s in u]))
+        h1, h2 = [], []
+        for s in u:
+            idx = np.where(ok & (secs == s))[0]
+            if len(idx) >= 8:
+                h1.append(np.median(ya[idx[:len(idx) // 2]]))
+                h2.append(np.median(ya[idx[len(idx) // 2:]]))
+        r = np.corrcoef(h1, h2)[0, 1] if len(h1) > 3 else np.nan
+        stats[c] = (Fr, e2, (cnt + 1) / 501, beta * 12, Fa, e2a, wsd, med.std(), r)
+        print(f"{c:10s} {Fr:7.1f}  {e2:5.2f}  {(cnt + 1) / 501:6.3f}   | {beta * 12:+10.1f}              "
+              f"{Fa:7.1f}        {e2a:5.2f}     | {wsd:8.1f}        {med.std():8.1f}                 {r:+.2f}")
+    # nearest-centroid section identification from the standardised fingerprint
+    use = [cols.index(c) for c in ("h2", "h3", "h4", "h5", "odd-even", "THD")]
+    Y = np.column_stack([F[:, j] - within_slope(F[:, j], midi, secs) * (midi - np.nanmean(midi)) for j in use])
+    good = ~np.isnan(Y).any(1)
+    Y, sg = Y[good], secs[good]
+    Y = (Y - Y.mean(0)) / (Y.std(0) + 1e-9)
+    u = np.unique(sg)
+    hit = hit1 = 0
+    for i in range(len(Y)):
+        m = np.ones(len(Y), bool)
+        m[i] = False
+        cents = np.array([np.median(Y[m & (sg == s)], 0) if (m & (sg == s)).sum() else np.full(Y.shape[1], 1e9)
+                          for s in u])
+        pred = u[int(np.argmin(((cents - Y[i]) ** 2).sum(1)))]
+        hit += pred == sg[i]
+        hit1 += abs(pred - sg[i]) <= 1
+    print(f"\nleave-one-out nearest-centroid: which section is this note from? {hit / len(Y) * 100:.1f}% exact "
+          f"(chance {100 / len(u):.1f}%), {hit1 / len(Y) * 100:.1f}% within +-1 section")
+    B = None
+    if os.path.exists(scratch("bell.npz")):
+        B = dict(np.load(scratch("bell.npz")))
+    print("\nper section (pitch-adjusted medians, dB re the note's own fundamental):")
+    print("  sec   n   medMIDI    h2     h3     h4     h5    odd-even   THD   floor@h2 floor@h5 | bell p50  n_on | h1 clear dB")
+    per = []
+    for s in u:
+        idx = sg == s
+        raw = secs == s
+        adj = lambda j: np.nanmedian(F[raw, j] - within_slope(F[:, j], midi, secs) * (midi[raw] - np.nanmean(midi)))
+        vals = [adj(cols.index(c)) for c in ("h2", "h3", "h4", "h5", "odd-even", "THD", "floor@h2", "floor@h5")]
+        bm, bn = np.nan, 0
+        if B is not None:
+            mb = (B["sec"] == s) & B["clean"].astype(bool)
+            bn = int(mb.sum())
+            bm = np.median(B["bell"][mb]) if bn >= 3 else np.nan
+        per.append([s + 1, raw.sum(), np.median(midi[raw])] + vals + [bm, bn])
+        print(f"  S{s + 1:02d} {int(raw.sum()):4d}  {np.median(midi[raw]):6.1f}  " +
+              "  ".join(f"{v:+5.1f}" for v in vals[:4]) + f"   {vals[4]:+6.1f}  {vals[5]:+6.1f}  {vals[6]:+7.1f}  "
+              f"{vals[7]:+7.1f}  | {bm:+6.1f}  {bn:4d} | {np.median(h1x[raw]):5.1f}")
+    np.savez(scratch("timbre_summary.npz"), per=np.array(per),
+             stats=np.array([stats[c] for c in cols]), cols=np.array(cols))
+
+
+# ----------------------------------------------------------------------
+# 11. riff repetition
+# ----------------------------------------------------------------------
+RIFF_THR = 0.50            # 16th-slot agreement for "the same riff" (chance between records ~11%)
+RIFF_TOL = 1               # semitones: absorbs glide / pitch-ping smear across a 16th boundary
+
+
+def riff_match(a, b, tol=RIFF_TOL):
+    act = (a >= 0) | (b >= 0)
+    if act.sum() < 3:
+        return np.nan
+    same = act & (((a >= 0) & (b >= 0) & (np.abs(a - b) <= tol)) | ((a < 0) & (b < 0)))
+    return same.sum() / act.sum()
+
+
+def onsets(row):
+    row = np.asarray(row)
+    prev = np.r_[-1, row[:-1]]
+    return (row >= 0) & ((prev < 0) | (np.abs(row - prev) > RIFF_TOL))
+
+
+def bar_sequences():
+    """Per bar, 16 slots on the grid.npz beats: rounded MIDI of the bass, -1 = rest."""
+    beats, downbeats, _ = load_grid()
+    d = load_f0()
+    ft, midi, v = d["t"].astype(np.float64), d["midi"].astype(np.float64), d["voiced"].astype(bool)
+    bidx = np.searchsorted(beats, downbeats - 0.02)
+    bars = []
+    for bi in bidx:
+        if bi + 4 < len(beats):
+            b0 = beats[bi:bi + 5]
+            bars.append(np.r_[np.concatenate([b0[k] + (b0[k + 1] - b0[k]) * np.arange(4) / 4 for k in range(4)]), b0[4]])
+    bars = np.array(bars)
+    nb = len(bars)
+    seq = np.full((nb, 16), -1, int)
+    for b in range(nb):
+        i0, i1 = np.searchsorted(ft, bars[b, 0]), np.searchsorted(ft, bars[b, 16])
+        tt, vv, mm = ft[i0:i1], v[i0:i1], midi[i0:i1]
+        k = np.clip(np.searchsorted(bars[b], tt, "right") - 1, 0, 15)
+        for s in range(16):
+            sel = k == s
+            if sel.sum() and vv[sel].mean() >= 0.5:
+                seq[b, s] = int(round(np.median(mm[sel & vv])))
+    active = (seq >= 0).sum(1) >= 3
+    return bars, seq, active
+
+
+def block_match(A, LA, Bq, LB, tol=RIFF_TOL):
+    """Best agreement between two riffs of LA and LB bars, tiled to a common length, over every
+    bar rotation of the second."""
+    Lc = int(np.lcm(LA, LB))
+    At = np.tile(A.reshape(LA, 16), (Lc // LA, 1)).ravel()
+    best = 0.0
+    for sh in range(LB):
+        Bt = np.tile(np.roll(Bq.reshape(LB, 16), sh, axis=0), (Lc // LB, 1)).ravel()
+        m = riff_match(At, Bt, tol)
+        if not np.isnan(m) and m > best:
+            best = m
+    return best
+
+
+def riff_core(seq, active, sec, nsec, thr=RIFF_THR, tol=RIFF_TOL):
+    nb = len(seq)
+    lags = (1, 2, 3, 4, 8)
+    per_sec, period = {}, np.full(nb, 4, int)
+    for s in range(nsec):
+        bs = np.where((sec == s) & active)[0]
+        mv = {}
+        for L in lags:
+            vals = [riff_match(seq[b], seq[b + L], tol) for b in bs
+                    if b + L < nb and sec[b + L] == s and active[b + L]]
+            vals = [q for q in vals if not np.isnan(q)]
+            mv[L] = (float(np.mean(vals)) if len(vals) >= 3 else np.nan, len(vals))
+        cands = [L for L in (1, 2, 4, 8) if not np.isnan(mv[L][0])]
+        P, bestL = 0, 4
+        if cands:
+            best = max(mv[L][0] for L in cands)
+            bestL = min(L for L in cands if mv[L][0] >= best - 0.08)
+            P = bestL if best >= thr else 0
+        per_sec[s] = (mv, P)
+        period[sec == s] = bestL
+    cont = np.zeros(nb, bool)
+    for b in range(nb):
+        L = period[b]
+        if b - L >= 0 and active[b] and active[b - L]:
+            m = riff_match(seq[b], seq[b - L], tol)
+            cont[b] = (not np.isnan(m)) and m >= thr
+    runs, b = [], 0
+    while b < nb:
+        if cont[b]:
+            e = b
+            while e + 1 < nb and (cont[e + 1] or (e + 2 < nb and cont[e + 2] and active[e + 1])):
+                e += 1
+            L = period[b]
+            runs.append((max(b - L, 0), e, L))
+            b = e + 1
+        else:
+            b += 1
+    return per_sec, period, cont, runs
+
+
+def riff_ids(seq, active, runs, period, thr=RIFF_THR, tol=RIFF_TOL):
+    """Same id whenever the same riff (any rotation, any tiling of 1/2/4/8 bars) comes back."""
+    nb = len(seq)
+    rid = np.full(nb, -1, int)
+    protos = []                                          # (block, L)
+    def assign(block, L):
+        for i, (pb, pL) in enumerate(protos):
+            if block_match(pb, pL, block, L, tol) >= thr:
+                return i
+        protos.append((block, L))
+        return len(protos) - 1
+    for s, e, L in runs:
+        blocks = [seq[q:q + L].ravel() for q in range(s, e - L + 2, L) if q + L <= nb]
+        if not blocks:
+            continue
+        if len(blocks) > 2:
+            sc = [np.nanmean([riff_match(bk, o, tol) for o in blocks if o is not bk]) for bk in blocks]
+            med = blocks[int(np.nanargmax(sc))]
+        else:
+            med = blocks[0]
+        i = assign(med, L)
+        rid[s:e + 1] = np.where(active[s:e + 1], i, -1)
+    for b in range(nb):                                  # active bars outside any run
+        if active[b] and rid[b] < 0:
+            L = period[b]
+            blk = seq[b:b + L].ravel() if b + L <= nb else seq[b:b + 1].ravel()
+            rid[b] = assign(blk, L if b + L <= nb else 1)
+    return rid, len(protos)
+
+
+def segments_from_ids(ids, min_len=2):
+    """Contiguous runs of equal id; runs shorter than min_len bars are absorbed by the previous
+    run (or the next one at the start)."""
+    ids = np.asarray(ids).copy()
+    changed = True
+    while changed:
+        changed = False
+        starts = np.r_[0, np.where(np.diff(ids) != 0)[0] + 1]
+        ends = np.r_[starts[1:], len(ids)]
+        for a, z in zip(starts, ends):
+            if z - a < min_len and len(starts) > 1:
+                ids[a:z] = ids[a - 1] if a > 0 else ids[z]
+                changed = True
+                break
+    starts = np.r_[0, np.where(np.diff(ids) != 0)[0] + 1]
+    seg = np.zeros(len(ids), int)
+    for i, a in enumerate(starts):
+        seg[a:] = i
+    return seg, starts[1:], ids
+
+
+def stage_riff():
+    bars, seq, active = bar_sequences()
+    bounds = load_sections()
+    nb, nsec = len(seq), len(bounds) - 1
+    sec = np.searchsorted(bounds, bars[:, 0], "right") - 1
+    print(f"{nb} bars x 16 slots; bars with >= 3 pitched 16ths: {active.sum()} ({active.mean() * 100:.0f}%)")
+    print(f"  16ths pitched: {(seq >= 0).mean() * 100:.0f}%; note onsets per active bar: "
+          f"median {np.median([onsets(seq[b]).sum() for b in range(nb) if active[b]]):.1f}")
+    rng = np.random.default_rng(3)
+    ab = np.where(active)[0]
+    ch0, ch1 = [], []
+    while len(ch1) < 20000:
+        i, j = rng.choice(ab, 2, replace=False)
+        if sec[i] != sec[j]:
+            ch0.append(riff_match(seq[i], seq[j], 0))
+            ch1.append(riff_match(seq[i], seq[j], 1))
+    ch0, ch1 = np.array(ch0), np.array(ch1)
+    print(f"  chance agreement between bars of DIFFERENT sections: exact mean {np.nanmean(ch0) * 100:.0f}%, "
+          f"+-1 st mean {np.nanmean(ch1) * 100:.0f}% (p90 {np.nanpercentile(ch1, 90) * 100:.0f}%, "
+          f"p99 {np.nanpercentile(ch1, 99) * 100:.0f}%) -> threshold {RIFF_THR * 100:.0f}% at +-{RIFF_TOL} st")
+    per_sec, period, cont, runs = riff_core(seq, active, sec, nsec)
+    rl = np.array([e - s + 1 for s, e, L in runs])
+    print(f"\nper-section lag agreement (mean over active bar pairs b, b+L; +-1 st)")
+    print("  sec   bars active |   L1   L2   L3   L4   L8 | period  notes/riff  runs  median run  max run")
+    table = []
+    for s in range(nsec):
+        mv, P = per_sec[s]
+        bsec = np.where(sec == s)[0]
+        sr = [r for r, (a, e, L) in zip(rl, runs) if sec[min(a, nb - 1)] == s]
+        L = period[bsec[0]] if len(bsec) else 4
+        npr = np.median([onsets(seq[b:b + L].ravel()).sum() for b in bsec if active[b] and b + L <= nb]) \
+            if active[bsec].sum() else np.nan
+        cells = "  ".join(f"{mv[q][0] * 100:3.0f}" if not np.isnan(mv[q][0]) else "  -" for q in (1, 2, 3, 4, 8))
+        print(f"  S{s + 1:02d}  {len(bsec):4d}  {int(active[bsec].sum()):5d} | {cells} | "
+              f"{(str(P) if P else '(' + str(L) + ')'):>6}  {npr:9.1f}  {len(sr):5d}  "
+              f"{(np.median(sr) if sr else float('nan')):9.0f}  {(max(sr) if sr else 0):7d}")
+        table.append([s + 1, len(bsec), active[bsec].sum()] + [mv[q][0] for q in (1, 2, 3, 4, 8)] +
+                     [P, L, npr, len(sr), np.median(sr) if sr else np.nan, max(sr) if sr else 0])
+    Ps = [row[8] for row in table if row[8]]
+    print(f"  periods found: " + ", ".join(f"{q} bars x{Ps.count(q)}" for q in (1, 2, 4, 8)) +
+          f"; no riff above threshold in {nsec - len(Ps)} sections")
+    print(f"\n{len(runs)} riff runs (each bar agrees with the bar one period back, one odd bar tolerated)")
+    print(f"  run length in bars: p10 {np.percentile(rl, 10):.0f}, p25 {np.percentile(rl, 25):.0f}, "
+          f"median {np.median(rl):.0f}, p75 {np.percentile(rl, 75):.0f}, p90 {np.percentile(rl, 90):.0f}, max {rl.max()}")
+    print("  bars      runs   % runs   % of riff bars")
+    for lo, hi in [(2, 4), (4, 8), (8, 16), (16, 32), (32, 999)]:
+        m = (rl >= lo) & (rl < hi)
+        print(f"  {lo:>3d}-{(str(hi - 1) if hi < 999 else ''):<4}  {m.sum():5d}   {m.mean() * 100:5.0f}%   "
+              f"{rl[m].sum() / rl.sum() * 100:6.0f}%")
+    in_runs = np.zeros(nb, bool)
+    for s0, e0, L in runs:
+        in_runs[s0:e0 + 1] = True
+    def act_in(lo, hi):
+        m = np.zeros(nb, bool)
+        for (s0, e0, L), r in zip(runs, rl):
+            if lo <= r <= hi:
+                m[s0:e0 + 1] = True
+        return np.sum(m & active) / active.sum() * 100
+    print(f"  active bars inside a run: {np.mean(in_runs[active]) * 100:.0f}%; inside runs of 8-16 bars: "
+          f"{act_in(8, 16):.0f}%; of >= 8 bars: {act_in(8, 9999):.0f}%; of < 8 bars: {act_in(1, 7):.0f}%")
+    for thr in (0.40, 0.60):
+        _, _, _, rr = riff_core(seq, active, sec, nsec, thr=thr)
+        q = np.array([e - s + 1 for s, e, L in rr])
+        print(f"  sensitivity, threshold {thr * 100:.0f}%: {len(rr)} runs, median {np.median(q):.0f} bars, "
+              f"p75 {np.percentile(q, 75):.0f}, p90 {np.percentile(q, 90):.0f}")
+    kinds = []
+    for (s0, e0, L0), nxt in zip(runs[:-1], runs[1:]):
+        L = max(L0, 1)
+        A = seq[max(e0 - L + 1, 0):e0 + 1].ravel()
+        n0 = e0 + 1
+        while n0 < nb and not active[n0]:
+            n0 += 1
+        if n0 + L > nb:
+            break
+        Bq = seq[n0:n0 + L].ravel()
+        if len(A) != len(Bq):
+            continue
+        pm = block_match(A, L, Bq, L)
+        oa, ob = onsets(A), onsets(Bq)
+        act = (A >= 0) | (Bq >= 0)
+        rm = float(np.mean((((A >= 0) == (Bq >= 0)) & (oa == ob))[act])) if act.any() else np.nan
+        tb, tm = 0, 0.0
+        for tr in range(-12, 13):
+            if abs(tr) <= RIFF_TOL:
+                continue
+            mt = block_match(np.where(A >= 0, A + tr, -1), L, Bq, L)
+            if mt > tm:
+                tm, tb = mt, tr
+        na = [int(p) % 12 for p, o in zip(A, oa) if o]
+        nq = [int(p) % 12 for p, o in zip(Bq, ob) if o]
+        same_notes = len(na) > 0 and sorted(set(na)) == sorted(set(nq))
+        if pm >= RIFF_THR:
+            k = "variation, then same riff"
+        elif tm >= RIFF_THR and tm > pm + 0.15:
+            k = "transposition"
+        elif rm >= 0.75:
+            k = "same rhythm, new notes"
+        elif same_notes:
+            k = "same notes, new rhythm"
+        elif pm >= 0.30:
+            k = "partial variation"
+        else:
+            k = "new riff"
+        kinds.append((k, sec[e0] != sec[min(n0, nb - 1)], n0 - e0 - 1, tb if k == "transposition" else 0))
+    from collections import Counter
+    cnt = Counter(k for k, *_ in kinds)
+    print(f"\nwhat follows the end of a run ({len(kinds)} changes):")
+    for k, c in cnt.most_common():
+        sub = [q for q in kinds if q[0] == k]
+        print(f"  {k:26s} {c:4d}  ({c / len(kinds) * 100:4.0f}%)  across a section boundary "
+              f"{np.mean([q[1] for q in sub]) * 100:3.0f}%, after an absence {np.mean([q[2] > 0 for q in sub]) * 100:3.0f}%")
+    tr = [q[3] for q in kinds if q[0] == "transposition"]
+    if tr:
+        print(f"  transposition intervals (st): {dict(Counter(tr))}")
+    np.savez(scratch("riff.npz"), table=np.array(table, float), rl=rl, chance=np.array([np.nanmean(ch1)]),
+             kinds=np.array([k for k, *_ in kinds]))
+
+
+# ----------------------------------------------------------------------
+# 12. bar-level state: change points, phrase grid, bass_bars.npz
+# ----------------------------------------------------------------------
+TIMBRE_COLS = ["h2", "h3", "h4", "h5", "odd-even", "THD"]
+
+
+def timbre_rows(x, N, bounds, min_dur=0.25, lead=0.06, min_win=0.15, max_win=0.40):
+    """Per held note: harmonic levels re its own fundamental, background-subtracted.
+    Row = [t0, t1, sec, midi, h2..h8, odd-even, THD, floor@h2, floor@h5, h1 over its neighbours]."""
+    nfft = 1 << 15
+    fr = np.fft.rfftfreq(nfft, 1.0 / SR8)
+    rows = []
+    for t0, t1, m, sd, cf, pw in N:
+        if t1 - t0 < min_dur or cf < 0.7:
+            continue
+        a = t0 + lead
+        b = min(t1 - 0.02, a + max_win)
+        if b - a < min_win:
+            continue
+        seg = x[int(a * SR8):int(b * SR8)].astype(np.float64)
+        X = np.fft.rfft(seg * np.hanning(len(seg)), nfft)
+        P = X.real ** 2 + X.imag ** 2
+        f0 = 440.0 * 2 ** ((m - 69) / 12)
+        s = (fr >= 0.94 * f0) & (fr <= 1.06 * f0)
+        i = np.where(s)[0][int(np.argmax(P[s]))]
+        y0, y1, y2 = np.log(P[i - 1] + 1e-30), np.log(P[i] + 1e-30), np.log(P[i + 1] + 1e-30)
+        den = y0 - 2 * y1 + y2
+        f0r = fr[i] + (0.5 * (y0 - y2) / den if den != 0 else 0.0) * (fr[1] - fr[0])
+        on, off = np.full(KP, np.nan), np.full(KP, np.nan)
+        for k in range(1, KP + 1):
+            if (k + 0.62) * f0r > 3900:
+                break
+            w = 0.12 * f0r
+            on[k - 1] = P[(fr >= k * f0r - w) & (fr <= k * f0r + w)].max()
+            off[k - 1] = 0.5 * (P[(fr >= (k + 0.5) * f0r - w) & (fr <= (k + 0.5) * f0r + w)].max() +
+                                P[(fr >= (k - 0.5) * f0r - w) & (fr <= (k - 0.5) * f0r + w)].max())
+        h1 = on[0]
+        corr = np.maximum(on - off, h1 * 10 ** -4.5) / h1
+        hdb = 10 * np.log10(corr)
+        fdb = 10 * np.log10(off / h1)
+        oe = 10 * np.log10(np.nansum(corr[[2, 4, 6]]) / np.nansum(corr[[1, 3, 5]]))
+        thd = 10 * np.log10(np.nansum(corr[1:]))
+        sec = int(np.searchsorted(bounds, t0, "right") - 1)
+        rows.append(np.r_[t0, t1, sec, m, hdb[1:], oe, thd, fdb[1], fdb[4], -fdb[0]])
+    return np.array(rows)
+
+
+def within_slope(y, xm, g):
+    ok = ~np.isnan(y)
+    y, xm, g = y[ok], xm[ok], g[ok]
+    u, inv = np.unique(g, return_inverse=True)
+    n = np.bincount(inv)
+    xc = xm - (np.bincount(inv, xm) / n)[inv]
+    yc = y - (np.bincount(inv, y) / n)[inv]
+    return (xc * yc).sum() / ((xc ** 2).sum() + 1e-12)
+
+
+def dp_segment(Y, pen, min_len=2):
+    """Optimal partition of rows of Y (unit-noise, mean-shift model), min_len rows per segment."""
+    n, d = Y.shape
+    cs = np.vstack([np.zeros(d), np.cumsum(Y, 0)])
+    cs2 = np.r_[0.0, np.cumsum((Y ** 2).sum(1))]
+    F = np.full(n + 1, np.inf)
+    F[0] = -pen
+    back = np.zeros(n + 1, int)
+    for j in range(min_len, n + 1):
+        i = np.arange(0, j - min_len + 1)
+        m = (j - i)[:, None]
+        cost = (cs2[j] - cs2[i]) - ((cs[j] - cs[i]) ** 2 / m).sum(1)
+        tot = F[i] + cost + pen
+        k = int(np.argmin(tot))
+        F[j], back[j] = tot[k], i[k]
+    cps, j = [], n
+    while j > 0:
+        cps.append(back[j])
+        j = back[j]
+    return sorted(c for c in cps if c > 0)
+
+
+def dp_segment_w(Y, w, pen, min_len=2):
+    """Weighted mean-shift optimal partition: row i carries w[i] unit-noise observations
+    (w = 0 -> no evidence, the row just belongs to whichever segment spans it)."""
+    n, d = Y.shape
+    Yz = np.nan_to_num(Y)
+    cw = np.r_[0.0, np.cumsum(w)]
+    cs = np.vstack([np.zeros(d), np.cumsum(Yz * w[:, None], 0)])
+    cs2 = np.r_[0.0, np.cumsum((Yz ** 2).sum(1) * w)]
+    F = np.full(n + 1, np.inf)
+    F[0] = -pen
+    back = np.zeros(n + 1, int)
+    for j in range(min_len, n + 1):
+        i = np.arange(0, j - min_len + 1)
+        W = np.maximum(cw[j] - cw[i], 1e-9)[:, None]
+        cost = (cs2[j] - cs2[i]) - ((cs[j] - cs[i]) ** 2 / W).sum(1)
+        tot = F[i] + cost + pen
+        k = int(np.argmin(tot))
+        F[j], back[j] = tot[k], i[k]
+    cps, j = [], n
+    while j > 0:
+        cps.append(back[j])
+        j = back[j]
+    return sorted(c for c in cps if c > 0)
+
+
+def ping_scan(x):
+    """Broad onset set for the per-bar attack flag: every voiced-run start after >= 48 ms unvoiced
+    with a >= 6 dB rise; start pitch offset from zero crossings re the YIN pitch of the note."""
+    d = load_f0()
+    t, v, midi = d["t"].astype(np.float64), d["voiced"].astype(bool), d["midi"].astype(np.float64)
+    lo = block_rms(fft_band(x, SR8, 25, 400), 20)
+    hf = block_rms(fft_band(x, SR8, 2000, 3950), 20)
+    L = 20 * np.log10(lo + 1e-7)
+    Ls = np.convolve(L, np.ones(3) / 3, "same")
+    Hd = 20 * np.log10(hf + 1e-7)
+    Hs = np.convolve(Hd, np.ones(3) / 3, "same")
+    nb = len(L)
+    out, i, n, prev = [], 0, len(v), -100
+    while i < n:
+        if not v[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and v[j + 1]:
+            j += 1
+        gap, prev_end = i - prev - 1, j
+        prev = j
+        s_i = i
+        i = j + 1
+        if gap < 2 or j - s_i + 1 < 7:
+            continue
+        mm = midi[s_i + 4:min(j, s_i + 13) + 1]
+        if len(mm) < 3 or mm.std() > 0.8:
+            continue
+        f0 = 440.0 * 2 ** ((np.median(mm) - 69) / 12)
+        jc = int(t[s_i] * 400)
+        s0, s1 = max(jc - 40, 60), min(jc + 24, nb - 60)
+        if s1 <= s0:
+            continue
+        js = s0 + int(np.argmax(Ls[s0 + 4:s1 + 4] - Ls[s0:s1]))
+        pre, pk = float(np.median(L[js - 24:js - 4])), float(L[js:js + 40].max())
+        if pk - pre < 6:
+            continue
+        Aw = 10 ** (L[js - 10:js + 40] / 20)
+        ap, ak = 10 ** (pre / 20), 10 ** (pk / 20)
+        jon = js - 10 + int(np.argmax(Aw >= ap + 0.25 * (ak - ap)))
+        s_on = jon * 20
+        if s_on - PRE_S < 0 or s_on + POST_S > len(x):
+            continue
+        dur_ms = (t[j] - t[s_i]) * 1000 + 24
+        snip = x[s_on - PRE_S:s_on + POST_S].astype(np.float64)
+        z = zc_track(np.fft.fft(snip * _TAPER), f0, 0.6, 1.9, fref=f0, amp_ms=(40, max(60, min(dur_ms - 10, 300))))
+        if z is None:
+            continue
+        st = zc_summary(z[0], z[1])[1]
+        if np.isnan(st):
+            continue
+        hfr = float(Hs[jon - 4:jon + 8].max() - np.median(Hd[jon - 40:jon - 8]))
+        out.append((s_on / SR8, f0, st, hfr, dur_ms))
+    return np.array(out)
+
+
+def phrase_alignment(cps, sec, nb, rng, n_null=2000):
+    """Share of change points on 4/8/16/32-bar boundaries, with the phase chosen (a) once for the
+    whole file and (b) per section, each against a Monte-Carlo null with the same number of
+    change points per section and >= 2 bars spacing."""
+    cps = np.asarray(sorted(cps))
+    if len(cps) < 3:
+        return {}
+    secs = np.unique(sec)
+    ranges = {s: np.where(sec == s)[0] for s in secs}
+    k_per = {s: int(np.sum(sec[cps] == s)) for s in secs}
+
+    def shares(c):
+        out = {}
+        for M in (4, 8, 16, 32):
+            g = max(np.mean((c - ph) % M == 0) for ph in range(M))
+            hits = 0
+            for s in secs:
+                cs = c[sec[c] == s]
+                if len(cs):
+                    hits += max(int(np.sum((cs - ph) % M == 0)) for ph in range(M))
+            lens = np.diff(c)
+            g1 = max(np.mean(np.minimum((c - ph) % M, M - (c - ph) % M) <= 1) for ph in range(M))
+            out[M] = (g, hits / len(c), np.mean(lens % M == 0) if len(lens) else np.nan, g1)
+        return out
+
+    obs = shares(cps)
+    null = {M: [] for M in (4, 8, 16, 32)}
+    for _ in range(n_null):
+        c = []
+        for s in secs:
+            k = k_per[s]
+            r = ranges[s]
+            if k == 0 or len(r) < 3:
+                continue
+            for _try in range(50):
+                pick = np.sort(rng.choice(r[1:] if r[0] == 0 else r, min(k, len(r) - 1), replace=False))
+                if len(pick) < 2 or np.all(np.diff(pick) >= 2):
+                    break
+            c.extend(pick.tolist())
+        c = np.array(sorted(c))
+        if len(c) < 3:
+            continue
+        sh = shares(c)
+        for M in null:
+            null[M].append(sh[M])
+    res = {}
+    for M in (4, 8, 16, 32):
+        nm = np.array(null[M])
+        res[M] = tuple((obs[M][q], np.nanmean(nm[:, q]), float(np.mean(nm[:, q] >= obs[M][q])))
+                       for q in range(4))
+    return res
+
+
+def stage_bars():
+    x = np.load(os.path.join(CACHE, "mono8k.npy")).astype(np.float32)
+    bounds = load_sections()
+    bars, seq, active = bar_sequences()
+    nb, nsec = len(seq), len(bounds) - 1
+    sec = np.searchsorted(bounds, bars[:, 0], "right") - 1
+    rng = np.random.default_rng(11)
+    print(f"{nb} bars from grid.npz")
+
+    # --- riff state per bar
+    per_sec, period, cont, runs = riff_core(seq, active, sec, nsec)
+    rid, nproto = riff_ids(seq, active, runs, period)
+    riff_seg, riff_cps, rid_merged = segments_from_ids(rid, 2)
+    rlen = np.diff(np.r_[0, riff_cps, nb])
+    riff_state = rid_merged
+    print(f"\n[riff] {nproto} distinct riff ids; {len(riff_cps) + 1} riff segments (min 2 bars; a riff id, "
+          f"or no bass)")
+    bass_seg = riff_state >= 0
+    rl_b = np.array([z - a for a, z in zip(np.r_[0, riff_cps], np.r_[riff_cps, nb]) if riff_state[a] >= 0])
+    print(f"  segment length (bars), bass segments only: p10 {np.percentile(rl_b, 10):.0f}, p25 {np.percentile(rl_b, 25):.0f}, "
+          f"median {np.median(rl_b):.0f}, p75 {np.percentile(rl_b, 75):.0f}, p90 {np.percentile(rl_b, 90):.0f}, max {rl_b.max()}")
+    for lo, hi in [(2, 4), (4, 8), (8, 16), (16, 32), (32, 9999)]:
+        m = (rl_b >= lo) & (rl_b < hi)
+        print(f"    {lo:>3d}-{(str(hi - 1) if hi < 9999 else ''):<4} bars: {m.sum():4d} segments ({m.mean() * 100:4.0f}%), "
+              f"{rl_b[m].sum() / rl_b.sum() * 100:4.0f}% of bass bars")
+    sb = np.array([np.argmax(sec == q) for q in range(nsec) if np.any(sec == q)])[1:]
+    print(f"  riff change points within 4 bars of a section boundary: "
+          f"{np.mean([np.min(np.abs(sb - c)) <= 4 for c in riff_cps]) * 100:.0f}% of {len(riff_cps)}")
+    ids_active = rid[active]
+    reuse = np.bincount(ids_active[ids_active >= 0])
+    print(f"  riff ids used in >1 segment: {int(np.sum([len(set(riff_seg[(riff_state == i)])) > 1 for i in np.unique(ids_active)]))} "
+          f"of {len(np.unique(ids_active))}")
+
+    # --- timbre per bar
+    Nn = load_notes(merged=True)
+    T = timbre_rows(x, Nn, bounds, min_dur=0.21, lead=0.04, min_win=0.15)
+    t0s, t1s, secn, midi = T[:, 0], T[:, 1], T[:, 2].astype(int), T[:, 3]
+    feat_idx = {"h2": 4, "h3": 5, "h4": 6, "h5": 7, "odd-even": 11, "THD": 12}
+    Fz = np.column_stack([T[:, feat_idx[c]] for c in TIMBRE_COLS])
+    for j in range(Fz.shape[1]):
+        Fz[:, j] = Fz[:, j] - within_slope(Fz[:, j], midi, secn) * (midi - np.nanmean(midi))
+    timbre = np.full((nb, len(TIMBRE_COLS)), np.nan)
+    for b in range(nb):
+        a, z = bars[b, 0], bars[b, 16]
+        ov = np.maximum(0, np.minimum(t1s, z) - np.maximum(t0s, a))
+        m = ov > 0.05
+        if m.any():
+            timbre[b] = np.nanmedian(Fz[m], 0)
+    have = ~np.isnan(timbre).any(1)
+    print(f"\n[timbre] {len(T)} notes >= 210 ms measured; bars with a timbre reading: {have.sum()} "
+          f"({have.sum() / active.sum() * 100:.0f}% of bass bars)")
+    # evidence per bar = the notes that START in it (a note spanning two bars is counted once);
+    # noise = note-to-note spread inside a section (conservative: includes real variation)
+    nb_of = np.clip(np.searchsorted(bars[:, 0], t0s, "right") - 1, 0, nb - 1)
+    dz = []
+    for sct in np.unique(secn):
+        q = Fz[secn == sct]
+        if len(q) >= 3:
+            dz.append(np.diff(q, axis=0))
+    dz = np.vstack(dz)
+    sig = np.nanmedian(np.abs(dz - np.nanmedian(dz, 0)), 0) / 0.6745 / np.sqrt(2)
+    mu = np.nanmean(Fz, 0)
+    Y = np.zeros((nb, len(TIMBRE_COLS)))
+    wv = np.zeros(nb)
+    for b in range(nb):
+        m = nb_of == b
+        if m.any():
+            Y[b] = np.nanmean(np.clip((Fz[m] - mu) / sig, -2.5, 2.5), 0)   # winsorised: clamped harmonics are outliers
+            wv[b] = m.sum()
+    print(f"  per-note noise (dB): " + ", ".join(f"{c} {v:.1f}" for c, v in zip(TIMBRE_COLS, sig)))
+    d = len(TIMBRE_COLS)
+    tim_res = {}
+    for c in (0.5, 1.0, 2.0):
+        cps = dp_segment_w(Y, wv, c * d * np.log(wv.sum()), 2)
+        seglen = np.diff(np.r_[0, cps, nb])
+        tim_res[c] = (cps, seglen)
+        print(f"  penalty {c:.1f} x BIC: {len(cps)} change points, segment length median {np.median(seglen):.0f} bars, "
+              f"p25 {np.percentile(seglen, 25):.0f}, p75 {np.percentile(seglen, 75):.0f}, p90 {np.percentile(seglen, 90):.0f}")
+    TPEN = 1.0
+    tcps, tlen = tim_res[TPEN]
+    print(f"  using penalty {TPEN:.1f} x BIC below (standard BIC; readings winsorised at 2.5 sigma so single odd notes do not split)")
+    timbre_seg = np.zeros(nb, int)
+    for i, a in enumerate(tcps):
+        timbre_seg[a:] = i + 1
+    print("  timbre segment length (bars, BIC):")
+    for lo, hi in [(2, 4), (4, 8), (8, 16), (16, 32), (32, 64), (64, 9999)]:
+        m = (tlen >= lo) & (tlen < hi)
+        print(f"    {lo:>3d}-{(str(hi - 1) if hi < 9999 else ''):<4} bars: {m.sum():4d} segments, {tlen[m].sum() / nb * 100:4.0f}% of bars")
+    sec_starts = np.array([np.argmax(sec == s) for s in range(nsec) if np.any(sec == s)])[1:]
+    near = [np.min(np.abs(sec_starts - c)) for c in tcps]
+    nulln = []
+    for _ in range(2000):
+        rc = rng.choice(np.arange(2, nb - 2), len(tcps), replace=False)
+        nulln.append(np.mean([np.min(np.abs(sec_starts - c)) <= 4 for c in rc]))
+    print(f"  (null for 'within 4 bars of a boundary' with {len(tcps)} random change points: {np.mean(nulln) * 100:.0f}%)")
+    print(f"  timbre change points within 4 bars of a section (record) boundary: {np.mean(np.array(near) <= 4) * 100:.0f}% "
+          f"({len(tcps)} cps, {len(sec_starts)} boundaries); boundaries with a timbre cp within 4 bars: "
+          f"{np.mean([np.min(np.abs(np.array(tcps) - s)) <= 4 for s in sec_starts]) * 100 if len(tcps) else 0:.0f}%")
+    within = [c for c, nd in zip(tcps, near) if nd > 4]
+    print(f"  timbre change points INSIDE sections (> 4 bars from a boundary): {len(within)}")
+
+    # --- attack ping per bar
+    pg = ping_scan(x)
+    print(f"\n[attack] broad onset set: {len(pg)} onsets with a measurable start pitch; "
+          f"start >= +3 st: {np.mean(pg[:, 2] >= 3) * 100:.0f}% (clean of HF hits: "
+          f"{np.mean(pg[pg[:, 3] < 9, 2] >= 3) * 100:.0f}% of {int(np.sum(pg[:, 3] < 9))}; on a drum hit: "
+          f"{np.mean(pg[pg[:, 3] >= 9, 2] >= 3) * 100:.0f}% of {int(np.sum(pg[:, 3] >= 9))})")
+    print(f"  start offset percentiles: p10 {np.percentile(pg[:, 2], 10):+.1f}, p25 {np.percentile(pg[:, 2], 25):+.1f}, "
+          f"p50 {np.percentile(pg[:, 2], 50):+.1f}, p75 {np.percentile(pg[:, 2], 75):+.1f}, p90 {np.percentile(pg[:, 2], 90):+.1f} st")
+    osec = np.searchsorted(bounds, pg[:, 0], "right") - 1
+    print("  per section: sec  onsets  share starting >= +3 st   median start st")
+    ping_sec = {}
+    for s in range(nsec):
+        m = osec == s
+        if m.sum() >= 5:
+            ping_sec[s] = (m.sum(), np.mean(pg[m, 2] >= 3), np.median(pg[m, 2]))
+            print(f"   S{s + 1:02d}  {m.sum():5d}   {np.mean(pg[m, 2] >= 3) * 100:10.0f}%   {np.median(pg[m, 2]):+14.1f}")
+    has_bell = np.full(nb, np.nan)
+    n_on = np.zeros(nb, int)
+    bi = np.searchsorted(bars[:, 0], pg[:, 0], "right") - 1
+    for b in range(nb):
+        m = bi == b
+        n_on[b] = m.sum()
+        if m.any():
+            has_bell[b] = np.mean(pg[m, 2] >= 3)
+
+    # --- phrase grid alignment
+    print("\n[phrase grid] change points on 4/8/16/32-bar boundaries vs a Monte-Carlo null (same count per section)")
+    print("  layer    M   global-phase share (null, p)   +-1 bar (null, p)       per-section-phase (null, p)   segment lengths multiple of M (null, p)")
+    align = {}
+    for name, cps in (("riff", riff_cps), ("timbre", np.array(tcps))):
+        res = phrase_alignment(cps, sec, nb, rng, 1000)
+        align[name] = res
+        for M, ((g, gn, gp), (l, ln, lp), (q, qn, qp), (g1, g1n, g1p)) in res.items():
+            print(f"  {name:6s} {M:3d}     {g * 100:5.1f}% ({gn * 100:4.1f}%, {gp:.3f})     {g1 * 100:5.1f}% ({g1n * 100:4.1f}%, {g1p:.3f})"
+                  f"     {l * 100:5.1f}% ({ln * 100:4.1f}%, {lp:.3f})       {q * 100:5.1f}% ({qn * 100:4.1f}%, {qp:.3f})")
+
+    root_pc = np.full(nb, -1, int)
+    for b in range(nb):
+        if active[b]:
+            vals = seq[b][seq[b] >= 0]
+            root_pc[b] = int(np.bincount(vals % 12).argmax())
+    out = os.path.join(CACHE, "bass_bars.npz")
+    np.savez(out,
+             bar_start_s=bars[:, 0].astype(np.float64), bar_end_s=bars[:, 16].astype(np.float64),
+             section=sec.astype(np.int16), root_pc=root_pc.astype(np.int8), bass_present=active,
+             seq16=seq.astype(np.int8), riff_id=rid.astype(np.int16), riff_period_bars=period.astype(np.int8),
+             riff_segment_id=riff_seg.astype(np.int16), timbre=timbre.astype(np.float32),
+             timbre_cols=np.array(TIMBRE_COLS), timbre_segment_id=timbre_seg.astype(np.int16),
+             has_bell_attack=has_bell.astype(np.float32), n_onsets_measured=n_on.astype(np.int8))
+    print(f"\nwrote {out}")
+    np.savez(scratch("bars_summary.npz"), riff_len=rl_b, timbre_len=tlen, ping=pg,
+             riff_cps=np.array(riff_cps), timbre_cps=np.array(tcps))
+
+
 def stage_inspect(t0=500.0, t1=512.0):
     """Print the raw F0 track over a window, to see with your own eyes what the notes are made of."""
     d = load_f0()
@@ -1087,13 +2468,16 @@ def stage_inspect(t0=500.0, t1=512.0):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("stage", choices=["grid", "sections", "f0", "notes", "spec", "kick",
-                                      "report", "inspect", "all"])
+                                      "report", "inspect", "bell", "bellreport", "recipe",
+                                      "timbre", "riff", "bars", "all"])
     ap.add_argument("--t0", type=float, default=500.0)
     ap.add_argument("--t1", type=float, default=512.0)
     a = ap.parse_args(argv)
     stages = {"grid": stage_grid, "sections": stage_sections, "f0": stage_f0,
               "notes": stage_notes, "spec": stage_spec, "kick": stage_kick,
-              "report": stage_report, "inspect": lambda: stage_inspect(a.t0, a.t1)}
+              "report": stage_report, "inspect": lambda: stage_inspect(a.t0, a.t1),
+              "bell": stage_bell, "bellreport": bell_report, "recipe": stage_recipe,
+              "timbre": stage_timbre, "riff": stage_riff, "bars": lambda: stage_bars()}
     if a.stage == "all":
         for k in ["grid", "sections", "f0", "notes", "spec", "kick", "report"]:
             print(f"\n----- {k} -----")

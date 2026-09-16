@@ -592,7 +592,7 @@ def diag():
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    for f in ("stage1", "peek", "diag", "report"):
+    for f in ("stage1", "peek", "diag", "report", "callresp"):
         ap.add_argument("--" + f, action="store_true")
     a = ap.parse_args(argv)
     if a.stage1:
@@ -603,6 +603,8 @@ def main(argv=None):
         diag()
     elif a.report:
         report()
+    elif a.callresp:
+        callresp_main()
     else:
         ap.print_help()
     return 0
@@ -929,13 +931,15 @@ def report():
         w(f"Tempo is effectively locked across the whole set (spread "
           f"{1000*(segl[:,2].max()-segl[:,2].min()):.0f} mBPM). 1 bar = {bar_s:.4f} s, "
           f"1 beat = {beat_s:.4f} s.\n")
-        w(f"The **phase** is not locked, and this matters. `grid.npz` records "
-          f"**{len(resets)} bar-phase resets** at "
-          f"{', '.join(f'{x:.0f} s' for x in resets)} - the DJ's mix points. Independently, combing "
-          f"each of my sections' low-band onset flux against a single global grid puts their "
-          f"downbeats up to **+-173 ms** apart, more than a 16th note "
-          f"({bar_s/16*1000:.0f} ms). The two methods agree: a single-tempo bar grid is safe for "
-          "*lengths* but wrong for *positions*, so no bar index here comes from one.\n")
+        w(f"`grid.npz` records **{len(resets)} bar-phase moves** at "
+          f"{', '.join(f'{x:.0f} s' for x in resets)} - the DJ's mix points - and one beat-phase "
+          "step (see grid.md). All bar positions here come from it.\n")
+        w("*Correction to an earlier draft:* this file once said a per-section comb against a "
+          "single global grid put downbeats up to +-173 ms apart and 'independently agreed' with "
+          "the phase resets. That comb was measured against the old cached grid in `meta.json` "
+          "(165.83 BPM), which grid.md shows is the wrong tempo and drifts 3.7 beats by the end of "
+          "the file - so most of that offset was tempo error, not phase. The conclusion (do not use "
+          "the cached bar grid) stands; the 'independent agreement' does not.\n")
     else:
         w("`grid.npz` was NOT present, so the grid below is my own and bar positions should be "
           "treated as approximate.\n")
@@ -1405,10 +1409,1458 @@ def report():
     with open(OUT_MD, "w", encoding="utf-8") as fh:
         fh.write(txt)
     print(f"report -> {OUT_MD}  ({len(txt)} chars, {len(L)} lines)")
+    cr_lines, cr_res = callresp(F, secs, evs_all)
+    cr_splice(cr_lines + anacrusis(cr_res))
     np.savez_compressed(EVENTS_NPZ,
                         t=np.array([e["t"] for e in evs_all]),
                         dur=np.array([e["dur"] for e in evs_all]),
                         lab=lab)
+
+
+# ======================================================================
+# CALL AND RESPONSE - "high call at the front; sub response, longer, at the back"
+# ======================================================================
+# Measurement only. The sub stream comes from the bass agent's note code (scripts/reaper_bass.py,
+# imported read-only; its cached notes.npz is read, never written). The sub-section boundaries come
+# from reaper_structure.py's bar-accurate segments (sections.json, read only). Nothing is written
+# anywhere except the markdown section this appends.
+GRID_NPZ = os.path.join(CACHE, "grid.npz")
+STRUCT_JSON = os.path.join(SCRATCH, "sections.json")
+BASS_BARS = os.path.join(CACHE, "bass_bars.npz")
+SUB_HZ = 120.0
+CR_HEAD = "## Call and response"
+
+
+def cr_grid():
+    """16th-note slots on grid.npz. Only bars with exactly four beats are foldable."""
+    g = np.load(GRID_NPZ)
+    beats = np.asarray(g["beats_s"], float)
+    pos = np.asarray(g["beat_bar_pos"], int)
+    beat_len = float(np.median(np.diff(beats)))
+    b_ext = np.append(beats, beats[-1] + beat_len)
+    step = np.diff(b_ext)
+    slot_t = (b_ext[:-1, None] + step[:, None] * np.arange(4)[None, :] / 4.0).ravel()
+    slot_t = np.append(slot_t, b_ext[-1])
+    bar_of_beat = np.cumsum(pos == 0) - 1
+    nbar = int(bar_of_beat.max()) + 1
+    beats_in_bar = np.bincount(bar_of_beat[bar_of_beat >= 0], minlength=nbar)
+    slot_beat = np.repeat(np.arange(len(beats)), 4)
+    slot_bar = bar_of_beat[slot_beat]
+    slot_inbar = pos[slot_beat] * 4 + np.tile(np.arange(4), len(beats))
+    ok_bar = beats_in_bar == 4
+    slot_ok = (slot_bar >= 0) & ok_bar[np.clip(slot_bar, 0, nbar - 1)] & (slot_inbar < 16)
+    return dict(beats=beats, beat_len=beat_len, slot_t=slot_t, slot_beat=slot_beat,
+                slot_bar=slot_bar, slot_inbar=slot_inbar, slot_ok=slot_ok, nbar=nbar,
+                downbeats=beats[pos == 0], bar_of_beat=bar_of_beat, ok_bar=ok_bar)
+
+
+def cr_subsections(G):
+    """Sub-sections as bar ranges: reaper_structure.py's bar-accurate segments if present,
+    else this script's own novelty sections."""
+    if os.path.exists(STRUCT_JSON):
+        rows = json.load(open(STRUCT_JSON))
+        starts, src = [float(r["a"]) for r in rows], "reaper_structure.py segments"
+    else:
+        starts, src = [s["t0"] for s in sections()], "reaper_hooks.py novelty sections"
+    db = G["downbeats"]
+    sb = sorted(set(int(np.argmin(np.abs(db - a))) for a in starts))
+    if sb[0] != 0:
+        sb = [0] + sb
+    b = sb + [G["nbar"]]
+    return [(b[i], b[i + 1]) for i in range(len(b) - 1) if b[i + 1] > b[i]], src
+
+
+def cr_cover(intervals, slot_t):
+    """Fraction of each 16th slot covered by any of the intervals (1 ms resolution)."""
+    FS = 1000
+    n = int(np.ceil(slot_t[-1] * FS)) + 2
+    m = np.zeros(n, np.float32)
+    for a, z in intervals:
+        i0, i1 = int(max(a, 0.0) * FS), int(min(z, slot_t[-1]) * FS)
+        if i1 > i0:
+            m[i0:i1] = 1.0
+    cs = np.concatenate([[0.0], np.cumsum(m, dtype=np.float64)])
+    idx = np.clip(np.round(slot_t * FS).astype(int), 0, n)
+    return ((cs[idx[1:]] - cs[idx[:-1]]) / np.maximum(idx[1:] - idx[:-1], 1)).astype(np.float32)
+
+
+def cr_onsets(times, slot_t):
+    """Count of onsets per 16th slot, each onset assigned to its NEAREST slot start."""
+    st = slot_t[:-1]
+    k = np.clip(np.searchsorted(st, times), 1, len(st) - 1)
+    k = np.where(np.abs(times - st[k - 1]) <= np.abs(times - st[k]), k - 1, k)
+    ok = (times >= st[0] - 0.05) & (times <= slot_t[-1])
+    return np.bincount(k[ok], minlength=len(st)).astype(np.float32)
+
+
+def cr_perc_accents(G, subs):
+    """High-percussion accents that stand OUT of the 16th carrier: 2-16 kHz onset strength at a
+    slot more than 2x (6 dB) the median strength of the SAME bar position over the surrounding
+    +-4 bars of the same sub-section, and above that sub-section's 60th percentile. The regular
+    backbeat therefore does not count - only departures from the repeating pattern do."""
+    f = np.load(os.path.join(CACHE, "frames.npz"))
+    fl = (f["flux_high"] + f["flux_air"]).astype(np.float64)
+    ft = f["t"].astype(np.float64)
+    st = G["slot_t"][:-1]
+    i0 = np.searchsorted(ft, st - 0.02)
+    i1 = np.maximum(np.searchsorted(ft, st + 0.04), i0 + 1)
+    idx = np.ravel(np.column_stack([i0, i1]))
+    idx = np.clip(idx, 0, len(fl) - 1)
+    v = np.maximum.reduceat(fl, idx)[::2]
+    L = np.log(v + 1e-9)
+    acc = np.zeros(len(st), np.float32)
+    sb, si, ok = G["slot_bar"], G["slot_inbar"], G["slot_ok"]
+    for b0, b1 in subs:
+        sel = np.where(ok & (sb >= b0) & (sb < b1))[0]
+        if len(sel) < 64:
+            continue
+        nb = b1 - b0
+        Mx = np.full((nb, 16), np.nan)
+        Mx[sb[sel] - b0, si[sel]] = L[sel]
+        ref = np.full_like(Mx, np.nan)
+        for r in range(nb):
+            lo, hi = max(0, r - 4), min(nb, r + 5)
+            ref[r] = np.nanmedian(Mx[lo:hi], axis=0)
+        thr = np.percentile(v[sel], 60)
+        rr = ref[sb[sel] - b0, si[sel]]
+        acc[sel] = ((L[sel] - rr > np.log(2.0)) & (v[sel] > thr)).astype(np.float32)
+    return acc
+
+
+def cr_fold(act, G, subs, N, anchor="sub"):
+    """Per sub-section position sums for an N-bar cycle (complete cycles only)."""
+    P = 16 * N
+    sums, counts = [], []
+    sb, si, ok = G["slot_bar"], G["slot_inbar"], G["slot_ok"]
+    for b0, b1 in subs:
+        nfull = (b1 - b0) // N
+        if nfull == 0:
+            sums.append(np.zeros(P))
+            counts.append(0)
+            continue
+        sel = ok & (sb >= b0) & (sb < b0 + nfull * N)
+        base = b0 if anchor == "sub" else 0
+        cp = ((sb[sel] - base) % N) * 16 + si[sel]
+        sums.append(np.bincount(cp, weights=act[sel], minlength=P)[:P])
+        counts.append(nfull)
+    return np.array(sums), np.array(counts)
+
+
+def cr_profile_stats(prof):
+    P = len(prof)
+    tot = prof.sum()
+    if tot <= 0:
+        return dict(first=np.nan, com=np.nan, phase=np.nan, R=np.nan)
+    pos = np.arange(P) + 0.5
+    ang = 2 * np.pi * pos / P
+    z = (prof * np.exp(1j * ang)).sum() / tot
+    return dict(first=float(prof[:P // 2].sum() / tot), com=float((prof * pos).sum() / tot / P),
+                phase=float((np.angle(z) / (2 * np.pi)) % 1.0), R=float(np.abs(z)))
+
+
+def cr_front_back(call, resp, G, subs, N, anchor="sub", nboot=600, seed=7):
+    Sc, n = cr_fold(call, G, subs, N, anchor)
+    Sr, _ = cr_fold(resp, G, subs, N, anchor)
+    keep = n > 0
+    Sc, Sr = Sc[keep], Sr[keep]
+    pc, pr = Sc.sum(0), Sr.sum(0)
+    out = {"call": cr_profile_stats(pc), "resp": cr_profile_stats(pr),
+           "prof_call": pc / max(pc.sum(), 1e-9), "prof_resp": pr / max(pr.sum(), 1e-9)}
+    rng = np.random.default_rng(seed)
+    P = 16 * N
+    diffs, fc, fr = [], [], []
+    for _ in range(nboot):
+        k = rng.integers(0, len(Sc), len(Sc))
+        a, b = Sc[k].sum(0), Sr[k].sum(0)
+        if a.sum() <= 0 or b.sum() <= 0:
+            continue
+        x, y = a[:P // 2].sum() / a.sum(), b[:P // 2].sum() / b.sum()
+        fc.append(x)
+        fr.append(y)
+        diffs.append(x - y)
+    out["ci_call"] = np.percentile(fc, [2.5, 97.5])
+    out["ci_resp"] = np.percentile(fr, [2.5, 97.5])
+    out["ci_diff"] = np.percentile(diffs, [2.5, 97.5])
+    out["diff"] = out["call"]["first"] - out["resp"]["first"]
+    # anchor-free: circular offset of the response behind the call, per sub-section
+    num, wsum, pos_share = 0j, 0.0, []
+    for a, b in zip(Sc, Sr):
+        if a.sum() <= 0 or b.sum() <= 0:
+            continue
+        sa, sbb = cr_profile_stats(a), cr_profile_stats(b)
+        d = ((sbb["phase"] - sa["phase"] + 0.5) % 1.0) - 0.5
+        w = sa["R"] * sbb["R"]
+        num += w * np.exp(2j * np.pi * d)
+        wsum += w
+        pos_share.append(d > 0)
+    out["rel_offset"] = float(np.angle(num) / (2 * np.pi)) if wsum > 0 else np.nan
+    out["rel_R"] = float(np.abs(num) / wsum) if wsum > 0 else np.nan
+    out["rel_pos_share"] = float(np.mean(pos_share)) if pos_share else np.nan
+    return out
+
+
+def cr_beats(act, G):
+    return np.bincount(G["slot_beat"], weights=act, minlength=len(G["beats"]))
+
+
+def cr_sub_beats(G, b0, b1):
+    return np.where((G["bar_of_beat"] >= b0) & (G["bar_of_beat"] < b1))[0]
+
+
+def cr_xcorr(cb, rb, G, subs, lags, mode=None, rng=None):
+    num = np.zeros(len(lags))
+    den = np.zeros(len(lags))
+    for b0, b1 in subs:
+        idx = cr_sub_beats(G, b0, b1)
+        if len(idx) < 32:
+            continue
+        c, r = cb[idx].astype(float), rb[idx].astype(float)
+        if c.std() == 0 or r.std() == 0:
+            continue
+        if mode == "shift":
+            c = np.roll(c, int(rng.integers(8, len(c) - 8)))
+        elif mode == "bars":
+            bars = G["bar_of_beat"][idx]
+            groups = [np.where(bars == k)[0] for k in np.unique(bars)]
+            order = rng.permutation(len(groups))
+            c = np.concatenate([c[groups[k]] for k in order])
+        c = (c - c.mean()) / c.std()
+        r = (r - r.mean()) / r.std()
+        n = len(c)
+        for j, L in enumerate(lags):
+            if L >= 0:
+                pr = c[:n - L] * r[L:]
+            else:
+                pr = c[-L:] * r[:n + L]
+            num[j] += pr.sum()
+            den[j] += len(pr)
+    return num / np.maximum(den, 1)
+
+
+def cr_cycles(call, resp, G, subs, N):
+    """Per complete cycle: call and response sounding time in beats, whole cycle and by half."""
+    rows = []
+    sb, si, ok = G["slot_bar"], G["slot_inbar"], G["slot_ok"]
+    for b0, b1 in subs:
+        nfull = (b1 - b0) // N
+        for c in range(nfull):
+            sel = ok & (sb >= b0 + c * N) & (sb < b0 + (c + 1) * N)
+            if sel.sum() < 16 * N:
+                continue
+            first = (((sb[sel] - b0) % N) * 16 + si[sel]) < 8 * N
+            ca, ra = call[sel], resp[sel]
+            rows.append((ca.sum() * 0.25, ra.sum() * 0.25, ca[first].sum() * 0.25,
+                         ra[~first].sum() * 0.25, b0))
+    return np.array(rows) if rows else np.zeros((0, 5))
+
+
+def cr_unit(call, resp, G, b0, b1, N, nnull=200, rng=None):
+    """Contrast for one bar range at an N-bar cycle, plus a null from rotating the call stream
+    inside the range by a random number of 16ths (keeps its density and the sub untouched)."""
+    sb, si, ok = G["slot_bar"], G["slot_inbar"], G["slot_ok"]
+    nfull = (b1 - b0) // N
+    if nfull == 0:
+        return None
+    sel = np.where(ok & (sb >= b0) & (sb < b0 + nfull * N))[0]
+    P = 16 * N
+    cp = ((sb[sel] - b0) % N) * 16 + si[sel]
+    half = cp < P // 2
+    c, r = call[sel], resp[sel]
+    cb_, rb_ = c.sum() * 0.25, r.sum() * 0.25
+    if c.sum() <= 0 or r.sum() <= 0:
+        return dict(d=np.nan, lo=np.nan, hi=np.nan, cb=cb_, rb=rb_, cf=np.nan, rf=np.nan)
+    rf = r[half].sum() / r.sum()
+    cf = c[half].sum() / c.sum()
+    nd = []
+    if rng is not None and len(c) > 32:
+        for _ in range(nnull):
+            cc = np.roll(c, int(rng.integers(1, len(c))))
+            nd.append(cc[half].sum() / cc.sum() - rf)
+    lo, hi = (np.percentile(nd, [2.5, 97.5]) if nd else (np.nan, np.nan))
+    return dict(d=cf - rf, lo=lo, hi=hi, cb=cb_, rb=rb_, cf=cf, rf=rf)
+
+
+def cr_state(u, ncall, min_calls=4):
+    if u is None:
+        return "too short"
+    if ncall < min_calls or u["rb"] < 4.0 or u["d"] != u["d"]:
+        return "absent"
+    if u["d"] > u["hi"]:
+        return "holds"
+    if u["d"] < u["lo"]:
+        return "reversed"
+    return "flat"
+
+
+def callresp(F, secs, evs):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "reaper_bass", os.path.join(os.path.dirname(os.path.abspath(__file__)), "reaper_bass.py"))
+    rb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rb)                    # read-only import: defs and constants only
+    z = np.load(rb.scratch("notes.npz"))
+    plate = z["merged"]
+    glides = z["glides"]
+    sub_midi = 69 + 12 * np.log2(SUB_HZ / 440.0)
+    plate = plate[plate[:, 2] < sub_midi]
+
+    G = cr_grid()
+    subs, sub_src = cr_subsections(G)
+    st = G["slot_t"]
+    dur = float(F["t"][-1])
+
+    # ---- streams
+    call_snd = cr_cover([(e["t"], e["t"] + e["dur"]) for e in evs], st)
+    call_on = cr_onsets(np.array([e["t"] for e in evs]), st)
+    acc = cr_perc_accents(G, subs)
+    comb_on = np.clip(call_on + acc, 0, 1)
+    comb_snd = np.clip(call_snd + acc, 0, 1)
+    resp_snd = cr_cover([(a, b) for a, b in plate[:, :2]] + [(a, b) for a, b in glides[:, :2]], st)
+    resp_on = cr_onsets(plate[:, 0], st)
+    HOOK_TYPES = ("stab", "chord stab", "vocal-like", "bell / high tone")
+    hook_snd = cr_cover([(e["t"], e["t"] + e["dur"]) for e in evs if e["type"] in HOOK_TYPES], st)
+    streams = {
+        "tonal CALL, sounding": call_snd,
+        "hook types only, sounding": hook_snd,
+        "tonal CALL, onsets": call_on,
+        "perc accents, onsets": acc,
+        "tonal + accents, onsets": comb_on,
+    }
+    resp_streams = {"sub, sounding": resp_snd, "sub, onsets": resp_on}
+
+    L = []
+    w = L.append
+    w(f"{CR_HEAD}\n")
+    w("Test of the reading **\"high call at the front; sub response, longer, at the back\"**. "
+      "Measurement only: event times, durations and intervals. Nothing was extracted or reused.\n")
+    w("### Streams and grid\n")
+    ntype = Counter(e["type"] for e in evs)
+    w(f"- **CALL (tonal)** - all {len(evs)} events from section 1, every type counted: "
+      + ", ".join(f"{k} {v}" for k, v in ntype.most_common()) + ". Their fundamentals sit at "
+      "233-392 Hz (IQR), so 'high' here means *above the sub*, not top-octave (section 5 shows there "
+      "is no separate top-octave layer). A narrower **hook-types-only** stream keeps just "
+      f"{', '.join(HOOK_TYPES)} ({sum(1 for e in evs if e['type'] in HOOK_TYPES)} events) and "
+      "drops riff fragments, sustained tones and lead lines.\n")
+    ok_s = G["slot_ok"]
+    w(f"- **CALL (percussion accents)** - 2-16 kHz onset strength at a 16th that is >= 6 dB above "
+      f"the median of the *same bar position* over the surrounding +-4 bars and above the "
+      f"sub-section's 60th percentile. The regular backbeat and the 16th carrier are therefore "
+      f"excluded; fills, crashes and displaced snares count. {int(acc.sum())} accents = "
+      f"{100 * acc[ok_s].mean():.1f}% of 16th slots ({16 * acc[ok_s].mean():.2f} per bar). Kept as "
+      "a separate stream and in a combined stream, because they are a different kind of call.\n")
+    w(f"- **RESPONSE (sub)** - `scripts/reaper_bass.py` note code, imported read-only: "
+      f"{len(plate)} held-pitch plateaus below {SUB_HZ:.0f} Hz (onsets) plus {len(glides)} glides "
+      f"(sounding time). Sub sounds in {100 * resp_snd[ok_s].mean():.0f}% of 16th slots; the tonal "
+      f"call in {100 * call_snd[ok_s].mean():.0f}%.\n")
+    bbn = ("present - its per-bar riff segments are used as the bass layer's own state "
+           "boundaries in part 5; the sub stream itself comes from the note cache, which carries "
+           "exact onset and offset times" if os.path.exists(BASS_BARS) else
+           "not present when this ran, so the notes cache was used directly")
+    w(f"- `bass_bars.npz`: {bbn}.\n")
+    w(f"- **Grid**: `grid.npz` beats, split into 16ths; only 4-beat bars are folded "
+      f"({int(G['ok_bar'].sum())} of {G['nbar']}). **Cycles are anchored at sub-section starts** "
+      f"({len(subs)} sub-sections from {sub_src}, snapped to the nearest downbeat), so bar 1 of a "
+      "2- or 4-bar cycle is the first bar of a sub-section. Every front/back number is repeated "
+      "with a second anchor (the global bar count) and with an **anchor-free** measure - the "
+      "circular offset of the response behind the call inside the cycle, which does not depend on "
+      "where bar 1 is.\n")
+
+    # ---- 2. front vs back
+    w("### 1. Front versus back\n")
+    w("`first half` = share of the stream's activity in the first half of the cycle (0.50 = even). "
+      "`COM` = linear centre of mass in the cycle, 0 = downbeat of bar 1, 1 = end of the cycle. "
+      "`contrast` = call first-half share minus response first-half share; the user's reading "
+      "predicts it positive. 95% CIs are a cluster bootstrap over sub-sections.\n")
+    w("| call stream | response | cycle | call first half | call COM | resp first half | resp COM "
+      "| contrast [95% CI] | anchor-free offset resp-call | global-anchor contrast [95% CI] |")
+    w("|---|---|---|---|---|---|---|---|---|---|")
+    FB = {}
+    for cname, cs in streams.items():
+        for rname, rs in resp_streams.items():
+            if ("sounding" in cname) != ("sounding" in rname):
+                continue
+            for N in (1, 2, 4, 8):
+                o = cr_front_back(cs, rs, G, subs, N)
+                og = cr_front_back(cs, rs, G, subs, N, anchor="global", nboot=200)
+                FB[(cname, rname, N)] = o
+                w(f"| {cname} | {rname} | {N} bar | {o['call']['first']:.3f} | "
+                  f"{o['call']['com']:.3f} | {o['resp']['first']:.3f} | {o['resp']['com']:.3f} | "
+                  f"**{o['diff']:+.3f}** [{o['ci_diff'][0]:+.3f}, {o['ci_diff'][1]:+.3f}] | "
+                  f"{o['rel_offset']:+.3f} cycle (R {o['rel_R']:.2f}, later in "
+                  f"{100 * o['rel_pos_share']:.0f}% of subs) | {og['diff']:+.3f} "
+                  f"[{og['ci_diff'][0]:+.3f}, {og['ci_diff'][1]:+.3f}] |")
+    w("")
+    key = ("tonal CALL, sounding", "sub, sounding")
+    best_N = max((1, 2, 4, 8), key=lambda N: FB[key + (N,)]["diff"])
+    ob = FB[key + (best_N,)]
+    sig_pos = [(k2, v) for k2, v in FB.items() if v["ci_diff"][0] > 0]
+    sig_neg = [(k2, v) for k2, v in FB.items() if v["ci_diff"][1] < 0]
+    w(f"Largest contrast in the predicted direction for tonal call vs sub sounding: "
+      f"**{best_N} bar(s)**, {ob['diff']:+.3f} [{ob['ci_diff'][0]:+.3f}, {ob['ci_diff'][1]:+.3f}] - "
+      "its interval includes zero. Rows whose sub-section-anchored interval excludes zero: "
+      f"**{len(sig_pos)} in the predicted direction, {len(sig_neg)} in the opposite direction** ("
+      + "; ".join(f"{k2[0]} vs {k2[1]}, {k2[2]} bar: {v['diff']:+.3f}" for k2, v in sig_neg)
+      + ").\n")
+
+    def profile(title, cname, rname, N, per):
+        o = FB[(cname, rname, N)]
+        pc_ = o["prof_call"].reshape(-1, per).sum(1)
+        pr_ = o["prof_resp"].reshape(-1, per).sum(1)
+        if per == 16:
+            labs = [f"bar {k + 1}" for k in range(len(pc_))]
+        elif per == 4:
+            labs = [f"{k // 4 + 1}.{k % 4 + 1}" for k in range(len(pc_))]
+        else:
+            labs = [f"{k // 2 + 1}{'' if k % 2 == 0 else '&'}" for k in range(len(pc_))]
+        w(f"*{title}* - share of each stream's activity per {'bar' if per == 16 else ('beat' if per == 4 else '8th')}:\n")
+        w("| position | " + " | ".join(labs) + " |")
+        w("|---|" + "---|" * len(labs))
+        w(f"| {cname} | " + " | ".join(f"{100 * x:.1f}" for x in pc_) + " |")
+        w(f"| {rname} | " + " | ".join(f"{100 * x:.1f}" for x in pr_) + " |")
+        w("| call - sub | " + " | ".join(f"{100 * (a - b):+.1f}" for a, b in zip(pc_, pr_)) + " |")
+        w("")
+
+    profile("One bar, percussion accents against sub onsets (the strongest effect in the table)",
+            "perc accents, onsets", "sub, onsets", 1, 2)
+    profile("Eight bars, tonal call onsets against sub onsets", "tonal CALL, onsets",
+            "sub, onsets", 8, 16)
+    profile("Four bars (the phrase unit), tonal call against sub, sounding",
+            "tonal CALL, sounding", "sub, sounding", 4, 4)
+
+    # ---- 3. alternation
+    w("### 2. Alternation: cross-correlation at beat resolution\n")
+    lags = list(range(-8, 9))
+    rng = np.random.default_rng(11)
+    w("Per-beat activity, z-scored inside each sub-section (so slow level changes between sections "
+      "cannot create correlation), correlated at lags -8..+8 beats. **Positive lag = the sub comes "
+      "after the call.** Two nulls, 200 draws each: `shift` rotates the call by a random number of "
+      "beats inside its sub-section (destroys all alignment); `bar-shuffle` permutes whole bars of "
+      "the call inside its sub-section (keeps the call's position-in-bar habit, destroys which bar "
+      "answers which). A lag that beats `shift` but not `bar-shuffle` is a *metric habit*; one "
+      "that beats both is *specific answering*.\n")
+    XC = {}
+    for cname, rname in (("tonal CALL, sounding", "sub, sounding"),
+                         ("tonal CALL, onsets", "sub, onsets"),
+                         ("perc accents, onsets", "sub, onsets"),
+                         ("tonal + accents, onsets", "sub, onsets")):
+        cb, rbb = cr_beats(streams[cname], G), cr_beats(resp_streams[rname], G)
+        obs = cr_xcorr(cb, rbb, G, subs, lags)
+        n_sh = np.array([cr_xcorr(cb, rbb, G, subs, lags, "shift", rng) for _ in range(200)])
+        n_bs = np.array([cr_xcorr(cb, rbb, G, subs, lags, "bars", rng) for _ in range(200)])
+        XC[cname] = (obs, n_sh, n_bs)
+        w(f"**{cname} vs {rname}**\n")
+        w("| lag (beats) | " + " | ".join(f"{L:+d}" for L in lags) + " |")
+        w("|---|" + "---|" * len(lags))
+        w("| r | " + " | ".join(f"{x:+.3f}" for x in obs) + " |")
+        w("| shift null 95% | " + " | ".join(
+            f"{np.percentile(n_sh[:, j], 2.5):+.3f}..{np.percentile(n_sh[:, j], 97.5):+.3f}"
+            for j in range(len(lags))) + " |")
+        w("| bar-shuffle null mean | " + " | ".join(f"{x:+.3f}" for x in n_bs.mean(0)) + " |")
+        sig = ["**S**" if obs[j] > np.percentile(n_bs[:, j], 97.5) else
+               ("**s-**" if obs[j] < np.percentile(n_bs[:, j], 2.5) else "") for j in range(len(lags))]
+        w("| vs bar-shuffle | " + " | ".join(sig) + " |")
+        pos_l = [j for j, L in enumerate(lags) if L > 0]
+        jpk = max(pos_l, key=lambda j: obs[j])
+        j0 = lags.index(0)
+        w(f"\nPeak at positive lag: **{lags[jpk]:+d} beats**, r = {obs[jpk]:+.3f} "
+          f"(bar-shuffle null {n_bs[:, jpk].mean():+.3f}). Lag 0: r = **{obs[j0]:+.3f}** "
+          f"(shift null {np.percentile(n_sh[:, j0], 2.5):+.3f}..{np.percentile(n_sh[:, j0], 97.5):+.3f}, "
+          f"bar-shuffle null {n_bs[:, j0].mean():+.3f}). `S` / `s-` = above / below the "
+          "bar-shuffle 95% band.\n")
+
+    # ---- 4. durations
+    w("### 3. Durations: is the response longer?\n")
+    for N in sorted(set([1, 2, 4, best_N])):
+        C = cr_cycles(call_snd, resp_snd, G, subs, N)
+        both = C[(C[:, 0] >= 0.25) & (C[:, 1] > 0)]
+        ratio = both[:, 1] / both[:, 0]
+        fb = C[(C[:, 2] >= 0.25) & (C[:, 3] > 0)]
+        r2 = fb[:, 3] / fb[:, 2]
+        w(f"**{N}-bar cycles** ({len(C)} complete, {len(both)} with both a call >= 1/4 beat and "
+          "some sub):\n")
+        w(f"- call sounding per cycle {'/'.join(f'{x:.2f}' for x in pct(both[:, 0]))} beats; sub "
+          f"sounding {'/'.join(f'{x:.2f}' for x in pct(both[:, 1]))} beats (10/25/50/75/90)\n")
+        w(f"- **sub / call ratio {'/'.join(f'{x:.2f}' for x in pct(ratio))}**; sub longer in "
+          f"**{100 * np.mean(ratio > 1):.0f}%** of cycles, geometric mean "
+          f"{np.exp(np.mean(np.log(ratio))):.2f}x\n")
+        w(f"- front call vs back sub only (call in the first half, sub in the second half; "
+          f"{len(fb)} cycles): ratio {'/'.join(f'{x:.2f}' for x in pct(r2))}, sub longer in "
+          f"{100 * np.mean(r2 > 1):.0f}%\n")
+    w("**Is 'longer' a property of the response, or of the sub?** The sub sounds in "
+      f"{100 * resp_snd[ok_s].mean():.0f}% of 16ths and the call in "
+      f"{100 * call_snd[ok_s].mean():.0f}%, so almost *any* cycle holding a call also holds more "
+      "sub. Two checks: (a) the same ratio with the call stream rotated to random positions inside "
+      "its sub-section (50 rotations) - if the observed ratio matches, 'longer' is just density; "
+      "(b) sub sounding time in cycles *with* a call versus cycles *without* one, inside the same "
+      "sub-section - an answering sub should play more after a call, not less.\n")
+    w("| cycle | observed median sub/call | rotated-call median [95%] | sub beats, cycles with a "
+      "call | sub beats, cycles without | paired diff (with - without) per sub-section |")
+    w("|---|---|---|---|---|---|")
+    rngd = np.random.default_rng(5)
+    DUR = {}
+    for N in (1, 2, 4):
+        C = cr_cycles(call_snd, resp_snd, G, subs, N)
+        both = C[(C[:, 0] >= 0.25) & (C[:, 1] > 0)]
+        obs_med = float(np.median(both[:, 1] / both[:, 0]))
+        nulls = []
+        for _ in range(50):
+            rot = np.zeros_like(call_snd)
+            for b0, b1 in subs:
+                sel = np.where(G["slot_ok"] & (G["slot_bar"] >= b0) & (G["slot_bar"] < b1))[0]
+                if len(sel) > 1:
+                    rot[sel] = np.roll(call_snd[sel], int(rngd.integers(1, len(sel))))
+            Cn = cr_cycles(rot, resp_snd, G, subs, N)
+            bn = Cn[(Cn[:, 0] >= 0.25) & (Cn[:, 1] > 0)]
+            nulls.append(np.median(bn[:, 1] / bn[:, 0]))
+        withc = C[C[:, 0] >= 0.25]
+        noc = C[C[:, 0] == 0]
+        pd_ = []
+        for b0 in np.unique(C[:, 4]):
+            a_ = C[(C[:, 4] == b0) & (C[:, 0] >= 0.25), 1]
+            z_ = C[(C[:, 4] == b0) & (C[:, 0] == 0), 1]
+            if len(a_) and len(z_):
+                pd_.append(a_.mean() - z_.mean())
+        DUR[N] = (obs_med, nulls, withc[:, 1].mean(), noc[:, 1].mean(), pd_)
+        w(f"| {N} bar | {obs_med:.2f} | {np.median(nulls):.2f} "
+          f"[{np.percentile(nulls, 2.5):.2f}, {np.percentile(nulls, 97.5):.2f}] | "
+          f"{withc[:, 1].mean():.2f} (n={len(withc)}) | {noc[:, 1].mean():.2f} (n={len(noc)}) | "
+          f"{np.median(pd_):+.2f} beats median, positive in {100 * np.mean(np.array(pd_) > 0):.0f}% "
+          f"of {len(pd_)} sub-sections |")
+    w("")
+    dl = np.array([e["dur"] for e in evs]) / G["beat_len"]
+    pl = (plate[:, 1] - plate[:, 0]) / G["beat_len"]
+    w(f"\nSingle units, for scale: a call event lasts {'/'.join(f'{x:.2f}' for x in pct(dl))} beats, "
+      f"a sub plateau {'/'.join(f'{x:.2f}' for x in pct(pl))} beats (10/25/50/75/90).\n")
+    # event pairs: sub sounding after each call until the next call or 2 bars
+    ct = np.array(sorted(e["t"] for e in evs))
+    pairs = []
+    for i, e in enumerate(sorted(evs, key=lambda e: e["t"])):
+        end = min(ct[i + 1] if i + 1 < len(ct) else e["t"] + 8 * G["beat_len"],
+                  e["t"] + 8 * G["beat_len"])
+        a = int(np.searchsorted(st, e["t"])) - 1
+        z2 = int(np.searchsorted(st, end))
+        a, z2 = max(a, 0), min(z2, len(resp_snd))
+        # sub sounding inside the window, measured in beats
+        rs = resp_snd[a:z2].sum() * 0.25
+        if rs > 0:
+            pairs.append((e["dur"] / G["beat_len"], rs, (end - e["t"]) / G["beat_len"]))
+    pairs = np.array(pairs)
+    pr_ratio = pairs[:, 1] / pairs[:, 0]
+    w(f"\nCall -> following window (until the next call, max 2 bars; {len(pairs)} calls with sub "
+      f"in the window): window {'/'.join(f'{x:.1f}' for x in pct(pairs[:, 2]))} beats, sub "
+      f"sounding in it {'/'.join(f'{x:.2f}' for x in pct(pairs[:, 1]))} beats, **ratio sub/call "
+      f"{'/'.join(f'{x:.2f}' for x in pct(pr_ratio))}**, sub longer in "
+      f"{100 * np.mean(pr_ratio > 1):.0f}%.\n")
+
+    # ---- 5. pitch
+    w("### 4. Pitch relationship (intervals only)\n")
+    sub_pc = np.mod(np.round(plate[:, 2]).astype(int), 12)
+    sub_w = plate[:, 1] - plate[:, 0]
+    bar_t = G["downbeats"]
+    roots = {}
+    for k, (b0, b1) in enumerate(subs):
+        t0 = bar_t[b0]
+        t1 = bar_t[b1] if b1 < len(bar_t) else dur
+        m = (plate[:, 0] >= t0) & (plate[:, 0] < t1)
+        if m.sum() >= 3:
+            roots[k] = int(np.argmax(np.bincount(sub_pc[m], weights=sub_w[m], minlength=12)))
+
+    def sub_of(t):
+        for k, (b0, b1) in enumerate(subs):
+            t0 = bar_t[b0]
+            t1 = bar_t[b1] if b1 < len(bar_t) else dur
+            if t0 <= t < t1:
+                return k, t0, t1
+        return None, None, None
+
+    obs_int, null_int, under_int = [], [], []
+    call_root, resp_root = [], []
+    rng = np.random.default_rng(3)
+    for e in evs:
+        k, t0, t1 = sub_of(e["t"])
+        if k is None:
+            continue
+        cpc = int(np.round(e["f0_midi"])) % 12
+        nxt = np.where((plate[:, 0] >= e["t"]) & (plate[:, 0] < e["t"] + 8 * G["beat_len"]))[0]
+        under = np.where((plate[:, 0] <= e["t"]) & (plate[:, 1] > e["t"]))[0]
+        if len(under):
+            under_int.append((sub_pc[under[0]] - cpc) % 12)
+        if len(nxt) == 0:
+            continue
+        rpc = sub_pc[nxt[0]]
+        obs_int.append((rpc - cpc) % 12)
+        pool = np.where((plate[:, 0] >= t0) & (plate[:, 0] < t1))[0]
+        if len(pool):
+            for j in rng.choice(pool, 50):
+                null_int.append((sub_pc[j] - cpc) % 12)
+        if k in roots:
+            call_root.append((cpc - roots[k]) % 12)
+            resp_root.append((rpc - roots[k]) % 12)
+    all_root = []
+    for k, (b0, b1) in enumerate(subs):
+        if k not in roots:
+            continue
+        t0 = bar_t[b0]
+        t1 = bar_t[b1] if b1 < len(bar_t) else dur
+        m = (plate[:, 0] >= t0) & (plate[:, 0] < t1)
+        all_root += list((sub_pc[m] - roots[k]) % 12)
+
+    def hist(a):
+        h = np.bincount(np.asarray(a, int), minlength=12).astype(float)
+        return h / max(h.sum(), 1)
+
+    ho, hn, hu = hist(obs_int), hist(null_int), hist(under_int)
+    w(f"Call pitch class = the event's fundamental estimate; response = the **first** sub plateau "
+      f"starting within 2 bars after the call onset ({len(obs_int)} pairs). Interval = response "
+      "minus call, folded to one octave. The null pairs each call with 50 random sub plateaus from "
+      "the same sub-section, so it shows what the key alone would produce.\n")
+    w("| interval response-call | " + " | ".join(PC) + " |")
+    w("|---|" + "---|" * 12)
+    w("| observed | " + " | ".join(f"{100 * x:.0f}%" for x in ho) + " |")
+    w("| same-section null | " + " | ".join(f"{100 * x:.0f}%" for x in hn) + " |")
+    w("| observed - null | " + " | ".join(f"{100 * (a - b):+.0f}" for a, b in zip(ho, hn)) + " |")
+    w("| sub note *under* the call | " + " | ".join(f"{100 * x:.0f}%" for x in hu) + " |")
+    w("")
+    uf = [0, 5, 7]
+    w(f"Unison + 4th + 5th (response relative to call): observed **{100 * ho[uf].sum():.0f}%**, "
+      f"null {100 * hn[uf].sum():.0f}%, under-the-call {100 * hu[uf].sum():.0f}%. "
+      "(Octave errors in the call's f0 keep the pitch class; a twelfth error would move weight "
+      "between 1 and 5, so read unison and fifth together.)\n")
+    hc, hr, ha = hist(call_root), hist(resp_root), hist(all_root)
+    w("\nRelative to the sub-section root (duration-weighted modal pitch class of that "
+      "sub-section's sub plateaus):\n")
+    w("| interval above root | " + " | ".join(PC) + " |")
+    w("|---|" + "---|" * 12)
+    w("| call | " + " | ".join(f"{100 * x:.0f}%" for x in hc) + " |")
+    w("| sub response (first note after a call) | " + " | ".join(f"{100 * x:.0f}%" for x in hr) + " |")
+    w("| all sub plateaus (baseline) | " + " | ".join(f"{100 * x:.0f}%" for x in ha) + " |")
+    w("")
+    w(f"Response on the root: {100 * hr[0]:.0f}% vs {100 * ha[0]:.0f}% for sub notes in general; "
+      f"call on the root {100 * hc[0]:.0f}%, on root/4th/5th {100 * hc[uf].sum():.0f}%.\n")
+
+    # Is the b6 spike under the call a musical choice or the sub's own 5th partial?
+    HK = {2: 12.0, 3: 19.02, 4: 24.0, 5: 27.86, 6: 31.02, 7: 33.69, 8: 36.0}
+    obs_d, null_d, suspect = [], [], set()
+    for i_e, e in enumerate(evs):
+        under = np.where((plate[:, 0] <= e["t"]) & (plate[:, 1] > e["t"]))[0]
+        if not len(under):
+            continue
+        d = float(e["f0_midi"] - plate[under[0], 2])
+        obs_d.append(d)
+        if any(abs(d - v) <= 0.5 for kk, v in HK.items() if kk in (3, 5, 6, 7)):
+            suspect.add(i_e)
+        k_, t0_, t1_ = sub_of(e["t"])
+        if k_ is not None:
+            pool = np.where((plate[:, 0] >= t0_) & (plate[:, 0] < t1_))[0]
+            for j in rng.choice(pool, 50) if len(pool) else []:
+                null_d.append(float(e["f0_midi"] - plate[j, 2]))
+    obs_d, null_d = np.array(obs_d), np.array(null_d)
+
+    def near(a, v):
+        return float(np.mean(np.abs(a - v) <= 0.5)) if len(a) else np.nan
+    w("\n**Harmonic check.** The b6 spike in the *under-the-call* row is the signature of a call "
+      "sitting a major third above the sub - which is also exactly where the sub's own **5th "
+      "partial** falls (two octaves and a major third up). Measuring the unfolded distance from "
+      "the sub plateau to the call's fundamental, against the same-section null:\n")
+    w("| partial of the sub | 2 (8ve) | 3 (12th) | 4 (2 8ves) | 5 (2 8ves + M3) | 6 | 7 | 8 |")
+    w("|---|---|---|---|---|---|---|---|")
+    w("| call within 0.5 st, observed | " + " | ".join(f"{100 * near(obs_d, v):.1f}%"
+                                                        for v in HK.values()) + " |")
+    w("| same-section null | " + " | ".join(f"{100 * near(null_d, v):.1f}%"
+                                             for v in HK.values()) + " |")
+    w(f"\n{len(obs_d)} calls have a sub plateau sounding at their onset; {len(suspect)} of them "
+      f"({100 * len(suspect) / max(len(obs_d), 1):.0f}%) sit within half a semitone of a non-octave "
+      "partial (3, 5, 6 or 7) of that plateau. Octave partials are left out of the suspect set on "
+      "purpose - a call on the bass's pitch class an octave or two up is a normal musical choice.\n")
+    HARM = dict(obs=obs_d, null=null_d, suspect=suspect, HK=HK)
+    evs_clean = [e for i_e, e in enumerate(evs) if i_e not in suspect]
+    clean_snd = cr_cover([(e["t"], e["t"] + e["dur"]) for e in evs_clean], st)
+    FBX = {}
+    w("\nFront/back re-run **without** the harmonic suspects (sounding, sub-section anchor):\n")
+    w("| cycle | call first half | sub first half | contrast [95% CI] |")
+    w("|---|---|---|---|")
+    for N in (1, 2, 4):
+        o = cr_front_back(clean_snd, resp_snd, G, subs, N)
+        FBX[N] = o
+        w(f"| {N} bar | {o['call']['first']:.3f} | {o['resp']['first']:.3f} | "
+          f"{o['diff']:+.3f} [{o['ci_diff'][0]:+.3f}, {o['ci_diff'][1]:+.3f}] |")
+    w("")
+
+    # ---- 6. per sub-section, and switching
+    w("### 5. Per sub-section, and whether the state switches at boundaries\n")
+    w("Each sub-section gets its own test at 1-, 2- and 4-bar cycles. Its contrast is compared with "
+      "200 rotations of *its own* call stream by a random number of 16ths (same calls, same sub, "
+      "positions scrambled), so a sub-section with two calls cannot 'hold' by luck. State at the "
+      "4-bar cycle (the reference's phrase unit): `holds` = contrast above the rotation null's "
+      "97.5th percentile; `reversed` = below its 2.5th; `flat` = inside; `absent` = fewer than 4 "
+      "calls or under 4 beats of sub. By chance alone about 2.5% of eligible sub-sections would "
+      "land in each tail.\n")
+    w("| sub | start s | bars | calls | call beats | sub beats | contrast 1 bar | contrast 2 bar "
+      "| contrast 4 bar [null 95%] | state (4 bar) | state (2 bar) |")
+    w("|---|---|---|---|---|---|---|---|---|---|---|")
+    rng6 = np.random.default_rng(21)
+    sub_states = []
+    ct_all = np.array([e["t"] for e in evs])
+    for k, (b0, b1) in enumerate(subs):
+        t0 = bar_t[b0]
+        t1 = bar_t[b1] if b1 < len(bar_t) else dur
+        ncall = int(((ct_all >= t0) & (ct_all < t1)).sum())
+        U = {N: cr_unit(call_snd, resp_snd, G, b0, b1, N, rng=rng6) for N in (1, 2, 4)}
+        s4, s2 = cr_state(U[4], ncall), cr_state(U[2], ncall)
+        sub_states.append((k, t0, b1 - b0, s4, s2, U, ncall))
+
+        def fm(u):
+            return "-" if u is None or u["d"] != u["d"] else f"{u['d']:+.2f}"
+        u4 = U[4]
+        c4 = ("-" if u4 is None or u4["d"] != u4["d"] else
+              f"{u4['d']:+.2f} [{u4['lo']:+.2f}, {u4['hi']:+.2f}]")
+        cbeats = U[1]["cb"] if U[1] else 0.0
+        rbeats = U[1]["rb"] if U[1] else 0.0
+        w(f"| {k} | {t0:.0f} | {b1 - b0} | {ncall} | {cbeats:.1f} | {rbeats:.1f} | {fm(U[1])} | "
+          f"{fm(U[2])} | {c4} | {s4} | {s2} |")
+    for lab_n, idx in (("4-bar", 3), ("2-bar", 4)):
+        cnt = Counter(s_[idx] for s_ in sub_states)
+        bars_by = {}
+        for s_ in sub_states:
+            bars_by[s_[idx]] = bars_by.get(s_[idx], 0) + s_[2]
+        totb = sum(bars_by.values())
+        elig = sum(v for k2, v in cnt.items() if k2 in ("holds", "reversed", "flat"))
+        w(f"\n**{lab_n} states:** " + ", ".join(
+            f"`{k2}` {v} ({100 * bars_by[k2] / totb:.0f}% of bars)" for k2, v in cnt.most_common())
+          + f". Of {elig} eligible sub-sections, chance predicts ~{0.025 * elig:.1f} in each tail.\n")
+    w("\nWhere it holds (4-bar): " + (", ".join(
+        f"{s_[1]:.0f} s ({s_[2]} bars)" for s_ in sub_states if s_[3] == "holds") or "nowhere")
+      + ". Where it is reversed (4-bar): " + (", ".join(
+        f"{s_[1]:.0f} s ({s_[2]} bars)" for s_ in sub_states if s_[3] == "reversed") or "nowhere")
+      + ".\n")
+    w("Where it holds (2-bar): " + (", ".join(
+        f"{s_[1]:.0f} s" for s_ in sub_states if s_[4] == "holds") or "nowhere")
+      + ". Where it is reversed (2-bar): " + (", ".join(
+        f"{s_[1]:.0f} s" for s_ in sub_states if s_[4] == "reversed") or "nowhere") + ".\n")
+
+    # 8-bar windows: does the contrast hold its value inside a sub-section and change at edges?
+    w("\n**Persistence inside sub-sections.** The user's model predicts that the contrast is a "
+      "*state* a sub-section holds: consecutive 8-bar windows inside one sub-section should look "
+      "alike, and changes should cluster at sub-section edges. Tested on complete 8-bar windows "
+      "anchored at sub-section starts, with the eta^2 null built by rotating the sub-section "
+      "labels (which keeps them contiguous).\n")
+    w("| cycle | windows with call and sub | eta^2 by sub-section | null median | null 95th | "
+      "abs contrast change inside a sub-section | abs change across a boundary |")
+    w("|---|---|---|---|---|---|---|")
+    persist = {}
+    for N in (1, 2, 4):
+        win = []
+        for k, (b0, b1) in enumerate(subs):
+            for j in range((b1 - b0) // 8):
+                wb0 = b0 + 8 * j
+                u = cr_unit(call_snd, resp_snd, G, wb0, wb0 + 8, N)
+                ok_w = u is not None and u["d"] == u["d"] and u["cb"] >= 0.5 and u["rb"] >= 2.0
+                win.append((k, j, u["d"] if ok_w else np.nan))
+        dv = np.array([x[2] for x in win])
+        lk = np.array([x[0] for x in win])
+        okd = ~np.isnan(dv)
+
+        def eta2(vals, labs):
+            m = vals.mean()
+            ss_t = ((vals - m) ** 2).sum()
+            ss_b = sum(((vals[labs == g].mean() - m) ** 2) * (labs == g).sum()
+                       for g in np.unique(labs))
+            return ss_b / ss_t if ss_t > 0 else np.nan
+
+        e_obs = eta2(dv[okd], lk[okd])
+        n_ok = int(okd.sum())
+        e_null = [eta2(dv[okd], np.roll(lk[okd], sh)) for sh in range(1, n_ok)]
+        ins, acr = [], []
+        for (k1, _, d1), (k2, _, d2) in zip(win, win[1:]):
+            if d1 == d1 and d2 == d2:
+                (ins if k1 == k2 else acr).append(abs(d1 - d2))
+        persist[N] = (e_obs, e_null, ins, acr)
+        w(f"| {N} bar | {n_ok} | **{e_obs:.2f}** | {np.median(e_null):.2f} | "
+          f"{np.percentile(e_null, 95):.2f} | {np.median(ins):.2f} (n={len(ins)}) | "
+          f"{np.median(acr):.2f} (n={len(acr)}) |")
+    w("\neta^2 is inflated by construction when many sub-sections hold only one or two windows, "
+      "which is why the rotated-label null sits so high; read the observed value against the null "
+      "columns, not against zero.\n")
+
+    # The bass layer's own state boundaries, from the bass agent's bass_bars.npz (read only).
+    bass_riff = None
+    if os.path.exists(BASS_BARS):
+        zb = np.load(BASS_BARS, allow_pickle=True)
+        if "riff_segment_id" in zb.files and "bar_start_s" in zb.files:
+            bstart = np.asarray(zb["bar_start_s"], float)
+            rseg = np.asarray(zb["riff_segment_id"], int)
+            db_ = G["downbeats"]
+            gi = np.clip(np.searchsorted(bstart, db_), 1, len(bstart) - 1)
+            gi = np.where(np.abs(db_ - bstart[gi - 1]) <= np.abs(db_ - bstart[gi]), gi - 1, gi)
+            bass_riff = rseg[gi]                      # riff segment id per grid.npz bar
+    if bass_riff is not None:
+        chg = np.flatnonzero(np.diff(bass_riff) != 0) + 1     # bar index where a new riff state starts
+        w(f"\n**Against the bass layer's own state changes.** `bass_bars.npz` (bass agent, read "
+          f"only) splits the set into {len(np.unique(bass_riff))} riff segments "
+          f"({len(chg)} change points). If every layer holds its state inside a sub-section, the "
+          "call-vs-sub placement should also change where the *bass riff* changes:\n")
+        w("| cycle | eta^2 by bass riff segment | null median | null 95th | abs change, window pair "
+          "with no riff change | with a riff change |")
+        w("|---|---|---|---|---|---|")
+        for N in (1, 2, 4):
+            wins = []
+            for b0 in range(0, G["nbar"] - 8, 8):
+                u = cr_unit(call_snd, resp_snd, G, b0, b0 + 8, N)
+                ok_w = u is not None and u["d"] == u["d"] and u["cb"] >= 0.5 and u["rb"] >= 2.0
+                seg_id = int(np.bincount(bass_riff[b0:b0 + 8] - bass_riff.min()).argmax()
+                             + bass_riff.min())
+                wins.append((b0, seg_id, u["d"] if ok_w else np.nan))
+            dv = np.array([x[2] for x in wins])
+            lk = np.array([x[1] for x in wins])
+            okd = ~np.isnan(dv)
+            e_b = eta2(dv[okd], lk[okd])
+            e_bn = [eta2(dv[okd], np.roll(lk[okd], sh)) for sh in range(1, int(okd.sum()))]
+            no_c, with_c = [], []
+            for (b0a, _, da), (b0b, _, db2) in zip(wins, wins[1:]):
+                if da == da and db2 == db2:
+                    crosses = np.any((chg > b0a) & (chg < b0b + 8))
+                    (with_c if crosses else no_c).append(abs(da - db2))
+            persist[("bass", N)] = (e_b, e_bn, no_c, with_c)
+            w(f"| {N} bar | **{e_b:.2f}** | {np.median(e_bn):.2f} | {np.percentile(e_bn, 95):.2f} | "
+              f"{np.median(no_c):.2f} (n={len(no_c)}) | {np.median(with_c):.2f} (n={len(with_c)}) |")
+        w("")
+    else:
+        w("\n`bass_bars.npz` was not available, so the bass layer's own riff boundaries were not "
+          "tested.\n")
+    # ---- verdict
+    w("### Verdict\n")
+    T = "tonal CALL, sounding"
+    S = "sub, sounding"
+    fb = {N: FB[(T, S, N)] for N in (1, 2, 4, 8)}
+    acc1 = FB[("perc accents, onsets", "sub, onsets", 1)]
+    ton8 = FB[("tonal CALL, onsets", "sub, onsets", 8)]
+    obs_x, nsh_x, nbs_x = XC[T]
+    j0 = lags.index(0)
+    jpos = [j for j, L_ in enumerate(lags) if L_ > 0]
+    jmax = max(jpos, key=lambda j: obs_x[j])
+    jmin = min(jpos, key=lambda j: obs_x[j])
+    obs_o, nsh_o, _ = XC["tonal CALL, onsets"]
+    jall = max(range(len(lags)), key=lambda j: obs_o[j])
+    st4 = Counter(x[3] for x in sub_states)
+    elig4 = sum(v for k2, v in st4.items() if k2 in ("holds", "reversed", "flat"))
+    absent_bars = sum(x[2] for x in sub_states if x[3] == "absent")
+    tot_bars = sum(x[2] for x in sub_states)
+    e1, en1, in1, ac1 = persist[1]
+    e2, en2, in2, ac2 = persist[2]
+    h5 = HARM["HK"][5]
+    o5 = float(np.mean(np.abs(HARM["obs"] - h5) <= 0.5))
+    n5 = float(np.mean(np.abs(HARM["null"] - h5) <= 0.5))
+
+    w("**The reading does not hold as a set-wide rule, and at the bar level the reference leans "
+      "the other way.**\n")
+    w(f"1. **Front vs back - no.** Tonal call against sub, sounding time, sub-section anchor: "
+      + ", ".join(f"{N} bar {fb[N]['diff']:+.3f} [{fb[N]['ci_diff'][0]:+.2f}, "
+                  f"{fb[N]['ci_diff'][1]:+.2f}]" for N in (1, 2, 4, 8))
+      + ". Every interval includes zero. The sub is not back-loaded in any cycle: its first-half "
+      f"share of sounding time is {min(fb[N]['resp']['first'] for N in fb):.3f}-"
+      f"{max(fb[N]['resp']['first'] for N in fb):.3f}. The anchor-free offset (no assumption about "
+      f"where bar 1 is) finds no consistent order either: the response trails the call in only "
+      f"{100 * min(fb[N]['rel_pos_share'] for N in fb):.0f}-"
+      f"{100 * max(fb[N]['rel_pos_share'] for N in fb):.0f}% of sub-sections.\n")
+    pa = acc1["prof_call"].reshape(-1, 2).sum(1)
+    ps = acc1["prof_resp"].reshape(-1, 2).sum(1)
+    lab8 = ["1", "1&", "2", "2&", "3", "3&", "4", "4&"]
+    top_s = [lab8[i] for i in np.argsort(ps)[::-1][:2]]
+    top_a = [lab8[i] for i in np.argsort(pa)[::-1][:2]]
+    p8 = ton8["prof_call"].reshape(-1, 16).sum(1)
+    top_b = sorted(int(i) + 1 for i in np.argsort(p8)[::-1][:3])
+    w(f"2. **What the bar actually does is the reverse.** Sub *onsets* put "
+      f"**{100 * acc1['resp']['first']:.0f}%** of themselves in the first half of the bar, peaking "
+      f"on {' and '.join(top_s)}, while high percussion accents put "
+      f"**{100 * (1 - acc1['call']['first']):.0f}%** in the second half, peaking on "
+      f"{' and '.join(top_a)} (fills and pickups): contrast {acc1['diff']:+.3f} "
+      f"[{acc1['ci_diff'][0]:+.2f}, {acc1['ci_diff'][1]:+.2f}], same with the global anchor. Over "
+      f"8 bars, tonal call onsets drift late ({100 * (1 - ton8['call']['first']):.0f}% in bars 5-8, "
+      f"busiest bars {', '.join(str(b) for b in top_b)}; "
+      f"contrast {ton8['diff']:+.3f} [{ton8['ci_diff'][0]:+.2f}, {ton8['ci_diff'][1]:+.2f}]) "
+      "while sub onsets stay even. So: **sub at the front, highs at the back** - of the bar "
+      "clearly, of the 8-bar phrase weakly.\n")
+    w(f"3. **Alternation - no answering lag.** Beat-resolution cross-correlation of call and sub "
+      f"sounding peaks at positive lag {lags[jmax]:+d} beats with r = {obs_x[jmax]:+.3f}, inside "
+      f"the shift null. Lag 0 is r = {obs_x[j0]:+.3f} - **not negative**, so they do not avoid "
+      f"overlapping. The one lag outside both nulls is a *dip*: r = {obs_x[jmin]:+.3f} at "
+      f"{lags[jmin]:+d} beats, i.e. the sub is slightly *thinner* "
+      f"{abs(lags[jmin]) / 4:g} bar(s) after a call, not busier. "
+      f"For onsets the largest value is at {lags[jall]:+d} beats (r = {obs_o[jall]:+.3f}, shift "
+      f"null 97.5th {np.percentile(nsh_o[:, jall], 97.5):+.3f})"
+      + (f" - if anything the sub leads and the call follows {abs(lags[jall]) / 4:g} bar(s) later."
+         if lags[jall] < 0 else " - the sub following the call.") + "\n")
+    w("4. **Longer - yes, but it is density, not response.** " + " ".join(
+        f"{N}-bar: sub/call {DUR[N][0]:.2f}x observed vs {np.median(DUR[N][1]):.2f}x with the call "
+        f"placed at random; sub {DUR[N][2]:.2f} beats in cycles with a call vs {DUR[N][3]:.2f} "
+        "without." for N in (1, 2, 4))
+      + " The sub sounds about four times as much as the call everywhere, so any cycle holding a "
+      "call holds a longer stretch of sub - and it does not play more because a call happened.\n")
+    uf = [0, 5, 7]
+    w(f"5. **Pitch - no relationship beyond sharing the key.** First sub note after a call on the "
+      f"call's pitch class, 4th or 5th: {100 * ho[uf].sum():.0f}% against "
+      f"{100 * hn[uf].sum():.0f}% for random same-section pairs. The response sits on the "
+      f"sub-section root {100 * hr[0]:.0f}% of the time, but so does every sub note "
+      f"({100 * ha[0]:.0f}%). The one real pitch signal is *vertical*: a call sounding over a held "
+      f"sub note lands on that note's 5th partial (two octaves and a major third up) "
+      f"{100 * o5:.0f}% of the time against {100 * n5:.0f}% by chance - either a deliberate major "
+      "third over the bass or a few 'calls' that are the reese's own upper partial. Removing those "
+      "events does not change any front/back result.\n")
+    w(f"6. **Per sub-section.** At the 4-bar phrase the pattern clears its own rotation null in "
+      f"{st4.get('holds', 0)} of {elig4} eligible sub-sections and reverses in "
+      f"{st4.get('reversed', 0)} - chance level (~{0.025 * elig4:.1f} each). "
+      f"{st4.get('absent', 0)} sub-sections ({100 * absent_bars / tot_bars:.0f}% of bars) have too "
+      "few calls or too little sub to test at all. What *does* behave like the user's model is "
+      f"persistence: the call-vs-sub placement is stickier inside a sub-section than across one - "
+      f"eta^2 {e1:.2f} vs null 95th {np.percentile(en1, 95):.2f} at 1 bar, {e2:.2f} vs "
+      f"{np.percentile(en2, 95):.2f} at 2 bars; median change between neighbouring 8-bar windows "
+      f"{np.median(in1):.2f} inside vs {np.median(ac1):.2f} across a boundary (1 bar). **Each "
+      "sub-section holds a placement state and changes it at the edge - it just is not a "
+      "front-call/back-response state.**" + (
+        " Against the bass layer's own riff segments (`bass_bars.npz`): " + "; ".join(
+            f"{N}-bar cycle eta^2 {persist[('bass', N)][0]:.2f} vs null 95th "
+            f"{np.percentile(persist[('bass', N)][1], 95):.2f} "
+            f"({'above' if persist[('bass', N)][0] > np.percentile(persist[('bass', N)][1], 95) else 'not above'}), "
+            f"neighbouring windows differ {np.median(persist[('bass', N)][2]):.2f} without a riff "
+            f"change vs {np.median(persist[('bass', N)][3]):.2f} across one"
+            for N in (1, 2, 4)) + " - the placement state changes where the bass riff changes, "
+        "clearly at the 2- and 4-bar cycles."
+        if ("bass", 4) in persist else "") + "\n")
+    w("**For the build.** Don't program the sub as an answer that waits for the hook. Measured "
+      "against this reference, the working version is: sub attacks at the front of the bar, on the 1 and the 2&"
+      "; high accents and pickups at the back of the bar; hooks clustered on the phrase "
+      f"midpoint and the last bar of an 8-bar phrase (bars {', '.join(str(b) for b in top_b)}); the "
+      "sub running about 4x the hook's sounding time regardless; and "
+      "whatever placement relationship you pick, held for the whole sub-section and changed at its "
+      "boundary.\n")
+    return L, dict(best_N=best_N, FB=FB, XC=XC, lags=lags, ho=ho, hn=hn, hr=hr, ha=ha, hc=hc,
+                   sub_states=sub_states, persist=persist, pr_ratio=pr_ratio, DUR=DUR,
+                   HARM=HARM, FBX=FBX, G=G, subs=subs, acc=acc, resp_on=resp_on,
+                   resp_snd=resp_snd, plate=plate, glides=glides, dur=dur)
+
+# ----------------------------------------------------------------------
+# call across the bar line (anacrusis reading)
+# ----------------------------------------------------------------------
+AN_HEAD = "### Call across the bar line"
+BACK = [10, 12, 14]                         # 3&, 4, 4& as 16th slots of the bar
+MID = [2, 4, 6]                             # 1&, 2, 2&  (control)
+
+
+def an_high_strength(G):
+    """2-16 kHz onset strength at every 16th slot (log), same measurement the accents use."""
+    f = np.load(os.path.join(CACHE, "frames.npz"))
+    fl = (f["flux_high"] + f["flux_air"]).astype(np.float64)
+    ft = f["t"].astype(np.float64)
+    st = G["slot_t"][:-1]
+    i0 = np.searchsorted(ft, st - 0.02)
+    i1 = np.maximum(np.searchsorted(ft, st + 0.04), i0 + 1)
+    idx = np.clip(np.ravel(np.column_stack([i0, i1])), 0, len(fl) - 1)
+    return np.log(np.maximum.reduceat(fl, idx)[::2] + 1e-9)
+
+
+def an_mat(G, stream):
+    M = np.zeros((G["nbar"], 16), np.float64)
+    ok = G["slot_ok"]
+    M[G["slot_bar"][ok], G["slot_inbar"][ok]] = stream[ok]
+    return M
+
+
+def an_pairs(G, units):
+    ok = G["ok_bar"]
+    P = [(N, k) for k, (b0, b1) in enumerate(units) for N in range(b0, b1 - 1) if ok[N] and ok[N + 1]]
+    return np.array(P, int).reshape(-1, 2)
+
+
+def an_cond(A, S):
+    a, sv = A.astype(bool), S.astype(float)
+    pA = sv[a].mean() if a.any() else np.nan
+    pn = sv[~a].mean() if (~a).any() else np.nan
+    return pA, pn, sv.mean()
+
+
+def an_nulls(A, S, unit, n, rng):
+    groups = [np.where(unit == k)[0] for k in np.unique(unit)]
+    out = {"shuffle": [], "shift": []}
+    for mode in out:
+        for _ in range(n):
+            A2 = A.copy()
+            for ix in groups:
+                if len(ix) < 2:
+                    continue
+                if mode == "shuffle":
+                    A2[ix] = A[ix][rng.permutation(len(ix))]
+                else:
+                    A2[ix] = np.roll(A[ix], int(rng.integers(1, len(ix))))
+            pA, pn, _ = an_cond(A2, S)
+            out[mode].append(pA - pn)
+        out[mode] = np.array(out[mode])
+    return out
+
+
+def an_boot(A, S, unit, n, rng):
+    ks = np.unique(unit)
+    groups = {k: np.where(unit == k)[0] for k in ks}
+    d = []
+    for _ in range(n):
+        ix = np.concatenate([groups[k] for k in rng.choice(ks, len(ks))])
+        pA, pn, _ = an_cond(A[ix], S[ix])
+        if pA == pA and pn == pn:
+            d.append(pA - pn)
+    return np.percentile(d, [2.5, 97.5])
+
+
+def an_xcorr16(acc, on, G, units, lags, mode=None, rng=None):
+    num, den = np.zeros(len(lags)), np.zeros(len(lags))
+    for b0, b1 in units:
+        sel = np.where(G["slot_ok"] & (G["slot_bar"] >= b0) & (G["slot_bar"] < b1))[0]
+        if len(sel) < 64:
+            continue
+        c, r = acc[sel].astype(float), on[sel].astype(float)
+        if c.std() == 0 or r.std() == 0:
+            continue
+        if mode == "shift":
+            c = np.roll(c, int(rng.integers(16, len(c) - 16)))
+        elif mode == "bars":
+            nbar = len(c) // 16
+            c = c[:nbar * 16].reshape(nbar, 16)[rng.permutation(nbar)].ravel()
+            r = r[:nbar * 16]
+        c = (c - c.mean()) / (c.std() + 1e-12)
+        r = (r - r.mean()) / (r.std() + 1e-12)
+        n = len(c)
+        for j, L_ in enumerate(lags):
+            pr = c[:n - L_] * r[L_:] if L_ >= 0 else c[-L_:] * r[:n + L_]
+            num[j] += pr.sum()
+            den[j] += len(pr)
+    return num / np.maximum(den, 1)
+
+
+def an_eta2(vals, labs):
+    m = vals.mean()
+    ss_t = ((vals - m) ** 2).sum()
+    ss_b = sum(((vals[labs == g].mean() - m) ** 2) * (labs == g).sum() for g in np.unique(labs))
+    return ss_b / ss_t if ss_t > 0 else np.nan
+
+
+def anacrusis(res):
+    G, subs, acc, on, plate, resp_snd = (res["G"], res["subs"], res["acc"], res["resp_on"],
+                                         res["plate"], res["resp_snd"])
+    rng = np.random.default_rng(1234)
+    L = []
+    w = L.append
+    w(f"{AN_HEAD}\n")
+    w("An anacrusis reading of the same idea: the *call* is a high hit at the back of bar N "
+      "(3&, 4 or 4&) and the *response* is the sub arriving at the front of bar N+1 and sounding "
+      f"longer. Units are the {len(subs)} structure sub-sections; every null keeps each unit's own "
+      "call and sub rates.\n")
+    if not os.path.exists(BASS_BARS):
+        w("`bass_bars.npz` is not available, so this test was not run.\n")
+        return L
+
+    # ---- the streams, per bar
+    zb = np.load(BASS_BARS, allow_pickle=True)
+    bstart = np.asarray(zb["bar_start_s"], float)
+    db_ = G["downbeats"]
+    gi = np.clip(np.searchsorted(bstart, db_), 1, len(bstart) - 1)
+    gi = np.where(np.abs(db_ - bstart[gi - 1]) <= np.abs(db_ - bstart[gi]), gi - 1, gi)
+    seq = np.asarray(zb["seq16"], int)[gi]
+    prev = np.concatenate([np.r_[-1, seq[:-1, 15]][:, None], seq[:, :15]], axis=1)
+    S16 = ((seq >= 0) & ((prev < 0) | (np.abs(seq - prev) > 1))).astype(float)
+    rid = np.asarray(zb["riff_segment_id"], int)[gi]
+    cut = np.r_[0, np.flatnonzero(np.diff(rid) != 0) + 1, G["nbar"]]
+    riff_units = [(int(cut[i]), int(cut[i + 1])) for i in range(len(cut) - 1)]
+    bsec = np.asarray(zb["section"], int)[gi]
+
+    Am = an_mat(G, acc)
+    Pm = an_mat(G, np.clip(on, 0, 1))
+    Cm = an_mat(G, resp_snd)
+    Hm = an_mat(G, an_high_strength(G))
+
+    # ---- latency of the plateau onsets against the bass agent's 16th sequence
+    pos_rate = Pm[G["ok_bar"]].mean(0)
+    s16_rate = S16[G["ok_bar"]].mean(0)
+    offs = []
+    okb = np.where(G["ok_bar"])[0]
+    flatP = Pm[okb].ravel()
+    flatS = S16[okb].ravel()
+    for i in np.flatnonzero(flatP > 0):
+        near = [d for d in (-2, -1, 0, 1, 2) if 0 <= i + d < len(flatS) and flatS[i + d] > 0]
+        if len(near) == 1:
+            offs.append(-near[0])
+    offs = np.array(offs)
+    w("#### 0. First, a clock problem\n")
+    w("Sub *plateau* onsets (the held-pitch start from the bass note code) run late. Their rate "
+      "per 16th of the bar, next to the bass agent's own quantised onsets from `bass_bars.npz` "
+      "`seq16` (a slot is an onset when it is voiced and the slot before was not, or moved by more "
+      "than a semitone):\n")
+    labs16 = [f"{b + 1}{s}" for b in range(4) for s in ("", "e", "&", "a")]
+    w("| 16th | " + " | ".join(labs16) + " |")
+    w("|---|" + "---|" * 16)
+    w("| plateau onsets, % of bars | " + " | ".join(f"{100 * x:.1f}" for x in pos_rate) + " |")
+    w("| seq16 onsets, % of bars | " + " | ".join(f"{100 * x:.1f}" for x in s16_rate) + " |")
+    h_off = Counter(offs.tolist())
+    w(f"\nMatched one-to-one within +-2 16ths ({len(offs)} onsets), the plateau onset sits "
+      + ", ".join(f"{k:+d}: {100 * v / len(offs):.0f}%" for k, v in sorted(h_off.items()))
+      + " 16ths from the seq16 onset. The plateau onsets land on the *e* 16ths because a note "
+      "only counts as a plateau once its attack pitch-ping has settled - about one 16th after "
+      "the attack. **So 'sub on the downbeat' has to be read from seq16 (or from the first 8th of "
+      "the bar for plateaus); a plateau-onset test at slot 0 is structurally near-empty.** The "
+      "8th-resolution statement in the section above (sub onsets peak on 1 and 2&) is unaffected, "
+      "since a one-16th delay stays inside the 8th.\n")
+
+    # ---- calls: strict accents, and a powered version
+    PR = an_pairs(G, subs)
+    N_, U_ = PR[:, 0], PR[:, 1]
+    back_str = Hm[N_][:, BACK].max(1)
+    strong = np.zeros(len(N_), bool)
+    for k in np.unique(U_):
+        ix = np.where(U_ == k)[0]
+        if len(ix) >= 6:
+            strong[ix] = back_str[ix] >= np.percentile(back_str[ix], 66.7)
+    mid_str = Hm[N_][:, MID].max(1)
+    strong_mid = np.zeros(len(N_), bool)
+    for k in np.unique(U_):
+        ix = np.where(U_ == k)[0]
+        if len(ix) >= 6:
+            strong_mid[ix] = mid_str[ix] >= np.percentile(mid_str[ix], 66.7)
+    strict = Am[N_][:, BACK].max(1) > 0
+    strict_w = Am[N_][:, 10:16].max(1) > 0
+    w("#### 1. Conditional probability of the sub across the bar line\n")
+    w(f"{len(PR)} consecutive bar pairs inside a sub-section. Three definitions of the call:\n")
+    w(f"- **strict accent** ({int(strict.sum())} bars): the accent stream above, on 3&, 4 or 4&. It "
+      "is >= 6 dB over the same bar position in the surrounding bars, so it *excludes* a pickup "
+      "that recurs every bar - which is exactly what an anacrusis call might be.\n")
+    w(f"- **strict accent, 3&..4&** ({int(strict_w.sum())} bars): any of the last six 16ths.\n")
+    w(f"- **strong back hit** ({int(strong.sum())} bars): 2-16 kHz onset strength on 3&/4/4& in the "
+      "top third of that sub-section's bars. Relative to the sub-section, not to the neighbouring "
+      "bars, so a recurring pickup counts. This is the powered test.\n")
+    w("Responses: `seq16 on 1` = a seq16 onset on the downbeat of N+1 (less latent than plateaus, "
+      "but seq16 also peaks on the *e* 16ths, so the first-8th and sounding responses are the "
+      "robust ones); `plateau in "
+      "1st 8th` = a plateau onset in the first 8th of N+1; `sub sounding, beat 1` = share of the "
+      "first beat of N+1 in which the sub sounds (plateaus + glides). For the last one the table "
+      "shows means, not probabilities. `boot` = bootstrap over sub-sections; `shuffle`/`shift` = "
+      "the call indicator permuted, or circularly shifted by whole bars, inside each sub-section "
+      "(1000 draws); `p` = one-sided share of shuffle draws >= observed.\n")
+    w("| call | response | P(resp \\| call) | P(resp \\| no call) | lift | difference [boot 95%] | "
+      "shuffle null 95% | shift null 95% | p |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    resp_defs = {
+        "seq16 on 1": S16[N_ + 1, 0],
+        "plateau in 1st 8th": Pm[N_ + 1, 0:2].max(1),
+        "sub sounding, beat 1": Cm[N_ + 1, 0:4].mean(1),
+    }
+    call_defs = {"strict accent": strict, "strict accent, 3&..4&": strict_w,
+                 "strong back hit": strong}
+    T1 = {}
+    rows = [(c, r) for c in call_defs for r in resp_defs]
+    rows += [("control: strong back hit of N+1 -> its OWN bar start", r) for r in resp_defs]
+    rows += [("control: strong mid-bar hit (1&/2/2&) -> beat 3 of the same bar", "seq16 on 3")]
+    for cname, rname in rows:
+        if cname.startswith("control: strong back hit of N+1"):
+            A = np.zeros(len(N_), bool)
+            bs1 = Hm[N_ + 1][:, BACK].max(1)
+            for k in np.unique(U_):
+                ix = np.where(U_ == k)[0]
+                if len(ix) >= 6:
+                    A[ix] = bs1[ix] >= np.percentile(bs1[ix], 66.7)
+            S = resp_defs[rname]
+        elif cname.startswith("control: strong mid-bar"):
+            A, S = strong_mid, S16[N_, 8]
+        else:
+            A, S = call_defs[cname], resp_defs[rname]
+        pA, pn, p0 = an_cond(A, S)
+        nl = an_nulls(A, S, U_, 1000, rng)
+        ci = an_boot(A, S, U_, 1000, rng)
+        d = pA - pn
+        pv = float(np.mean(nl["shuffle"] >= d))
+        T1[(cname, rname)] = dict(pA=pA, pn=pn, p0=p0, d=d, ci=ci, nl=nl, p=pv, n=int(A.sum()))
+        unit = "" if rname == "sub sounding, beat 1" else "%"
+        sc = 100.0
+        w(f"| {cname} ({int(A.sum())}) | {rname} | {sc * pA:.1f}{unit} | {sc * pn:.1f}{unit} | "
+          f"{pA / p0 if p0 > 0 else np.nan:.2f} | **{sc * d:+.1f}** [{sc * ci[0]:+.1f}, {sc * ci[1]:+.1f}] | "
+          f"{sc * np.percentile(nl['shuffle'], 2.5):+.1f}..{sc * np.percentile(nl['shuffle'], 97.5):+.1f} | "
+          f"{sc * np.percentile(nl['shift'], 2.5):+.1f}..{sc * np.percentile(nl['shift'], 97.5):+.1f} | "
+          f"{pv:.3f} |")
+    w("\nDifferences are in percentage points (for `sub sounding` in points of the first beat's "
+      "coverage).\n")
+
+    # bar-line aligned profile, seq16 onsets, strong back hit
+    X = np.concatenate([S16[N_][:, 8:16], S16[N_ + 1][:, 0:8]], axis=1)
+    prof_a, prof_n = X[strong].mean(0), X[~strong].mean(0)
+    ks = np.unique(U_)
+    grp = {k: np.where(U_ == k)[0] for k in ks}
+    boots = []
+    for _ in range(1000):
+        ix = np.concatenate([grp[k] for k in rng.choice(ks, len(ks))])
+        b_ = strong[ix]
+        if b_.any() and (~b_).any():
+            boots.append(X[ix][b_].mean(0) - X[ix][~b_].mean(0))
+    boots = np.array(boots)
+    lo_b, hi_b = np.percentile(boots, 2.5, 0), np.percentile(boots, 97.5, 0)
+    w("seq16 onset rate from half a bar before the bar line to half a bar after it, bar pairs "
+      f"with a strong back hit in bar N ({int(strong.sum())}) against the rest "
+      f"({int((~strong).sum())}). Position 0 is the downbeat of N+1.\n")
+    w("| 16ths from bar line | " + " | ".join(f"{o:+d}" for o in range(-8, 8)) + " |")
+    w("|---|" + "---|" * 16)
+    w("| strong back hit in N | " + " | ".join(f"{100 * x:.1f}" for x in prof_a) + " |")
+    w("| no strong back hit | " + " | ".join(f"{100 * x:.1f}" for x in prof_n) + " |")
+    w("| difference, pts | " + " | ".join(
+        (f"**{100 * d_:+.1f}**" if (lo > 0 or hi < 0) else f"{100 * d_:+.1f}")
+        for d_, lo, hi in zip(prof_a - prof_n, lo_b, hi_b)) + " |")
+    w("\nBold = bootstrap 95% interval excludes zero. Note positions -6, -4 and -2 are the call's "
+      "own 16ths: a sub onset there coincides with the hit rather than answering it.\n")
+
+    # ---- 2. cross-correlation
+    w("#### 2. Cross-correlation, accent stream against sub onsets (16th resolution)\n")
+    lags = list(range(-8, 9))
+    s16_slot = np.zeros(len(G["slot_t"]) - 1)
+    okm = G["slot_ok"]
+    s16_slot[okm] = S16[G["slot_bar"][okm], G["slot_inbar"][okm]]
+    XCR = {}
+    w("z-scored inside each sub-section; positive lag = sub onset after the accent. `shift` "
+      "rotates the accent stream by a random number of 16ths (destroys every alignment, including "
+      "the metric one); `bar-shuffle` permutes whole bars of accents (keeps where in the bar they "
+      "fall, destroys which bar follows which). 300 draws each. With seq16 onsets an accent on "
+      "4&, 4 or 3& reaches the next downbeat at +2, +4 or +6; with plateau onsets add one 16th.\n")
+    for rname, rs in (("seq16 onsets", s16_slot), ("plateau onsets", np.clip(on, 0, 1))):
+        obs = an_xcorr16(acc, rs, G, subs, lags)
+        nsh = np.array([an_xcorr16(acc, rs, G, subs, lags, "shift", rng) for _ in range(300)])
+        nbs = np.array([an_xcorr16(acc, rs, G, subs, lags, "bars", rng) for _ in range(300)])
+        XCR[rname] = (obs, nsh, nbs)
+        w(f"**accents vs {rname}**\n")
+        w("| lag (16ths) | " + " | ".join(f"{x:+d}" for x in lags) + " |")
+        w("|---|" + "---|" * len(lags))
+        w("| r | " + " | ".join(f"{x:+.3f}" for x in obs) + " |")
+        w("| shift null 97.5% | " + " | ".join(f"{np.percentile(nsh[:, j], 97.5):+.3f}"
+                                                for j in range(len(lags))) + " |")
+        w("| bar-shuffle null 97.5% | " + " | ".join(f"{np.percentile(nbs[:, j], 97.5):+.3f}"
+                                                     for j in range(len(lags))) + " |")
+        marks = []
+        for j in range(len(lags)):
+            a_ = obs[j] > np.percentile(nsh[:, j], 97.5)
+            b_ = obs[j] > np.percentile(nbs[:, j], 97.5)
+            marks.append("**both**" if a_ and b_ else ("shift" if a_ else ("bar" if b_ else "")))
+        w("| above null | " + " | ".join(marks) + " |")
+        w("")
+
+    # ---- 3. durations
+    w("#### 3. Duration: the call against the sub note that follows\n")
+    beat = G["beat_len"]
+    p0s = plate[:, 0]
+    pdur = (plate[:, 1] - plate[:, 0]) / beat
+
+    def answer_len(Nb):
+        """Length (beats) of the first plateau starting in the first 8th of bar Nb+1, else nan."""
+        t0 = G["slot_t"][np.where(G["slot_ok"] & (G["slot_bar"] == Nb + 1))[0][0]]
+        j = int(np.searchsorted(p0s, t0 - 0.045))
+        if j < len(p0s) and p0s[j] < t0 + 2 * beat / 4 - 0.045 + 0.09:
+            return pdur[j]
+        return np.nan
+
+    ans = np.array([answer_len(n) for n in N_])
+    has = ~np.isnan(ans)
+    call_len_beats = 0.25                       # a hit occupies one 16th
+    a_call = ans[strong & has]
+    a_none = ans[~strong & has]
+    obs_d = np.median(a_call) - np.median(a_none) if len(a_call) and len(a_none) else np.nan
+    nd = []
+    for _ in range(1000):
+        A2 = strong.copy()
+        for k in np.unique(U_):
+            ix = np.where(U_ == k)[0]
+            A2[ix] = strong[ix][rng.permutation(len(ix))]
+        x_, y_ = ans[A2 & has], ans[~A2 & has]
+        if len(x_) and len(y_):
+            nd.append(np.median(x_) - np.median(y_))
+    w("A back-of-bar hit is a single 16th (0.25 beats), so 'the answer is longer than the call' "
+      "is true of almost any sub note. The informative test is whether the sub note that starts "
+      "in the first 8th of N+1 is longer *after* a strong back hit than after a bar without one (the note must start in the first 8th of N+1, allowing the one-16th plateau latency).\n")
+    w("| | notes | answer length, beats (10/25/50/75/90) | answer / call (median) |")
+    w("|---|---|---|---|")
+    w(f"| after a strong back hit | {len(a_call)} | {'/'.join(f'{x:.2f}' for x in pct(a_call))} | "
+      f"{np.median(a_call) / call_len_beats:.2f}x |")
+    w(f"| after no strong back hit | {len(a_none)} | {'/'.join(f'{x:.2f}' for x in pct(a_none))} | "
+      f"{np.median(a_none) / call_len_beats:.2f}x |")
+    w(f"| all sub plateaus | {len(pdur)} | {'/'.join(f'{x:.2f}' for x in pct(pdur))} | - |")
+    w(f"\nMedian difference (after hit - after none): **{obs_d:+.2f} beats**; shuffle null 95% "
+      f"{np.percentile(nd, 2.5):+.2f}..{np.percentile(nd, 97.5):+.2f}, p = "
+      f"{np.mean(np.array(nd) >= obs_d):.3f}.\n")
+
+    # ---- 4. per riff segment, and switching
+    w("#### 4. Per bass riff segment, and switching at boundaries\n")
+    PRr = an_pairs(G, riff_units)
+    Nr, Ur = PRr[:, 0], PRr[:, 1]
+    bsr = Hm[Nr][:, BACK].max(1)
+    Ar = np.zeros(len(Nr), bool)
+    for k in np.unique(Ur):
+        ix = np.where(Ur == k)[0]
+        if len(ix) >= 6:
+            Ar[ix] = bsr[ix] >= np.percentile(bsr[ix], 66.7)
+    Sr = S16[Nr + 1, 0]
+    w(f"Units = the {len(riff_units)} riff segments of `bass_bars.npz`. Call = strong back hit "
+      "(top third inside the segment); response = seq16 onset on the next downbeat. `holds` = "
+      "difference above that segment's own shuffle-null 97.5th percentile (500 draws); `reversed` "
+      "= below the 2.5th; `flat` = inside; `absent` = under 6 bar pairs, or no seq16 downbeat onset "
+      "anywhere in the segment.\n")
+    w("| segment | start s | bars | call bars | P(sub on 1 \\| call) | P(sub on 1 \\| none) | "
+      "difference | null 95% | state |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    states = []
+    for k, (b0, b1) in enumerate(riff_units):
+        ix = np.where(Ur == k)[0]
+        a_, s_ = Ar[ix], Sr[ix]
+        if len(ix) < 6 or s_.sum() == 0 or a_.sum() == 0:
+            states.append((k, b0, b1, "absent", np.nan))
+            continue
+        pA, pn, _ = an_cond(a_, s_)
+        ndk = []
+        for _ in range(500):
+            a2 = a_[rng.permutation(len(a_))]
+            x1, x2, _ = an_cond(a2, s_)
+            ndk.append(x1 - x2)
+        lo, hi = np.percentile(ndk, [2.5, 97.5])
+        d = pA - pn
+        stt = "holds" if d > hi else ("reversed" if d < lo else "flat")
+        states.append((k, b0, b1, stt, d))
+        w(f"| {k} | {G['downbeats'][b0]:.0f} | {b1 - b0} | {int(a_.sum())} | {100 * pA:.0f}% | "
+          f"{100 * pn:.0f}% | {100 * d:+.0f} pts | {100 * lo:+.0f}..{100 * hi:+.0f} | {stt} |")
+    cnt = Counter(x[3] for x in states)
+    elig = sum(v for k2, v in cnt.items() if k2 != "absent")
+    w("\nSegments by state: " + ", ".join(f"`{k2}` {v}" for k2, v in cnt.most_common())
+      + f". Chance predicts ~{0.025 * elig:.1f} of {elig} eligible in each tail. Holds at: "
+      + (", ".join(f"{G['downbeats'][x[1]]:.0f} s ({x[2] - x[1]} bars)" for x in states
+                   if x[3] == "holds") or "nowhere")
+      + ". Reversed at: "
+      + (", ".join(f"{G['downbeats'][x[1]]:.0f} s" for x in states if x[3] == "reversed")
+         or "nowhere") + ".\n")
+
+    rid_bar = np.zeros(G["nbar"], int)
+    for k, (b0, b1) in enumerate(riff_units):
+        rid_bar[b0:b1] = k
+    sub_bar = np.zeros(G["nbar"], int)
+    for k, (b0, b1) in enumerate(subs):
+        sub_bar[b0:b1] = k
+    # windows: strong back hit defined within each window's own sub-section (from the PR set)
+    wins = []
+    for b0 in range(0, G["nbar"] - 8, 8):
+        ix = np.where((N_ >= b0) & (N_ < b0 + 8))[0]
+        a_, s_ = strong[ix], S16[N_[ix] + 1, 0]
+        if a_.sum() >= 2 and (~a_).sum() >= 2:
+            pA, pn, _ = an_cond(a_, s_)
+            wins.append((b0, pA - pn, np.bincount(rid_bar[b0:b0 + 8]).argmax(),
+                         np.bincount(bsec[b0:b0 + 8] - bsec.min()).argmax(),
+                         np.bincount(sub_bar[b0:b0 + 8]).argmax()))
+    W = np.array(wins, float)
+    w(f"\n**Switching.** {len(W)} 8-bar windows with at least two call and two no-call bar pairs. "
+      "If this is a state a sub-section holds, window differences should cluster by unit (eta^2 "
+      "above the rotated-label null) and neighbouring windows should differ more across a "
+      "boundary than inside one.\n")
+    w("| grouping | eta^2 | null median | null 95th | neighbour change inside | across a boundary |")
+    w("|---|---|---|---|---|---|")
+    SW = {}
+    for nm, col in (("bass riff segment", 2), ("bass section", 3), ("structure sub-section", 4)):
+        v, lab_ = W[:, 1], W[:, col].astype(int)
+        e_o = an_eta2(v, lab_)
+        e_n = [an_eta2(v, np.roll(lab_, sh)) for sh in range(1, len(v))]
+        ins, acr = [], []
+        for r1, r2 in zip(W, W[1:]):
+            if r2[0] - r1[0] == 8:
+                (ins if r1[col] == r2[col] else acr).append(abs(r1[1] - r2[1]))
+        SW[nm] = (e_o, e_n, ins, acr)
+        w(f"| {nm} | **{e_o:.2f}** | {np.median(e_n):.2f} | {np.percentile(e_n, 95):.2f} | "
+          f"{100 * np.median(ins) if ins else float('nan'):.0f} pts (n={len(ins)}) | "
+          f"{100 * np.median(acr) if acr else float('nan'):.0f} pts (n={len(acr)}) |")
+    w("")
+
+    # ---- verdict
+    w("#### Verdict on the bar-line reading\n")
+    main = T1[("strong back hit", "seq16 on 1")]
+    snd = T1[("strong back hit", "sub sounding, beat 1")]
+    strict_on = T1[("strict accent", "seq16 on 1")]
+    any_sig = [k for k, v in T1.items() if not k[0].startswith("control")
+               and v["d"] > np.percentile(v["nl"]["shuffle"], 97.5)
+               and v["d"] > np.percentile(v["nl"]["shift"], 97.5)]
+    ctrls = {r: T1[("control: strong back hit of N+1 -> its OWN bar start", r)] for r in resp_defs}
+    hint = [r for r in resp_defs if T1[("strong back hit", r)]["p"] < 0.05 and ctrls[r]["p"] > 0.2]
+    n_main = sum(1 for k in T1 if not k[0].startswith("control"))
+    n_p05 = sum(1 for k, v in T1.items() if not k[0].startswith("control") and v["p"] < 0.05)
+    head = ("**Null result" + (", with a weak order-specific hint.** " if hint and not any_sig
+                               else ".** ") if not any_sig else "**Partly supported.** ")
+    w(head + f"Of {n_main} call x response tests, {len(any_sig)} clear both within-sub-section "
+      f"nulls" + (": " + "; ".join(f"{c} -> {r}" for c, r in any_sig) if any_sig else "")
+      + f"; {n_p05} reach p < 0.05 against the shuffle null alone, where about "
+      f"{0.05 * n_main:.1f} would by chance.\n")
+    w(f"- Powered test (strong back hit -> seq16 onset on the next downbeat): "
+      f"{100 * main['pA']:.1f}% vs {100 * main['pn']:.1f}% without a hit, "
+      f"{100 * main['d']:+.1f} pts [{100 * main['ci'][0]:+.1f}, {100 * main['ci'][1]:+.1f}], "
+      f"p = {main['p']:.3f}. Sub sounding in beat 1 of N+1: {100 * snd['d']:+.1f} pts, "
+      f"p = {snd['p']:.3f}. Strict accents: {100 * strict_on['pA']:.0f}% vs "
+      f"{100 * strict_on['pn']:.0f}% on only {strict_on['n']} bars (p = {strict_on['p']:.3f}) - "
+      "the largest raw lift in the table, and too few bars to separate from chance.\n")
+    order_spec = [r for r in resp_defs
+                  if T1[("strong back hit", r)]["d"] - ctrls[r]["d"] > 0.03]
+    co_act = [r for r in resp_defs if ctrls[r]["d"] >= T1[("strong back hit", r)]["d"]]
+    w("- **Order control.** Moving the strong hit to the back of bar N+1, so the sub at the front "
+      "of N+1 comes *before* it and cannot be answering it, gives " + "; ".join(
+          f"{r}: {100 * T1[('strong back hit', r)]['d']:+.1f} pts after the hit vs "
+          f"{100 * ctrls[r]['d']:+.1f} before it (p {T1[('strong back hit', r)]['p']:.3f} vs "
+          f"{ctrls[r]['p']:.3f})" for r in resp_defs) + ". "
+      + (f"For {' and '.join(order_spec)} the small positive exists only *after* the hit, so it is "
+         "order-specific rather than busy bars being busy - " if order_spec else "")
+      + (f"for {' and '.join(co_act)} the sub is at least as likely *before* the hit, which is "
+         "co-activity, not an answer. " if co_act else "")
+      + "The effect that survives the order control is small (lift "
+      + ", ".join(f"{T1[('strong back hit', r)]['pA'] / T1[('strong back hit', r)]['p0']:.2f}"
+                  for r in order_spec)
+      + "), clears neither of those tests against the shuffle and shift nulls together, and does "
+      "not show on the downbeat-onset measure.\n")
+    j0 = 8
+    w(f"- Bar-line profile: {100 * (prof_a[j0] - prof_n[j0]):+.1f} pts at the downbeat "
+      f"[{100 * lo_b[j0]:+.1f}, {100 * hi_b[j0]:+.1f}].\n")
+    for rname, (obs, nsh, nbs) in XCR.items():
+        pos = [j for j, x in enumerate(lags) if x > 0]
+        jp = max(pos, key=lambda j: obs[j])
+        both = obs[jp] > np.percentile(nsh[:, jp], 97.5) and obs[jp] > np.percentile(nbs[:, jp], 97.5)
+        w(f"- Cross-correlation with {rname}: largest positive lag {lags[jp]:+d} 16ths, "
+          f"r = {obs[jp]:+.3f}, {'above' if both else 'not above'} both nulls.\n")
+    w(f"- Duration: the sub note after a strong back hit runs {np.median(a_call):.2f} beats "
+      f"against {np.median(a_none):.2f} after none ({obs_d:+.2f}, p = "
+      f"{np.mean(np.array(nd) >= obs_d):.3f}). It is 'longer than the call' only because every "
+      "sub note is longer than a 16th.\n")
+    w(f"- Per riff segment: " + ", ".join(f"`{k2}` {v}" for k2, v in cnt.most_common())
+      + " - chance level. Switching: " + "; ".join(
+          f"{nm} eta^2 {v[0]:.2f} vs null 95th {np.percentile(v[1], 95):.2f}, neighbour change "
+          f"{100 * np.median(v[2]):.0f} pts inside vs {100 * np.median(v[3]):.0f} across"
+          for nm, v in SW.items())
+      + ". There is nothing to hold or switch: the bar-line relationship is absent throughout, "
+      "not present in some sub-sections and missing in others.\n")
+    return L
+
+
+def cr_splice(lines):
+    txt = open(OUT_MD, encoding="utf-8").read()
+    i = txt.find("\n" + CR_HEAD)
+    if i >= 0:
+        txt = txt[:i + 1]
+    if not txt.endswith("\n"):
+        txt += "\n"
+    txt += "\n" + "\n".join(lines) + "\n"
+    with open(OUT_MD, "w", encoding="utf-8") as fh:
+        fh.write(txt)
+    print(f"call-and-response -> {OUT_MD}")
+
+
+def callresp_main():
+    F = load()
+    secs = section_grids(sections())
+    evs, _ = detect_events(F, secs)
+    evs = to_bars(evs, secs)
+    for e in evs:
+        e["type"] = classify(e)
+    lines, res = callresp(F, secs, evs)
+    cr_splice(lines + anacrusis(res))
+    np.savez_compressed(os.path.join(SCRATCH, "hook_callresp.npz"), best_N=res["best_N"])
+    return res
 
 
 if __name__ == "__main__":

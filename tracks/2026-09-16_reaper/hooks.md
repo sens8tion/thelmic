@@ -10,7 +10,9 @@ Source: `Tim_Reaper_Jungle_DJ_Set_SECTION_August_2026.wav`, 1259.7 s, 48 kHz ste
 
 Tempo is effectively locked across the whole set (spread 20 mBPM). 1 bar = 1.4458 s, 1 beat = 0.3615 s.
 
-The **phase** is not locked, and this matters. `grid.npz` records **8 bar-phase resets** at 161 s, 187 s, 418 s, 558 s, 790 s, 846 s, 906 s, 1027 s - the DJ's mix points. Independently, combing each of my sections' low-band onset flux against a single global grid puts their downbeats up to **+-173 ms** apart, more than a 16th note (90 ms). The two methods agree: a single-tempo bar grid is safe for *lengths* but wrong for *positions*, so no bar index here comes from one.
+`grid.npz` records **8 bar-phase moves** at 161 s, 187 s, 418 s, 558 s, 790 s, 846 s, 906 s, 1027 s - the DJ's mix points - and one beat-phase step (see grid.md). All bar positions here come from it.
+
+*Correction to an earlier draft:* this file once said a per-section comb against a single global grid put downbeats up to +-173 ms apart and 'independently agreed' with the phase resets. That comb was measured against the old cached grid in `meta.json` (165.83 BPM), which grid.md shows is the wrong tempo and drifts 3.7 beats by the end of the file - so most of that offset was tempo error, not phase. The conclusion (do not use the cached bar grid) stands; the 'independent agreement' does not.
 
 Sections are cut by checkerboard novelty on the cached band energies (min 45 s apart); in a DJ set these are roughly track and arrangement changes, not musical 8-bar phrases.
 
@@ -891,4 +893,467 @@ Every number below is measured from the reference, not chosen. Bars are 1.446 s 
 9. **In key, minor, four notes.** Hook pitch weight lands on **5, b3, 1, 4** relative to the section root - 48% of all hook weight on four pitch classes - and within a single section the top four carry 77%. The minor third outweighs the major 12% to 6%, and 11 of 17 sections read minor. Hook and bass draw on the same pitch set (median agreement 0.50). Use a 4-5 note set in the section's key, not a scale run.
 
 10. **Fragments answering the drums, not a second melody.** 79% of events are stabs or short riff fragments; only 3% are sustained tones or lead lines. Median simultaneous pitch classes during an event is 2 - dyads and small chords, not stacks. A pad, if you want one, should be the continuous bed the fragments are measured against: this detector treats a constant pad as the baseline rather than an event, and so does the ear.
+
+
+
+
+
+
+
+
+## Call and response
+
+Test of the reading **"high call at the front; sub response, longer, at the back"**. Measurement only: event times, durations and intervals. Nothing was extracted or reused.
+
+### Streams and grid
+
+- **CALL (tonal)** - all 287 events from section 1, every type counted: riff fragment 120, stab 69, chord stab 39, vocal-like 38, bell / high tone 12, sustained tone 5, lead line 4. Their fundamentals sit at 233-392 Hz (IQR), so 'high' here means *above the sub*, not top-octave (section 5 shows there is no separate top-octave layer). A narrower **hook-types-only** stream keeps just stab, chord stab, vocal-like, bell / high tone (158 events) and drops riff fragments, sustained tones and lead lines.
+
+- **CALL (percussion accents)** - 2-16 kHz onset strength at a 16th that is >= 6 dB above the median of the *same bar position* over the surrounding +-4 bars and above the sub-section's 60th percentile. The regular backbeat and the 16th carrier are therefore excluded; fills, crashes and displaced snares count. 344 accents = 2.5% of 16th slots (0.40 per bar). Kept as a separate stream and in a combined stream, because they are a different kind of call.
+
+- **RESPONSE (sub)** - `scripts/reaper_bass.py` note code, imported read-only: 1163 held-pitch plateaus below 120 Hz (onsets) plus 2174 glides (sounding time). Sub sounds in 50% of 16th slots; the tonal call in 12%.
+
+- `bass_bars.npz`: present - its per-bar riff segments are used as the bass layer's own state boundaries in part 5; the sub stream itself comes from the note cache, which carries exact onset and offset times.
+
+- **Grid**: `grid.npz` beats, split into 16ths; only 4-beat bars are folded (860 of 869). **Cycles are anchored at sub-section starts** (49 sub-sections from reaper_structure.py segments, snapped to the nearest downbeat), so bar 1 of a 2- or 4-bar cycle is the first bar of a sub-section. Every front/back number is repeated with a second anchor (the global bar count) and with an **anchor-free** measure - the circular offset of the response behind the call inside the cycle, which does not depend on where bar 1 is.
+
+### 1. Front versus back
+
+`first half` = share of the stream's activity in the first half of the cycle (0.50 = even). `COM` = linear centre of mass in the cycle, 0 = downbeat of bar 1, 1 = end of the cycle. `contrast` = call first-half share minus response first-half share; the user's reading predicts it positive. 95% CIs are a cluster bootstrap over sub-sections.
+
+| call stream | response | cycle | call first half | call COM | resp first half | resp COM | contrast [95% CI] | anchor-free offset resp-call | global-anchor contrast [95% CI] |
+|---|---|---|---|---|---|---|---|---|---|
+| tonal CALL, sounding | sub, sounding | 1 bar | 0.527 | 0.485 | 0.512 | 0.494 | **+0.015** [-0.041, +0.077] | +0.444 cycle (R 0.44, later in 61% of subs) | +0.015 [-0.041, +0.072] |
+| tonal CALL, sounding | sub, sounding | 2 bar | 0.468 | 0.508 | 0.502 | 0.496 | **-0.034** [-0.085, +0.026] | -0.313 cycle (R 0.26, later in 39% of subs) | -0.019 [-0.075, +0.036] |
+| tonal CALL, sounding | sub, sounding | 4 bar | 0.523 | 0.490 | 0.512 | 0.492 | **+0.011** [-0.052, +0.087] | -0.381 cycle (R 0.21, later in 46% of subs) | +0.077 [-0.004, +0.136] |
+| tonal CALL, sounding | sub, sounding | 8 bar | 0.455 | 0.516 | 0.513 | 0.489 | **-0.058** [-0.118, +0.010] | -0.315 cycle (R 0.15, later in 39% of subs) | +0.006 [-0.061, +0.059] |
+| hook types only, sounding | sub, sounding | 1 bar | 0.482 | 0.507 | 0.512 | 0.494 | **-0.029** [-0.098, +0.038] | -0.391 cycle (R 0.37, later in 52% of subs) | -0.029 [-0.093, +0.036] |
+| hook types only, sounding | sub, sounding | 2 bar | 0.453 | 0.527 | 0.502 | 0.496 | **-0.050** [-0.130, +0.034] | -0.157 cycle (R 0.06, later in 50% of subs) | -0.090 [-0.154, -0.021] |
+| hook types only, sounding | sub, sounding | 4 bar | 0.460 | 0.529 | 0.512 | 0.492 | **-0.052** [-0.147, +0.058] | -0.331 cycle (R 0.07, later in 48% of subs) | +0.035 [-0.067, +0.133] |
+| hook types only, sounding | sub, sounding | 8 bar | 0.442 | 0.543 | 0.513 | 0.489 | **-0.071** [-0.184, +0.042] | -0.185 cycle (R 0.19, later in 31% of subs) | -0.046 [-0.132, +0.028] |
+| tonal CALL, onsets | sub, onsets | 1 bar | 0.518 | 0.483 | 0.574 | 0.460 | **-0.056** [-0.154, +0.038] | -0.427 cycle (R 0.26, later in 41% of subs) | -0.056 [-0.157, +0.039] |
+| tonal CALL, onsets | sub, onsets | 2 bar | 0.498 | 0.494 | 0.497 | 0.482 | **+0.001** [-0.059, +0.063] | -0.496 cycle (R 0.21, later in 49% of subs) | -0.046 [-0.112, +0.020] |
+| tonal CALL, onsets | sub, onsets | 4 bar | 0.494 | 0.497 | 0.507 | 0.487 | **-0.013** [-0.064, +0.041] | -0.333 cycle (R 0.20, later in 33% of subs) | +0.064 [+0.007, +0.107] |
+| tonal CALL, onsets | sub, onsets | 8 bar | 0.445 | 0.524 | 0.508 | 0.489 | **-0.063** [-0.118, -0.012] | -0.344 cycle (R 0.36, later in 42% of subs) | -0.058 [-0.117, -0.011] |
+| perc accents, onsets | sub, onsets | 1 bar | 0.424 | 0.551 | 0.574 | 0.460 | **-0.149** [-0.218, -0.093] | +0.013 cycle (R 0.09, later in 49% of subs) | -0.149 [-0.217, -0.089] |
+| perc accents, onsets | sub, onsets | 2 bar | 0.548 | 0.503 | 0.497 | 0.482 | **+0.051** [-0.057, +0.149] | -0.080 cycle (R 0.11, later in 50% of subs) | +0.112 [+0.031, +0.225] |
+| perc accents, onsets | sub, onsets | 4 bar | 0.435 | 0.533 | 0.507 | 0.487 | **-0.072** [-0.165, +0.026] | +0.372 cycle (R 0.22, later in 63% of subs) | +0.017 [-0.069, +0.109] |
+| perc accents, onsets | sub, onsets | 8 bar | 0.438 | 0.554 | 0.508 | 0.489 | **-0.070** [-0.144, +0.000] | +0.065 cycle (R 0.37, later in 44% of subs) | +0.005 [-0.063, +0.084] |
+| tonal + accents, onsets | sub, onsets | 1 bar | 0.468 | 0.520 | 0.574 | 0.460 | **-0.105** [-0.172, -0.038] | -0.420 cycle (R 0.13, later in 42% of subs) | -0.105 [-0.174, -0.038] |
+| tonal + accents, onsets | sub, onsets | 2 bar | 0.526 | 0.498 | 0.497 | 0.482 | **+0.028** [-0.045, +0.089] | +0.389 cycle (R 0.06, later in 51% of subs) | +0.041 [-0.017, +0.121] |
+| tonal + accents, onsets | sub, onsets | 4 bar | 0.463 | 0.516 | 0.507 | 0.487 | **-0.044** [-0.101, +0.019] | +0.401 cycle (R 0.07, later in 49% of subs) | +0.038 [-0.005, +0.097] |
+| tonal + accents, onsets | sub, onsets | 8 bar | 0.444 | 0.538 | 0.508 | 0.489 | **-0.064** [-0.110, -0.017] | -0.276 cycle (R 0.20, later in 47% of subs) | -0.022 [-0.068, +0.022] |
+
+Largest contrast in the predicted direction for tonal call vs sub sounding: **1 bar(s)**, +0.015 [-0.041, +0.077] - its interval includes zero. Rows whose sub-section-anchored interval excludes zero: **0 in the predicted direction, 4 in the opposite direction** (tonal CALL, onsets vs sub, onsets, 8 bar: -0.063; perc accents, onsets vs sub, onsets, 1 bar: -0.149; tonal + accents, onsets vs sub, onsets, 1 bar: -0.105; tonal + accents, onsets vs sub, onsets, 8 bar: -0.064).
+
+*One bar, percussion accents against sub onsets (the strongest effect in the table)* - share of each stream's activity per 8th:
+
+| position | 1 | 1& | 2 | 2& | 3 | 3& | 4 | 4& |
+|---|---|---|---|---|---|---|---|---|
+| perc accents, onsets | 8.1 | 13.1 | 10.5 | 10.8 | 13.4 | 15.7 | 15.1 | 13.4 |
+| sub, onsets | 16.8 | 13.7 | 10.1 | 16.7 | 12.0 | 9.4 | 12.6 | 8.8 |
+| call - sub | -8.7 | -0.6 | +0.3 | -6.0 | +1.4 | +6.3 | +2.6 | +4.6 |
+
+*Eight bars, tonal call onsets against sub onsets* - share of each stream's activity per bar:
+
+| position | bar 1 | bar 2 | bar 3 | bar 4 | bar 5 | bar 6 | bar 7 | bar 8 |
+|---|---|---|---|---|---|---|---|---|
+| tonal CALL, onsets | 12.2 | 8.4 | 8.8 | 15.1 | 18.1 | 11.3 | 11.3 | 14.7 |
+| sub, onsets | 12.8 | 12.1 | 12.8 | 13.2 | 12.9 | 13.0 | 11.7 | 11.6 |
+| call - sub | -0.6 | -3.7 | -3.9 | +2.0 | +5.2 | -1.6 | -0.4 | +3.1 |
+
+*Four bars (the phrase unit), tonal call against sub, sounding* - share of each stream's activity per beat:
+
+| position | 1.1 | 1.2 | 1.3 | 1.4 | 2.1 | 2.2 | 2.3 | 2.4 | 3.1 | 3.2 | 3.3 | 3.4 | 4.1 | 4.2 | 4.3 | 4.4 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| tonal CALL, sounding | 7.9 | 7.5 | 5.5 | 7.4 | 7.4 | 6.4 | 5.1 | 5.1 | 5.0 | 4.4 | 4.4 | 5.0 | 7.8 | 7.1 | 7.5 | 6.4 |
+| sub, sounding | 6.1 | 6.9 | 6.3 | 6.2 | 6.5 | 6.8 | 6.5 | 5.9 | 6.2 | 6.5 | 6.2 | 5.8 | 5.7 | 6.4 | 6.4 | 5.6 |
+| call - sub | +1.8 | +0.6 | -0.8 | +1.2 | +1.0 | -0.5 | -1.4 | -0.8 | -1.2 | -2.1 | -1.8 | -0.8 | +2.1 | +0.7 | +1.2 | +0.8 |
+
+### 2. Alternation: cross-correlation at beat resolution
+
+Per-beat activity, z-scored inside each sub-section (so slow level changes between sections cannot create correlation), correlated at lags -8..+8 beats. **Positive lag = the sub comes after the call.** Two nulls, 200 draws each: `shift` rotates the call by a random number of beats inside its sub-section (destroys all alignment); `bar-shuffle` permutes whole bars of the call inside its sub-section (keeps the call's position-in-bar habit, destroys which bar answers which). A lag that beats `shift` but not `bar-shuffle` is a *metric habit*; one that beats both is *specific answering*.
+
+**tonal CALL, sounding vs sub, sounding**
+
+| lag (beats) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | +0.025 | +0.009 | -0.004 | -0.014 | -0.002 | +0.032 | +0.022 | -0.003 | +0.015 | -0.003 | -0.006 | -0.046 | -0.069 | -0.032 | +0.019 | -0.005 | +0.016 |
+| shift null 95% | -0.045..+0.039 | -0.040..+0.041 | -0.041..+0.046 | -0.043..+0.049 | -0.043..+0.042 | -0.037..+0.037 | -0.033..+0.041 | -0.040..+0.044 | -0.033..+0.043 | -0.034..+0.035 | -0.039..+0.044 | -0.042..+0.047 | -0.043..+0.046 | -0.042..+0.051 | -0.040..+0.045 | -0.039..+0.042 | -0.043..+0.043 |
+| bar-shuffle null mean | -0.009 | +0.006 | +0.009 | -0.005 | -0.005 | +0.008 | +0.008 | -0.007 | -0.008 | +0.004 | +0.008 | -0.006 | -0.007 | +0.004 | +0.007 | -0.009 | -0.008 |
+| vs bar-shuffle | **S** |  |  |  |  |  |  |  |  |  |  | **s-** | **s-** | **s-** |  |  |  |
+
+Peak at positive lag: **+6 beats**, r = +0.019 (bar-shuffle null +0.007). Lag 0: r = **+0.015** (shift null -0.033..+0.043, bar-shuffle null -0.008). `S` / `s-` = above / below the bar-shuffle 95% band.
+
+**tonal CALL, onsets vs sub, onsets**
+
+| lag (beats) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | +0.064 | +0.030 | +0.019 | +0.011 | -0.008 | +0.027 | -0.021 | -0.011 | +0.021 | +0.000 | +0.025 | +0.016 | -0.037 | -0.013 | +0.006 | -0.027 | +0.005 |
+| shift null 95% | -0.036..+0.038 | -0.041..+0.036 | -0.035..+0.042 | -0.041..+0.027 | -0.038..+0.037 | -0.037..+0.036 | -0.036..+0.038 | -0.036..+0.043 | -0.043..+0.034 | -0.031..+0.037 | -0.035..+0.042 | -0.036..+0.033 | -0.031..+0.036 | -0.032..+0.036 | -0.036..+0.039 | -0.040..+0.042 | -0.038..+0.037 |
+| bar-shuffle null mean | -0.003 | +0.001 | +0.010 | -0.008 | -0.000 | -0.000 | +0.007 | -0.007 | -0.000 | -0.001 | +0.008 | -0.005 | +0.002 | +0.002 | +0.005 | -0.005 | +0.000 |
+| vs bar-shuffle | **S** |  |  |  |  |  |  |  |  |  |  |  | **s-** |  |  |  |  |
+
+Peak at positive lag: **+2 beats**, r = +0.025 (bar-shuffle null +0.008). Lag 0: r = **+0.021** (shift null -0.043..+0.034, bar-shuffle null -0.000). `S` / `s-` = above / below the bar-shuffle 95% band.
+
+**perc accents, onsets vs sub, onsets**
+
+| lag (beats) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | -0.007 | +0.009 | -0.008 | -0.002 | +0.009 | -0.038 | +0.002 | +0.000 | +0.025 | -0.019 | -0.026 | +0.011 | -0.006 | -0.010 | +0.026 | -0.005 | +0.012 |
+| shift null 95% | -0.032..+0.047 | -0.045..+0.049 | -0.037..+0.048 | -0.037..+0.045 | -0.042..+0.047 | -0.037..+0.043 | -0.041..+0.036 | -0.050..+0.036 | -0.034..+0.038 | -0.042..+0.049 | -0.035..+0.033 | -0.038..+0.037 | -0.046..+0.046 | -0.038..+0.040 | -0.040..+0.040 | -0.046..+0.037 | -0.040..+0.041 |
+| bar-shuffle null mean | +0.002 | +0.003 | -0.005 | +0.002 | +0.003 | +0.000 | -0.004 | -0.003 | +0.005 | -0.001 | -0.004 | -0.001 | +0.004 | -0.000 | -0.003 | -0.001 | +0.006 |
+| vs bar-shuffle |  |  |  |  |  | **s-** |  |  |  |  |  |  |  |  |  |  |  |
+
+Peak at positive lag: **+6 beats**, r = +0.026 (bar-shuffle null -0.003). Lag 0: r = **+0.025** (shift null -0.034..+0.038, bar-shuffle null +0.005). `S` / `s-` = above / below the bar-shuffle 95% band.
+
+**tonal + accents, onsets vs sub, onsets**
+
+| lag (beats) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | +0.052 | +0.016 | +0.005 | +0.014 | -0.001 | -0.015 | -0.015 | -0.012 | +0.032 | -0.007 | +0.001 | +0.030 | -0.032 | -0.012 | +0.024 | -0.025 | +0.018 |
+| shift null 95% | -0.032..+0.042 | -0.039..+0.039 | -0.039..+0.038 | -0.038..+0.039 | -0.035..+0.032 | -0.042..+0.036 | -0.036..+0.041 | -0.037..+0.042 | -0.035..+0.039 | -0.040..+0.035 | -0.032..+0.042 | -0.038..+0.035 | -0.035..+0.036 | -0.036..+0.036 | -0.040..+0.044 | -0.051..+0.034 | -0.032..+0.032 |
+| bar-shuffle null mean | +0.000 | +0.002 | +0.002 | -0.007 | +0.002 | -0.001 | +0.002 | -0.006 | +0.002 | +0.000 | +0.003 | -0.008 | +0.004 | -0.000 | +0.001 | -0.006 | +0.006 |
+| vs bar-shuffle | **S** |  |  |  |  |  |  |  |  |  |  | **S** | **s-** |  |  |  |  |
+
+Peak at positive lag: **+3 beats**, r = +0.030 (bar-shuffle null -0.008). Lag 0: r = **+0.032** (shift null -0.035..+0.039, bar-shuffle null +0.002). `S` / `s-` = above / below the bar-shuffle 95% band.
+
+### 3. Durations: is the response longer?
+
+**1-bar cycles** (860 complete, 278 with both a call >= 1/4 beat and some sub):
+
+- call sounding per cycle 0.53/0.71/1.07/1.68/2.40 beats; sub sounding 0.89/1.41/2.45/3.04/3.45 beats (10/25/50/75/90)
+
+- **sub / call ratio 0.68/1.16/1.81/3.20/5.01**; sub longer in **79%** of cycles, geometric mean 1.71x
+
+- front call vs back sub only (call in the first half, sub in the second half; 170 cycles): ratio 0.33/0.64/1.19/1.98/2.96, sub longer in 59%
+
+**2-bar cycles** (415 complete, 215 with both a call >= 1/4 beat and some sub):
+
+- call sounding per cycle 0.57/0.80/1.42/2.21/3.19 beats; sub sounding 1.75/2.78/4.58/5.46/6.32 beats (10/25/50/75/90)
+
+- **sub / call ratio 0.83/1.58/2.86/5.13/8.04**; sub longer in **86%** of cycles, geometric mean 2.62x
+
+- front call vs back sub only (call in the first half, sub in the second half; 133 cycles): ratio 0.49/1.04/1.90/3.41/4.92, sub longer in 75%
+
+**4-bar cycles** (193 complete, 139 with both a call >= 1/4 beat and some sub):
+
+- call sounding per cycle 0.70/1.06/1.95/3.67/5.50 beats; sub sounding 3.59/6.18/8.93/10.68/12.26 beats (10/25/50/75/90)
+
+- **sub / call ratio 1.15/1.89/3.64/8.46/12.70**; sub longer in **91%** of cycles, geometric mean 3.61x
+
+- front call vs back sub only (call in the first half, sub in the second half; 101 cycles): ratio 0.89/1.64/2.76/4.98/8.46, sub longer in 88%
+
+**Is 'longer' a property of the response, or of the sub?** The sub sounds in 50% of 16ths and the call in 12%, so almost *any* cycle holding a call also holds more sub. Two checks: (a) the same ratio with the call stream rotated to random positions inside its sub-section (50 rotations) - if the observed ratio matches, 'longer' is just density; (b) sub sounding time in cycles *with* a call versus cycles *without* one, inside the same sub-section - an answering sub should play more after a call, not less.
+
+| cycle | observed median sub/call | rotated-call median [95%] | sub beats, cycles with a call | sub beats, cycles without | paired diff (with - without) per sub-section |
+|---|---|---|---|---|---|
+| 1 bar | 1.81 | 1.83 [1.72, 2.08] | 1.99 (n=312) | 2.01 (n=526) | +0.01 beats median, positive in 52% of 46 sub-sections |
+| 2 bar | 2.86 | 2.77 [2.53, 3.03] | 3.98 (n=228) | 4.08 (n=179) | +0.09 beats median, positive in 51% of 41 sub-sections |
+| 4 bar | 3.64 | 3.66 [3.30, 4.04] | 8.02 (n=143) | 8.30 (n=47) | +0.42 beats median, positive in 60% of 20 sub-sections |
+
+
+Single units, for scale: a call event lasts 0.62/0.80/1.15/1.86/2.74 beats, a sub plateau 0.20/0.33/0.60/1.13/1.86 beats (10/25/50/75/90).
+
+
+Call -> following window (until the next call, max 2 bars; 267 calls with sub in the window): window 2.4/4.2/8.0/8.0/8.0 beats, sub sounding in it 0.95/1.79/3.32/4.74/6.26 beats, **ratio sub/call 0.67/1.37/2.33/4.73/7.09**, sub longer in 82%.
+
+### 4. Pitch relationship (intervals only)
+
+Call pitch class = the event's fundamental estimate; response = the **first** sub plateau starting within 2 bars after the call onset (249 pairs). Interval = response minus call, folded to one octave. The null pairs each call with 50 random sub plateaus from the same sub-section, so it shows what the key alone would produce.
+
+| interval response-call | 1 | b2 | 2 | b3 | 3 | 4 | b5 | 5 | b6 | 6 | b7 | 7 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| observed | 15% | 7% | 10% | 4% | 7% | 10% | 8% | 7% | 11% | 7% | 4% | 9% |
+| same-section null | 11% | 7% | 8% | 5% | 7% | 11% | 8% | 7% | 9% | 7% | 8% | 10% |
+| observed - null | +4 | -0 | +2 | -2 | -0 | -1 | -0 | -0 | +2 | -0 | -3 | -1 |
+| sub note *under* the call | 8% | 3% | 6% | 3% | 7% | 7% | 7% | 8% | 23% | 4% | 8% | 15% |
+
+Unison + 4th + 5th (response relative to call): observed **32%**, null 30%, under-the-call 24%. (Octave errors in the call's f0 keep the pitch class; a twelfth error would move weight between 1 and 5, so read unison and fifth together.)
+
+
+Relative to the sub-section root (duration-weighted modal pitch class of that sub-section's sub plateaus):
+
+| interval above root | 1 | b2 | 2 | b3 | 3 | 4 | b5 | 5 | b6 | 6 | b7 | 7 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| call | 11% | 10% | 7% | 9% | 9% | 9% | 6% | 12% | 7% | 3% | 10% | 7% |
+| sub response (first note after a call) | 51% | 6% | 9% | 7% | 2% | 4% | 3% | 7% | 2% | 1% | 4% | 3% |
+| all sub plateaus (baseline) | 54% | 5% | 8% | 4% | 2% | 5% | 3% | 7% | 3% | 2% | 5% | 2% |
+
+Response on the root: 51% vs 54% for sub notes in general; call on the root 11%, on root/4th/5th 31%.
+
+
+**Harmonic check.** The b6 spike in the *under-the-call* row is the signature of a call sitting a major third above the sub - which is also exactly where the sub's own **5th partial** falls (two octaves and a major third up). Measuring the unfolded distance from the sub plateau to the call's fundamental, against the same-section null:
+
+| partial of the sub | 2 (8ve) | 3 (12th) | 4 (2 8ves) | 5 (2 8ves + M3) | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|
+| call within 0.5 st, observed | 1.4% | 1.4% | 2.8% | 18.3% | 2.8% | 1.4% | 4.2% |
+| same-section null | 0.8% | 0.7% | 3.4% | 5.2% | 5.8% | 3.4% | 3.0% |
+
+71 calls have a sub plateau sounding at their onset; 17 of them (24%) sit within half a semitone of a non-octave partial (3, 5, 6 or 7) of that plateau. Octave partials are left out of the suspect set on purpose - a call on the bass's pitch class an octave or two up is a normal musical choice.
+
+
+Front/back re-run **without** the harmonic suspects (sounding, sub-section anchor):
+
+| cycle | call first half | sub first half | contrast [95% CI] |
+|---|---|---|---|
+| 1 bar | 0.532 | 0.512 | +0.020 [-0.038, +0.082] |
+| 2 bar | 0.468 | 0.502 | -0.034 [-0.090, +0.025] |
+| 4 bar | 0.528 | 0.512 | +0.016 [-0.046, +0.094] |
+
+### 5. Per sub-section, and whether the state switches at boundaries
+
+Each sub-section gets its own test at 1-, 2- and 4-bar cycles. Its contrast is compared with 200 rotations of *its own* call stream by a random number of 16ths (same calls, same sub, positions scrambled), so a sub-section with two calls cannot 'hold' by luck. State at the 4-bar cycle (the reference's phrase unit): `holds` = contrast above the rotation null's 97.5th percentile; `reversed` = below its 2.5th; `flat` = inside; `absent` = fewer than 4 calls or under 4 beats of sub. By chance alone about 2.5% of eligible sub-sections would land in each tail.
+
+| sub | start s | bars | calls | call beats | sub beats | contrast 1 bar | contrast 2 bar | contrast 4 bar [null 95%] | state (4 bar) | state (2 bar) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 0 | 27 | 13 | 13.8 | 1.5 | -0.05 | -0.10 | -0.38 [-0.44, +0.10] | absent | absent |
+| 1 | 39 | 15 | 10 | 17.5 | 21.5 | +0.10 | +0.04 | +0.16 [-0.10, +0.30] | flat | flat |
+| 2 | 61 | 22 | 4 | 4.5 | 37.7 | -0.03 | -0.26 | -0.10 [-0.37, +0.35] | flat | flat |
+| 3 | 93 | 10 | 4 | 8.4 | 11.8 | +0.14 | +0.07 | +0.47 [-0.17, +0.57] | flat | flat |
+| 4 | 107 | 15 | 3 | 4.6 | 34.9 | -0.21 | +0.25 | -0.13 [-0.30, +0.08] | absent | absent |
+| 5 | 129 | 9 | 2 | 4.3 | 17.0 | +0.07 | -0.01 | +0.40 [-0.60, +0.40] | absent | absent |
+| 6 | 142 | 8 | 3 | 2.6 | 13.1 | -0.27 | -0.03 | +0.05 [-0.06, +0.39] | absent | absent |
+| 7 | 153 | 8 | 0 | 0.0 | 14.8 | - | - | - | absent | absent |
+| 8 | 165 | 16 | 9 | 15.8 | 18.8 | -0.06 | +0.23 | +0.23 [-0.39, +0.40] | flat | flat |
+| 9 | 189 | 45 | 28 | 49.9 | 131.9 | -0.02 | -0.03 | -0.17 [-0.46, +0.42] | flat | flat |
+| 10 | 255 | 10 | 1 | 1.9 | 16.5 | +0.13 | -0.45 | +0.53 [-0.47, +0.53] | absent | absent |
+| 11 | 269 | 9 | 3 | 3.5 | 11.4 | +0.14 | -0.82 | +0.62 [-0.20, +0.80] | absent | absent |
+| 12 | 282 | 8 | 1 | 1.0 | 21.8 | -0.32 | +0.36 | -0.61 [-0.61, +0.39] | absent | absent |
+| 13 | 294 | 21 | 3 | 4.9 | 52.0 | -0.20 | +0.34 | -0.19 [-0.38, +0.13] | absent | absent |
+| 14 | 324 | 18 | 1 | 0.5 | 26.8 | +0.54 | -0.77 | +0.43 [-0.57, +0.43] | absent | absent |
+| 15 | 350 | 15 | 2 | 8.3 | 32.6 | +0.08 | +0.29 | -0.51 [-0.51, +0.49] | absent | absent |
+| 16 | 372 | 24 | 6 | 12.6 | 49.1 | -0.03 | +0.26 | +0.16 [-0.32, +0.27] | flat | flat |
+| 17 | 406 | 17 | 4 | 5.5 | 15.2 | -0.06 | +0.12 | +0.03 [-0.29, +0.54] | flat | flat |
+| 18 | 432 | 9 | 6 | 8.1 | 4.3 | +0.25 | +0.41 | +0.31 [+0.20, +0.43] | absent | absent |
+| 19 | 445 | 13 | 2 | 1.1 | 29.0 | +0.62 | -0.42 | -0.58 [-0.58, +0.42] | absent | absent |
+| 20 | 463 | 19 | 7 | 8.3 | 44.5 | +0.15 | +0.03 | +0.17 [-0.28, +0.46] | flat | flat |
+| 21 | 491 | 32 | 8 | 16.1 | 76.2 | +0.16 | -0.17 | +0.13 [-0.31, +0.17] | flat | flat |
+| 22 | 537 | 15 | 5 | 5.9 | 18.2 | -0.25 | -0.27 | -0.15 [-0.62, +0.37] | flat | flat |
+| 23 | 558 | 32 | 7 | 7.7 | 62.7 | +0.03 | +0.08 | -0.22 [-0.24, +0.15] | flat | flat |
+| 24 | 604 | 15 | 6 | 9.3 | 47.8 | +0.01 | -0.06 | +0.39 [-0.38, +0.38] | holds | flat |
+| 25 | 626 | 14 | 0 | 0.0 | 36.3 | - | - | - | absent | absent |
+| 26 | 646 | 19 | 7 | 8.5 | 42.1 | -0.01 | -0.42 | -0.17 [-0.22, +0.13] | flat | flat |
+| 27 | 674 | 16 | 3 | 4.2 | 36.9 | -0.44 | +0.49 | -0.31 [-0.31, +0.39] | absent | absent |
+| 28 | 697 | 16 | 6 | 7.9 | 30.0 | -0.17 | +0.24 | -0.10 [-0.21, +0.16] | flat | flat |
+| 29 | 720 | 17 | 11 | 16.8 | 25.3 | +0.07 | -0.21 | +0.06 [-0.00, +0.26] | flat | flat |
+| 30 | 745 | 16 | 11 | 19.1 | 30.2 | -0.10 | -0.01 | +0.04 [-0.28, +0.13] | flat | flat |
+| 31 | 768 | 16 | 1 | 2.9 | 28.0 | -0.19 | -0.65 | +0.39 [-0.61, +0.39] | absent | absent |
+| 32 | 790 | 30 | 5 | 6.3 | 74.8 | -0.22 | -0.27 | +0.05 [-0.49, +0.51] | flat | flat |
+| 33 | 833 | 17 | 3 | 6.8 | 30.2 | +0.24 | +0.24 | +0.62 [-0.38, +0.62] | absent | absent |
+| 34 | 859 | 14 | 6 | 10.5 | 32.1 | +0.27 | +0.09 | -0.23 [-0.29, +0.40] | flat | flat |
+| 35 | 879 | 18 | 7 | 13.9 | 30.4 | +0.05 | +0.08 | +0.31 [-0.52, +0.34] | flat | flat |
+| 36 | 905 | 10 | 2 | 2.7 | 27.2 | +0.04 | -0.29 | -0.47 [-0.47, +0.53] | absent | absent |
+| 37 | 920 | 12 | 3 | 1.5 | 17.0 | -0.46 | +0.29 | -0.27 [-0.27, +0.01] | absent | absent |
+| 38 | 938 | 30 | 15 | 18.4 | 26.0 | +0.00 | +0.11 | -0.09 [-0.36, +0.46] | flat | flat |
+| 39 | 981 | 33 | 18 | 18.3 | 62.8 | -0.28 | -0.01 | +0.16 [-0.22, +0.23] | flat | flat |
+| 40 | 1030 | 16 | 2 | 1.1 | 48.2 | -0.21 | -0.23 | -0.25 [-0.50, +0.50] | absent | absent |
+| 41 | 1053 | 15 | 0 | 0.0 | 24.9 | - | - | - | absent | absent |
+| 42 | 1075 | 31 | 5 | 6.5 | 96.9 | +0.02 | -0.25 | +0.02 [-0.55, +0.42] | flat | flat |
+| 43 | 1120 | 15 | 6 | 5.5 | 38.8 | -0.09 | +0.22 | +0.05 [-0.40, +0.60] | flat | flat |
+| 44 | 1141 | 9 | 6 | 5.2 | 27.7 | +0.25 | -0.06 | +0.13 [-0.07, +0.23] | flat | flat |
+| 45 | 1154 | 9 | 2 | 1.4 | 26.4 | -0.03 | +0.12 | +0.13 [-0.41, +0.59] | absent | absent |
+| 46 | 1167 | 16 | 2 | 2.0 | 9.6 | -0.02 | +0.55 | +0.11 [-0.50, +0.50] | absent | absent |
+| 47 | 1190 | 9 | 8 | 13.4 | 26.6 | +0.40 | +0.02 | +0.07 [-0.04, +0.11] | flat | flat |
+| 48 | 1203 | 39 | 20 | 21.9 | 91.9 | +0.24 | -0.19 | +0.04 [-0.22, +0.13] | flat | flat |
+
+**4-bar states:** `flat` 25 (62% of bars), `absent` 23 (36% of bars), `holds` 1 (2% of bars). Of 26 eligible sub-sections, chance predicts ~0.7 in each tail.
+
+
+**2-bar states:** `flat` 26 (64% of bars), `absent` 23 (36% of bars). Of 26 eligible sub-sections, chance predicts ~0.7 in each tail.
+
+
+Where it holds (4-bar): 604 s (15 bars). Where it is reversed (4-bar): nowhere.
+
+Where it holds (2-bar): nowhere. Where it is reversed (2-bar): nowhere.
+
+
+**Persistence inside sub-sections.** The user's model predicts that the contrast is a *state* a sub-section holds: consecutive 8-bar windows inside one sub-section should look alike, and changes should cluster at sub-section edges. Tested on complete 8-bar windows anchored at sub-section starts, with the eta^2 null built by rotating the sub-section labels (which keeps them contiguous).
+
+| cycle | windows with call and sub | eta^2 by sub-section | null median | null 95th | abs contrast change inside a sub-section | abs change across a boundary |
+|---|---|---|---|---|---|---|
+| 1 bar | 75 | **0.74** | 0.62 | 0.71 | 0.14 (n=29) | 0.29 (n=32) |
+| 2 bar | 75 | **0.76** | 0.52 | 0.66 | 0.22 (n=29) | 0.32 (n=32) |
+| 4 bar | 75 | **0.66** | 0.54 | 0.67 | 0.29 (n=29) | 0.41 (n=32) |
+
+eta^2 is inflated by construction when many sub-sections hold only one or two windows, which is why the rotated-label null sits so high; read the observed value against the null columns, not against zero.
+
+
+**Against the bass layer's own state changes.** `bass_bars.npz` (bass agent, read only) splits the set into 65 riff segments (64 change points). If every layer holds its state inside a sub-section, the call-vs-sub placement should also change where the *bass riff* changes:
+
+| cycle | eta^2 by bass riff segment | null median | null 95th | abs change, window pair with no riff change | with a riff change |
+|---|---|---|---|---|---|
+| 1 bar | **0.62** | 0.58 | 0.66 | 0.13 (n=25) | 0.20 (n=55) |
+| 2 bar | **0.66** | 0.49 | 0.59 | 0.17 (n=25) | 0.31 (n=55) |
+| 4 bar | **0.66** | 0.44 | 0.56 | 0.15 (n=25) | 0.36 (n=55) |
+
+### Verdict
+
+**The reading does not hold as a set-wide rule, and at the bar level the reference leans the other way.**
+
+1. **Front vs back - no.** Tonal call against sub, sounding time, sub-section anchor: 1 bar +0.015 [-0.04, +0.08], 2 bar -0.034 [-0.08, +0.03], 4 bar +0.011 [-0.05, +0.09], 8 bar -0.058 [-0.12, +0.01]. Every interval includes zero. The sub is not back-loaded in any cycle: its first-half share of sounding time is 0.502-0.513. The anchor-free offset (no assumption about where bar 1 is) finds no consistent order either: the response trails the call in only 39-61% of sub-sections.
+
+2. **What the bar actually does is the reverse.** Sub *onsets* put **57%** of themselves in the first half of the bar, peaking on 1 and 2&, while high percussion accents put **58%** in the second half, peaking on 3& and 4 (fills and pickups): contrast -0.149 [-0.22, -0.09], same with the global anchor. Over 8 bars, tonal call onsets drift late (55% in bars 5-8, busiest bars 4, 5, 8; contrast -0.063 [-0.12, -0.01]) while sub onsets stay even. So: **sub at the front, highs at the back** - of the bar clearly, of the 8-bar phrase weakly.
+
+3. **Alternation - no answering lag.** Beat-resolution cross-correlation of call and sub sounding peaks at positive lag +6 beats with r = +0.019, inside the shift null. Lag 0 is r = +0.015 - **not negative**, so they do not avoid overlapping. The one lag outside both nulls is a *dip*: r = -0.069 at +4 beats, i.e. the sub is slightly *thinner* 1 bar(s) after a call, not busier. For onsets the largest value is at -8 beats (r = +0.064, shift null 97.5th +0.038) - if anything the sub leads and the call follows 2 bar(s) later.
+
+4. **Longer - yes, but it is density, not response.** 1-bar: sub/call 1.81x observed vs 1.83x with the call placed at random; sub 1.99 beats in cycles with a call vs 2.01 without. 2-bar: sub/call 2.86x observed vs 2.77x with the call placed at random; sub 3.98 beats in cycles with a call vs 4.08 without. 4-bar: sub/call 3.64x observed vs 3.66x with the call placed at random; sub 8.02 beats in cycles with a call vs 8.30 without. The sub sounds about four times as much as the call everywhere, so any cycle holding a call holds a longer stretch of sub - and it does not play more because a call happened.
+
+5. **Pitch - no relationship beyond sharing the key.** First sub note after a call on the call's pitch class, 4th or 5th: 32% against 30% for random same-section pairs. The response sits on the sub-section root 51% of the time, but so does every sub note (54%). The one real pitch signal is *vertical*: a call sounding over a held sub note lands on that note's 5th partial (two octaves and a major third up) 18% of the time against 5% by chance - either a deliberate major third over the bass or a few 'calls' that are the reese's own upper partial. Removing those events does not change any front/back result.
+
+6. **Per sub-section.** At the 4-bar phrase the pattern clears its own rotation null in 1 of 26 eligible sub-sections and reverses in 0 - chance level (~0.7 each). 23 sub-sections (36% of bars) have too few calls or too little sub to test at all. What *does* behave like the user's model is persistence: the call-vs-sub placement is stickier inside a sub-section than across one - eta^2 0.74 vs null 95th 0.71 at 1 bar, 0.76 vs 0.66 at 2 bars; median change between neighbouring 8-bar windows 0.14 inside vs 0.29 across a boundary (1 bar). **Each sub-section holds a placement state and changes it at the edge - it just is not a front-call/back-response state.** Against the bass layer's own riff segments (`bass_bars.npz`): 1-bar cycle eta^2 0.62 vs null 95th 0.66 (not above), neighbouring windows differ 0.13 without a riff change vs 0.20 across one; 2-bar cycle eta^2 0.66 vs null 95th 0.59 (above), neighbouring windows differ 0.17 without a riff change vs 0.31 across one; 4-bar cycle eta^2 0.66 vs null 95th 0.56 (above), neighbouring windows differ 0.15 without a riff change vs 0.36 across one - the placement state changes where the bass riff changes, clearly at the 2- and 4-bar cycles.
+
+**For the build.** Don't program the sub as an answer that waits for the hook. Measured against this reference, the working version is: sub attacks at the front of the bar, on the 1 and the 2&; high accents and pickups at the back of the bar; hooks clustered on the phrase midpoint and the last bar of an 8-bar phrase (bars 4, 5, 8); the sub running about 4x the hook's sounding time regardless; and whatever placement relationship you pick, held for the whole sub-section and changed at its boundary.
+
+### Call across the bar line
+
+An anacrusis reading of the same idea: the *call* is a high hit at the back of bar N (3&, 4 or 4&) and the *response* is the sub arriving at the front of bar N+1 and sounding longer. Units are the 49 structure sub-sections; every null keeps each unit's own call and sub rates.
+
+#### 0. First, a clock problem
+
+Sub *plateau* onsets (the held-pitch start from the bass note code) run late. Their rate per 16th of the bar, next to the bass agent's own quantised onsets from `bass_bars.npz` `seq16` (a slot is an onset when it is voiced and the slot before was not, or moved by more than a semitone):
+
+| 16th | 1 | 1e | 1& | 1a | 2 | 2e | 2& | 2a | 3 | 3e | 3& | 3a | 4 | 4e | 4& | 4a |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| plateau onsets, % of bars | 5.3 | 17.2 | 11.6 | 6.7 | 8.6 | 5.0 | 7.9 | 14.5 | 5.6 | 10.5 | 8.0 | 4.5 | 6.4 | 10.5 | 7.4 | 4.3 |
+| seq16 onsets, % of bars | 21.7 | 25.3 | 8.3 | 8.7 | 9.2 | 14.3 | 14.0 | 10.0 | 9.8 | 20.1 | 10.3 | 10.6 | 13.5 | 14.0 | 11.2 | 5.7 |
+
+Matched one-to-one within +-2 16ths (720 onsets), the plateau onset sits -2: 2%, -1: 0%, +0: 28%, +1: 47%, +2: 22% 16ths from the seq16 onset. The plateau onsets land on the *e* 16ths because a note only counts as a plateau once its attack pitch-ping has settled - about one 16th after the attack. **So 'sub on the downbeat' has to be read from seq16 (or from the first 8th of the bar for plateaus); a plateau-onset test at slot 0 is structurally near-empty.** The 8th-resolution statement in the section above (sub onsets peak on 1 and 2&) is unaffected, since a one-16th delay stays inside the 8th.
+
+#### 1. Conditional probability of the sub across the bar line
+
+806 consecutive bar pairs inside a sub-section. Three definitions of the call:
+
+- **strict accent** (35 bars): the accent stream above, on 3&, 4 or 4&. It is >= 6 dB over the same bar position in the surrounding bars, so it *excludes* a pickup that recurs every bar - which is exactly what an anacrusis call might be.
+
+- **strict accent, 3&..4&** (102 bars): any of the last six 16ths.
+
+- **strong back hit** (272 bars): 2-16 kHz onset strength on 3&/4/4& in the top third of that sub-section's bars. Relative to the sub-section, not to the neighbouring bars, so a recurring pickup counts. This is the powered test.
+
+Responses: `seq16 on 1` = a seq16 onset on the downbeat of N+1 (less latent than plateaus, but seq16 also peaks on the *e* 16ths, so the first-8th and sounding responses are the robust ones); `plateau in 1st 8th` = a plateau onset in the first 8th of N+1; `sub sounding, beat 1` = share of the first beat of N+1 in which the sub sounds (plateaus + glides). For the last one the table shows means, not probabilities. `boot` = bootstrap over sub-sections; `shuffle`/`shift` = the call indicator permuted, or circularly shifted by whole bars, inside each sub-section (1000 draws); `p` = one-sided share of shuffle draws >= observed.
+
+| call | response | P(resp \| call) | P(resp \| no call) | lift | difference [boot 95%] | shuffle null 95% | shift null 95% | p |
+|---|---|---|---|---|---|---|---|---|
+| strict accent (35) | seq16 on 1 | 40.0% | 21.0% | 1.83 | **+19.0** [-3.4, +39.0] | -1.9..+22.0 | -1.9..+22.0 | 0.120 |
+| strict accent (35) | plateau in 1st 8th | 22.9% | 21.9% | 1.04 | **+0.9** [-15.6, +28.5] | -8.0..+12.9 | -8.0..+12.9 | 0.677 |
+| strict accent (35) | sub sounding, beat 1 | 48.0 | 49.6 | 0.97 | **-1.6** [-16.2, +18.0] | -5.8..+14.1 | -4.8..+12.9 | 0.862 |
+| strict accent, 3&..4& (102) | seq16 on 1 | 26.5% | 21.2% | 1.21 | **+5.3** [-5.1, +15.5] | -3.7..+9.8 | -3.7..+9.8 | 0.311 |
+| strict accent, 3&..4& (102) | plateau in 1st 8th | 16.7% | 22.7% | 0.76 | **-6.1** [-16.2, +4.7] | -4.9..+8.5 | -4.9..+9.7 | 0.992 |
+| strict accent, 3&..4& (102) | sub sounding, beat 1 | 47.7 | 49.8 | 0.96 | **-2.1** [-12.5, +10.1] | -5.8..+6.1 | -6.3..+6.3 | 0.748 |
+| strong back hit (272) | seq16 on 1 | 22.4% | 21.5% | 1.03 | **+0.9** [-5.6, +7.7] | -5.2..+5.3 | -5.2..+5.3 | 0.408 |
+| strong back hit (272) | plateau in 1st 8th | 25.7% | 20.0% | 1.17 | **+5.7** [-1.3, +13.3] | -4.8..+5.7 | -5.4..+6.3 | 0.039 |
+| strong back hit (272) | sub sounding, beat 1 | 52.4 | 48.0 | 1.06 | **+4.4** [-1.7, +10.2] | -4.6..+4.5 | -5.4..+4.1 | 0.028 |
+| control: strong back hit of N+1 -> its OWN bar start (272) | seq16 on 1 | 25.0% | 20.2% | 1.14 | **+4.8** [+0.1, +10.0] | -5.2..+5.9 | -5.8..+4.8 | 0.051 |
+| control: strong back hit of N+1 -> its OWN bar start (272) | plateau in 1st 8th | 22.4% | 21.7% | 1.02 | **+0.7** [-4.4, +5.9] | -4.8..+6.3 | -5.4..+6.3 | 0.485 |
+| control: strong back hit of N+1 -> its OWN bar start (272) | sub sounding, beat 1 | 49.6 | 49.5 | 1.00 | **+0.1** [-6.1, +5.8] | -4.5..+4.1 | -5.2..+4.3 | 0.446 |
+| control: strong mid-bar hit (1&/2/2&) -> beat 3 of the same bar (272) | seq16 on 3 | 11.4% | 8.8% | 1.18 | **+2.6** [-3.4, +9.5] | -4.1..+4.3 | -5.2..+4.8 | 0.158 |
+
+Differences are in percentage points (for `sub sounding` in points of the first beat's coverage).
+
+seq16 onset rate from half a bar before the bar line to half a bar after it, bar pairs with a strong back hit in bar N (272) against the rest (534). Position 0 is the downbeat of N+1.
+
+| 16ths from bar line | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| strong back hit in N | 9.6 | 20.6 | 9.2 | 14.3 | 16.5 | 15.1 | 14.0 | 5.9 | 22.4 | 23.9 | 10.7 | 9.9 | 7.7 | 11.4 | 16.5 | 12.1 |
+| no strong back hit | 9.7 | 20.4 | 10.7 | 8.6 | 12.4 | 13.5 | 9.6 | 5.2 | 21.5 | 26.4 | 7.3 | 8.6 | 9.6 | 15.2 | 13.1 | 8.8 |
+| difference, pts | -0.2 | +0.2 | -1.5 | +5.7 | +4.2 | +1.6 | +4.4 | +0.6 | +0.9 | -2.5 | **+3.4** | +1.3 | -1.8 | -3.8 | +3.4 | +3.3 |
+
+Bold = bootstrap 95% interval excludes zero. Note positions -6, -4 and -2 are the call's own 16ths: a sub onset there coincides with the hit rather than answering it.
+
+#### 2. Cross-correlation, accent stream against sub onsets (16th resolution)
+
+z-scored inside each sub-section; positive lag = sub onset after the accent. `shift` rotates the accent stream by a random number of 16ths (destroys every alignment, including the metric one); `bar-shuffle` permutes whole bars of accents (keeps where in the bar they fall, destroys which bar follows which). 300 draws each. With seq16 onsets an accent on 4&, 4 or 3& reaches the next downbeat at +2, +4 or +6; with plateau onsets add one 16th.
+
+**accents vs seq16 onsets**
+
+| lag (16ths) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | -0.002 | -0.012 | +0.012 | -0.013 | +0.010 | -0.013 | -0.015 | -0.018 | -0.008 | -0.006 | +0.021 | -0.018 | +0.002 | -0.004 | +0.001 | -0.012 | +0.003 |
+| shift null 97.5% | +0.027 | +0.022 | +0.024 | +0.022 | +0.022 | +0.023 | +0.021 | +0.021 | +0.025 | +0.022 | +0.019 | +0.021 | +0.022 | +0.019 | +0.023 | +0.020 | +0.021 |
+| bar-shuffle null 97.5% | +0.009 | +0.015 | +0.030 | +0.011 | +0.020 | +0.008 | +0.011 | +0.010 | +0.027 | +0.021 | +0.027 | +0.003 | +0.031 | +0.006 | +0.021 | +0.021 | +0.008 |
+| above null |  |  |  |  |  |  |  |  |  |  | shift |  |  |  |  |  |  |
+
+**accents vs plateau onsets**
+
+| lag (16ths) | -8 | -7 | -6 | -5 | -4 | -3 | -2 | -1 | +0 | +1 | +2 | +3 | +4 | +5 | +6 | +7 | +8 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| r | +0.000 | -0.018 | -0.007 | -0.002 | -0.003 | +0.006 | +0.013 | +0.007 | +0.006 | -0.010 | +0.020 | -0.002 | -0.015 | -0.006 | +0.002 | -0.016 | +0.013 |
+| shift null 97.5% | +0.020 | +0.020 | +0.020 | +0.020 | +0.024 | +0.018 | +0.019 | +0.021 | +0.022 | +0.025 | +0.025 | +0.021 | +0.022 | +0.020 | +0.018 | +0.019 | +0.022 |
+| bar-shuffle null 97.5% | +0.025 | +0.004 | +0.016 | +0.025 | +0.016 | +0.017 | +0.023 | +0.015 | +0.018 | +0.022 | +0.024 | +0.009 | +0.014 | +0.024 | +0.012 | +0.019 | +0.027 |
+| above null |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
+
+#### 3. Duration: the call against the sub note that follows
+
+A back-of-bar hit is a single 16th (0.25 beats), so 'the answer is longer than the call' is true of almost any sub note. The informative test is whether the sub note that starts in the first 8th of N+1 is longer *after* a strong back hit than after a bar without one (the note must start in the first 8th of N+1, allowing the one-16th plateau latency).
+
+| | notes | answer length, beats (10/25/50/75/90) | answer / call (median) |
+|---|---|---|---|
+| after a strong back hit | 94 | 0.22/0.40/0.80/1.51/2.44 | 3.19x |
+| after no strong back hit | 174 | 0.20/0.33/0.80/1.39/2.32 | 3.19x |
+| all sub plateaus | 1163 | 0.20/0.33/0.60/1.13/1.86 | - |
+
+Median difference (after hit - after none): **+0.00 beats**; shuffle null 95% -0.20..+0.20, p = 0.459.
+
+#### 4. Per bass riff segment, and switching at boundaries
+
+Units = the 65 riff segments of `bass_bars.npz`. Call = strong back hit (top third inside the segment); response = seq16 onset on the next downbeat. `holds` = difference above that segment's own shuffle-null 97.5th percentile (500 draws); `reversed` = below the 2.5th; `flat` = inside; `absent` = under 6 bar pairs, or no seq16 downbeat onset anywhere in the segment.
+
+| segment | start s | bars | call bars | P(sub on 1 \| call) | P(sub on 1 \| none) | difference | null 95% | state |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 49 | 16 | 5 | 60% | 20% | +40 pts | -50..+56 | flat |
+| 2 | 72 | 10 | 3 | 0% | 17% | -17 pts | -17..+33 | flat |
+| 6 | 107 | 8 | 2 | 50% | 40% | +10 pts | -60..+80 | flat |
+| 7 | 119 | 8 | 2 | 0% | 40% | -40 pts | -40..+100 | flat |
+| 11 | 150 | 10 | 2 | 50% | 40% | +10 pts | -60..+80 | flat |
+| 12 | 165 | 15 | 4 | 25% | 11% | +14 pts | -22..+50 | flat |
+| 13 | 188 | 43 | 14 | 21% | 29% | -7 pts | -29..+25 | flat |
+| 15 | 257 | 16 | 5 | 0% | 10% | -10 pts | -10..+20 | flat |
+| 16 | 281 | 32 | 10 | 30% | 24% | +6 pts | -23..+36 | flat |
+| 17 | 327 | 16 | 5 | 0% | 10% | -10 pts | -10..+20 | flat |
+| 18 | 350 | 15 | 5 | 0% | 22% | -22 pts | -22..+40 | flat |
+| 20 | 375 | 10 | 3 | 67% | 33% | +33 pts | -67..+83 | flat |
+| 24 | 420 | 8 | 2 | 50% | 20% | +30 pts | -40..+100 | flat |
+| 32 | 557 | 26 | 8 | 12% | 25% | -12 pts | -31..+44 | flat |
+| 35 | 604 | 18 | 6 | 33% | 45% | -12 pts | -38..+39 | flat |
+| 36 | 630 | 10 | 3 | 0% | 50% | -50 pts | -50..+50 | flat |
+| 38 | 651 | 46 | 15 | 40% | 53% | -13 pts | -33..+27 | flat |
+| 40 | 720 | 12 | 4 | 25% | 29% | -4 pts | -43..+36 | flat |
+| 51 | 905 | 14 | 4 | 25% | 38% | -12 pts | -50..+62 | flat |
+| 52 | 926 | 7 | 2 | 0% | 25% | -25 pts | -25..+50 | flat |
+| 53 | 936 | 8 | 2 | 0% | 20% | -20 pts | -20..+50 | flat |
+| 54 | 948 | 10 | 3 | 0% | 17% | -17 pts | -17..+33 | flat |
+| 55 | 962 | 11 | 3 | 33% | 29% | +5 pts | -43..+52 | flat |
+| 56 | 978 | 32 | 10 | 90% | 33% | +57 pts | -32..+42 | holds |
+| 60 | 1075 | 26 | 8 | 75% | 76% | -1 pts | -38..+35 | flat |
+| 63 | 1124 | 62 | 20 | 45% | 34% | +11 pts | -26..+26 | flat |
+| 64 | 1214 | 32 | 10 | 40% | 10% | +30 pts | -30..+30 | flat |
+
+Segments by state: `absent` 38, `flat` 26, `holds` 1. Chance predicts ~0.7 of 27 eligible in each tail. Holds at: 978 s (32 bars). Reversed at: nowhere.
+
+
+**Switching.** 81 8-bar windows with at least two call and two no-call bar pairs. If this is a state a sub-section holds, window differences should cluster by unit (eta^2 above the rotated-label null) and neighbouring windows should differ more across a boundary than inside one.
+
+| grouping | eta^2 | null median | null 95th | neighbour change inside | across a boundary |
+|---|---|---|---|---|---|
+| bass riff segment | **0.51** | 0.60 | 0.72 | 17 pts (n=36) | 18 pts (n=25) |
+| bass section | **0.55** | 0.42 | 0.54 | 17 pts (n=48) | 18 pts (n=13) |
+| structure sub-section | **0.78** | 0.66 | 0.77 | 17 pts (n=31) | 20 pts (n=30) |
+
+#### Verdict on the bar-line reading
+
+**Null result, with a weak order-specific hint.** Of 9 call x response tests, 0 clear both within-sub-section nulls; 2 reach p < 0.05 against the shuffle null alone, where about 0.5 would by chance.
+
+- Powered test (strong back hit -> seq16 onset on the next downbeat): 22.4% vs 21.5% without a hit, +0.9 pts [-5.6, +7.7], p = 0.408. Sub sounding in beat 1 of N+1: +4.4 pts, p = 0.028. Strict accents: 40% vs 21% on only 35 bars (p = 0.120) - the largest raw lift in the table, and too few bars to separate from chance.
+
+- **Order control.** Moving the strong hit to the back of bar N+1, so the sub at the front of N+1 comes *before* it and cannot be answering it, gives seq16 on 1: +0.9 pts after the hit vs +4.8 before it (p 0.408 vs 0.051); plateau in 1st 8th: +5.7 pts after the hit vs +0.7 before it (p 0.039 vs 0.485); sub sounding, beat 1: +4.4 pts after the hit vs +0.1 before it (p 0.028 vs 0.446). For plateau in 1st 8th and sub sounding, beat 1 the small positive exists only *after* the hit, so it is order-specific rather than busy bars being busy - for seq16 on 1 the sub is at least as likely *before* the hit, which is co-activity, not an answer. The effect that survives the order control is small (lift 1.17, 1.06), clears neither of those tests against the shuffle and shift nulls together, and does not show on the downbeat-onset measure.
+
+- Bar-line profile: +0.9 pts at the downbeat [-5.1, +8.0].
+
+- Cross-correlation with seq16 onsets: largest positive lag +2 16ths, r = +0.021, not above both nulls.
+
+- Cross-correlation with plateau onsets: largest positive lag +2 16ths, r = +0.020, not above both nulls.
+
+- Duration: the sub note after a strong back hit runs 0.80 beats against 0.80 after none (+0.00, p = 0.459). It is 'longer than the call' only because every sub note is longer than a 16th.
+
+- Per riff segment: `absent` 38, `flat` 26, `holds` 1 - chance level. Switching: bass riff segment eta^2 0.51 vs null 95th 0.72, neighbour change 17 pts inside vs 18 across; bass section eta^2 0.55 vs null 95th 0.54, neighbour change 17 pts inside vs 18 across; structure sub-section eta^2 0.78 vs null 95th 0.77, neighbour change 17 pts inside vs 20 across. There is nothing to hold or switch: the bar-line relationship is absent throughout, not present in some sub-sections and missing in others.
 
