@@ -116,6 +116,7 @@ F_MINOR = [0, 2, 3, 5, 7, 8, 10]                   # F natural minor, as semiton
 
 DOUBLES = ((0.0, 1.0), (1.5, 1.0))                              # two hits a bar: on 1 and the "and" of 2
 FOUR = ((0.0, 0.6), (0.75, 0.6), (2.0, 0.6), (2.75, 0.6))      # twice the hits: that figure in both halves
+EIGHT = tuple((b + o, 0.4 if o == 0 else 0.2) for b in range(4) for o in (0.0, 0.75))  # twice again: every beat and its "a"
 
 
 def per_bar(pitches, hits=DOUBLES, glide=False, vel=(116, 108)):
@@ -123,6 +124,8 @@ def per_bar(pitches, hits=DOUBLES, glide=False, vel=(116, 108)):
     hit wherever the note changes, so SUB-LIMINAL's glide slides into it. -> (notes, clip length)."""
     out = []
     for b, pitch in enumerate(pitches):
+        if pitch is None:                               # a bar of rest
+            continue
         nxt = pitches[b + 1] if b + 1 < len(pitches) else None
         for k, (at, dur) in enumerate(hits):
             if glide and k == len(hits) - 1 and nxt is not None and nxt != pitch:
@@ -133,10 +136,12 @@ def per_bar(pitches, hits=DOUBLES, glide=False, vel=(116, 108)):
 
 def climb(start, bars=8, **kw):
     """The user's octave-crossing doubles: hits on one note per bar, then the next bar steps up to the next
-    note of F minor, crossing into the octave above after 7 bars."""
+    note of F minor, crossing into the next octave - and a bar of rest before it goes back to the start (the
+    user's ask, and the reference's normal one-bar hole). 7 steps + the gap keeps the phrase at 8 bars, in
+    phase with the 4-bar drums."""
     scale = [F1 - 12 + 12 * o + s for o in range(4) for s in F_MINOR]
     i = scale.index(start)
-    return per_bar(scale[i:i + bars], **kw)
+    return per_bar(scale[i:i + bars - 1] + [None], **kw)
 
 
 RIFF_ARRIVALS = twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
@@ -147,7 +152,7 @@ RIFF_SERVED = twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 
 RIFF_MESSAGE = per_bar([F1, F1, EB1, EB1], hits=FOUR, glide=True, vel=(114, 104, 110, 104))
 # the second drop of each section climbs the key in doubles, over 8 bars (the drums loop twice under it)
 CLIMB_ESCALATOR = climb(F1)                                                            # F1 .. F2, two hits a bar
-CLIMB_APPEAL = climb(AB1, hits=tuple((a, 0.4) for a, _ in FOUR), vel=(118, 106, 114, 106))  # Ab1 .. Ab2, four short hits
+CLIMB_APPEAL = climb(AB1, hits=EIGHT, vel=(118, 100, 112, 100))                       # Ab1 .. G2, eight hits a bar
 CLIMB_LEVITATION = climb(EB1, hits=FOUR, glide=True, vel=(114, 104, 110, 104))        # Eb1 .. Eb2, four hits, gliding up
 
 # ---------------------------------------------------------------- sub signatures (copies of F-HOLE)
