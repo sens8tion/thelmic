@@ -27,7 +27,7 @@ from jungle_reset import index_of, track_names  # noqa: E402
 # its old fader (its hits no longer drop out by chance), and every lane is 2 dB under, so Main peaks below 0 dBFS
 # when every hit plays.
 LEVELS = {"SPINE-TINGLER": -8.6, "AMEN-DMENT": -4.2, "COLD-CUTS": -14.0, "CHOPPER": -11.2, "THROW-UP": -1.5,
-          "BOO-MERANGUE": -7.6, "WOBBLE-BOARD": -7.6}      # the auditioned subs: F-HOLE's -3.6, 4 dB under, unmatched
+          "BOO-MERANGUE": -7.6}      # the 808: F-HOLE's -3.6, 4 dB under, not yet matched on the meter
 UNITY = 0.85                 # mixer volume raw value for 0 dB
 
 
@@ -86,7 +86,7 @@ def main():
                             ("COLD-CUTS", [(36, 0.0, 0.5, 120), (38, 1.0, 0.5, 120)]),
                             ("CHOPPER", [(36, 0.0, 0.5, 120), (40, 1.0, 0.5, 120)]),
                             ("THROW-UP", [(36, 0.0, 0.5, 120), (38, 1.0, 0.5, 120)]),
-                            ("BOO-MERANGUE", [(30, 0.0, 1.5, 120)]), ("WOBBLE-BOARD", [(30, 0.0, 1.5, 120)])):
+                            ("BOO-MERANGUE", [(30, 0.0, 1.5, 120)])):
             if name not in present:
                 continue
             peak = meter_test(ch, name, notes)

@@ -140,9 +140,8 @@ CHOPS = [
 ]
 
 BREAK_LANES = ("AMEN-DMENT", "COLD-CUTS", "CHOPPER")
-# the sub lanes: BOO-MERANGUE (the 808, chosen 2026-09-17) and WOBBLE-BOARD (muted, not chosen) - the bass
-# goes to each one present. F-HOLE and TONE-DEAF were dropped.
-SUB_LANES = ("BOO-MERANGUE", "WOBBLE-BOARD")
+# the sub lane: BOO-MERANGUE, the 808 chosen 2026-09-17 (F-HOLE, TONE-DEAF and WOBBLE-BOARD were dropped)
+SUB_LANES = ("BOO-MERANGUE",)
 VARIANT_FROM = 72
 FS0, GS0, A0, B0, CS1 = 30, 32, 33, 35, 37
 SHORT, HELD = 100, 110
