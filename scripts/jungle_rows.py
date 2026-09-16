@@ -252,73 +252,95 @@ def spine_lane(section):
     return out
 
 
-def chop_lane(section, seed, dealt=None):
-    """The scene's chop: every 16th except the spine's gets one slice at that position's chance. The slice
-    dealt changes per bar (A-B-C-D inside the 4-bar group): `dealt` bar maps where given (the approved
-    WAITING ROOM chop), otherwise drawn from the break by kind. Variant pads - pitch, stutter, reverse,
-    stretch - come in at low chance, with the fill on bar 4."""
-    _, _, brk, _, chance, _ = SECTIONS[section]
-    rnd = random.Random(seed)
-    pools = {k: [s for s in range(len(brk.home)) if kind_of(brk, s) == k] for k in ("kick", "snare", "soft", "light")}
-    hits = {}                               # (bar, 16th) -> [pad, velocity, chance, natural length]
-    for b in range(BARS):
-        for slot in range(16):
-            if slot in SPINE_SLOTS or chance[slot] < 0.05:
-                continue
-            if dealt and slot in dealt[b]:
-                s = dealt[b][slot]
-                kind = kind_of(brk, s)
+def home_bars(brk, drop_kicks=False):
+    """The break's own two bars on the 16th grid, in the drummer's order: {16th: slice} per bar."""
+    bars = [{}, {}]
+    for s, h in enumerate(brk.home):
+        b, k = divmod(int(round(h * 4)), 16)
+        if b < 2 and not (drop_kicks and kind_of(brk, s) == "kick"):
+            bars[b].setdefault(k, s)
+    return bars
+
+
+def blocks(brk, turnaround, drop_kicks=False):
+    """A-B-C-D from whole blocks of the break: A = its first bar, B = its second, C = A's first half with
+    B's second half, D = B with a turnaround in its last beat (slices by index, the snare on 4 kept)."""
+    a, b = home_bars(brk, drop_kicks)
+    c = {**{k: v for k, v in a.items() if k < 8}, **{k: v for k, v in b.items() if k >= 8}}
+    d = {**{k: v for k, v in b.items() if k < 13}, **turnaround}
+    return [a, b, c, d]
+
+
+CHOP_BARS = {
+    "arrivals": CHOP_A,                                                      # the approved WAITING ROOM chop
+    "court": blocks(SWEAT, {13: 9, 14: 14, 15: 19}),                          # ghost, soft snare, ghost
+    "print": blocks(TOP, {13: 13, 14: 20, 15: 27}, drop_kicks=True),          # conga, bongo, conga
+}
+
+
+def chop_lane(section):
+    """The scene's chop, legible first: whole blocks of its own break (CHOP_BARS), kicks and snares kept,
+    and every core hit at 100%. Chance only decorates - ghosts and hats on the off-16ths at 65%, hands at
+    80%, and the variant pads at 25-35% in 16ths the chop leaves empty (bar D's turnaround is the fill). A hit rings until
+    the next hit that always plays, so a note that doesn't fire never cuts another one short."""
+    _, _, brk, _, _, _ = SECTIONS[section]
+    notes = []
+    for b, bar in enumerate(CHOP_BARS[section]):
+        for slot, s in sorted(bar.items()):
+            parts = brk.parts[s]
+            kind = kind_of(brk, s)
+            vel = max(VEL.get(p, 96) for p in parts) - (12 if slot % 2 else 0)
+            if kind == "light" and slot % 2 and not any(p in ("bongo", "conga") for p in parts):
+                chance = 0.65
+            elif any(p in ("bongo", "conga") for p in parts):
+                chance = 0.8
             else:
-                kinds = ["kick", "soft", "soft", "light"] if slot == 8 else \
-                        ["light", "light", "soft", "kick"] if slot % 2 == 0 else ["light", "light", "light", "soft"]
-                kind = rnd.choice([k for k in kinds if pools[k]])
-                s = rnd.choice(pools[kind])
-            vel = {"kick": 108, "snare": 104, "soft": 96, "light": 88}[kind] - (10 if slot % 2 else 0)
-            hits[(b, slot)] = [36 + s, vel, round(chance[slot], 2), brk.natural(s)]
-    # low-chance variants replace whatever was dealt on their 16th
-    for pad, b, slot, vel, p, natural in [
-            (V_SNARE_UP7, 0, 15, 96, 0.25, 0.25),     # a snare up a fifth as the pickup into bar 2
-            (V_REV_LIGHT, 1, 14, 90, 0.35, 0.25),     # a reversed hat or hand drum
-            (V_KICK_DOWN, 2, 2, 104, 0.30, 0.5),      # the kick pitched down
-            (V_STRETCH_15, 2, 6, 94, 0.30, 0.5),      # a stretched snare
-            (V_REV_SNARE, 3, 14, 100, 0.25, 0.5),     # a reversed snare swelling into the downbeat
-            (V_SNARE_UP12, 3, 15, 100, 0.30, 0.25)]:  # a snare an octave up to end the group
-        hits[(b, slot)] = [pad, vel, p, natural]
-    notes = [(pad, b * 4.0 + slot * 0.25, nat, vel, p) for (b, slot), (pad, vel, p, nat) in hits.items()]
-    notes += [(V_STUTTER, 15.25 + k * 0.125, 0.12, 92 + 4 * k, 0.30) for k in range(3)]   # the fill: a 32nd stutter
+                chance = 1.0
+            notes.append((36 + s, b * 4.0 + slot * 0.25, brk.natural(s), vel, chance))
+    variants = [(V_SNARE_UP7, 0, (15, 13, 11), 96, 0.25, 0.25),   # a snare up a fifth, late in bar A
+                (V_REV_LIGHT, 1, (14, 13, 9), 90, 0.35, 0.25),     # a reversed hat or hand drum in bar B
+                (V_KICK_DOWN, 2, (3, 5, 9), 104, 0.30, 0.5),       # the kick pitched down in bar C
+                (V_STRETCH_15, 2, (6, 7, 11), 94, 0.30, 0.5),      # a stretched snare in bar C
+                (V_SNARE_UP12, 3, (15, 11, 9), 100, 0.30, 0.25)]   # a snare an octave up to end bar D
+    for pad, b, slots, vel, p, natural in variants:
+        taken = CHOP_BARS[section][b]
+        slot = next((sl for sl in slots if sl not in taken), None)
+        if slot is not None:
+            notes.append((pad, b * 4.0 + slot * 0.25, natural, vel, p))
     notes.sort(key=lambda n: n[1])
+    certain = [n[1] for n in notes if n[4] >= 0.99]
     out = []
-    for j, (pad, t, nat, vel, p) in enumerate(notes):
-        nxt = next((n[1] for n in notes[j + 1:] if n[1] > t + 1e-6), LEN)
+    for pad, t, nat, vel, p in notes:
+        nxt = next((c for c in certain if c > t + 1e-6), LEN)
         out.append((pad, round(t, 4), round(max(0.05, min(nat, nxt - t) - 0.012), 4), vel, p))
     return out
 
 
-def with_chance(notes, off8=0.7):
+def with_chance(notes, off8=0.85):
     """Carrier 16ths: the 8th positions always play; the "e"s and "a"s play at `off8` chance."""
     return [(p, t, d, v, off8 if round(t * 4) % 2 else 1.0) for p, t, d, v in notes]
 
 
-def drums(section, carrier, seed, dealt=None):
+def drums(section, carrier):
     spine, chop_track, _, carrier_track, _, _ = SECTIONS[section]
-    return {spine: spine_lane(section), chop_track: chop_lane(section, seed, dealt), carrier_track: carrier}
+    return {spine: spine_lane(section), chop_track: chop_lane(section), carrier_track: carrier}
 
 
 # ---------------------------------------------------------------- rows: (scene, name, {track: notes})
 ROWS = [
-    (0, "WAITING ROOM", drums("arrivals", "carrier_amen", 11, CHOP_A)),
-    (1, "ARRIVALS", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_ARRIVALS}),
-    (2, "DEPARTURES", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_DEPARTURES}),
-    (8, "THE DOCK", drums("court", "carrier_apache", 22)),
-    (9, "SUB-POENA SERVED", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_SERVED}),
-    (10, "COURT OF APPEAL", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_APPEAL}),
-    (16, "SMALL PRINT", drums("print", "carrier_sweat", 33)),
-    (17, "SUBLIMINAL MESSAGE", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_MESSAGE}),
-    (18, "COMING DOWN", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_COMING_DOWN}),
+    (0, "WAITING ROOM", drums("arrivals", "carrier_amen")),
+    (1, "ARRIVALS", {**drums("arrivals", "carrier_amen"), "F-HOLE": BASS_ARRIVALS}),
+    (2, "DEPARTURES", {**drums("arrivals", "carrier_amen"), "F-HOLE": BASS_DEPARTURES}),
+    (8, "THE DOCK", drums("court", "carrier_apache")),
+    (9, "SUB-POENA SERVED", {**drums("court", "carrier_apache"), "SUB-POENA": BASS_SERVED}),
+    (10, "COURT OF APPEAL", {**drums("court", "carrier_apache"), "SUB-POENA": BASS_APPEAL}),
+    (16, "SMALL PRINT", drums("print", "carrier_sweat")),
+    (17, "SUBLIMINAL MESSAGE", {**drums("print", "carrier_sweat"), "SUB-LIMINAL": BASS_MESSAGE}),
+    (18, "COMING DOWN", {**drums("print", "carrier_sweat"), "SUB-LIMINAL": BASS_COMING_DOWN}),
 ]
 CARRIERS = {
     "carrier_amen": with_chance([(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)]),
-    "carrier_apache": with_chance(lane(TOP, CARRIER_APACHE, cap=0.22, soften_off8=10), off8=0.8),
+    "carrier_apache": with_chance(lane(TOP, CARRIER_APACHE, cap=0.22, soften_off8=10), off8=0.9),
     "carrier_sweat": with_chance(lane(SWEAT, CARRIER_SWEAT, cap=0.22, soften_off8=18,
                                       accent_slots=(3, 7, 11, 15), accent=16)),
 }
