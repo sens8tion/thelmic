@@ -2,7 +2,7 @@
 
 Structural analysis only. No audio was sampled, extracted or copied; everything below is a
 measurement. All of it is reproducible with `scripts/reaper_bass.py`
-(`grid | sections | f0 | notes | spec | kick | report | bell | recipe | timbre | riff | bars`).
+(`grid | sections | f0 | notes | spec | kick | report | bell | recipe | timbre | riff | bars | shortcal | short`).
 
 **Grid**: 165.97 BPM (from `grid.npz`, least-squares over 3485 beats), beat 361.5 ms,
 bar 1.446 s, 871 bars. Sections are my own checkerboard-novelty split (25 sections, 22–63 bars
@@ -745,6 +745,319 @@ One row per bar of `grid.npz` (870 bars). Numbers derived from the analysis only
 
 ---
 
+## 13. Short-note placement
+
+Question: where do SHORT bass notes sit in the bar, in the loop and against the break? The user's
+two rows are the test cases:
+
+* **COURT OF APPEAL** — eight hits in every bar, on each beat and its "a", 0.2–0.4 beats long.
+  Doesn't feel like jungle.
+* **SUBLIMINAL MESSAGE** — the root struck on 1 and on the "&" of 2, 1.25 beats each, with slides
+  into the changes. Does.
+
+(`reaper_bass.py shortcal | shortcalhp | short`)
+
+### 13.0 Method and how far to trust it
+
+The plateau notes of §2 start late: the pitch drop of §9 keeps the tracker "gliding" for up to
+~100 ms. The 160 ms tracker also cannot see the short gaps between stabs. So this section builds
+**note events** directly:
+
+1. **Attacks.** A ≥ 9 dB dip-to-peak rise in the 25–150 Hz envelope (2.5 ms resolution),
+   confirmed as bass by a steady pitch measured period by period from 45 ms after the attack up
+   to the note's own gate-close. A note starting on a kick is accepted only if its pitch holds
+   120–220 ms later. Kicks are rejected because they decay steadily (slope < −0.5 dB per 10 ms).
+   An HF click cannot tell them apart: the break has a 2–4 kHz transient on almost every 16th.
+2. **Gapless retriggers.** In a 25–420 Hz band the pitch snaps ≥ 5 st up and falls back, with no
+   level jump.
+3. **Slid notes.** A pitch change between plateaus with no re-attack, timed on the period-by-period
+   pitch.
+
+A note ends at the next onset or at a 12 dB gate-close, whichever comes first. Durations are in
+beats of the local bar.
+
+**Bar grid.** The rhythm agent's drift-tracked bars (`rhythm_bars.npz`, 852 bars) supply its kick
+grid. Snares on 2 and 4 cannot distinguish a half-bar shift, so in each rhythm section the
+downbeat is put on the kick-heavier of slots 0 and 8. That rotates four sections by half a bar,
+including the whole two-step stretch (kick occupancy 0.52 / **0.96** before rotation). `grid.npz`
+downbeats agree with these bars in 64% of cases and differ by one beat in 26%. Position *within
+the beat* (beat / e / & / a) does not depend on that; *which* beat does, so read beat-number
+claims with that in mind.
+
+**Calibration.** The same code was run on a formula-generated synthetic bass (sine with the §9
+pitch drop) over a formula-generated break: kick sweeping 180 → 55 Hz with a click, noise snare
+on 2 and 4, a hat on every 16th. The track has 700 known notes in 160 bars, drawn from
+COURT-style bars, SUBLIMINAL-style bars, separated 8th stabs, gapless 16th retriggers, held
+notes, glides, pickups and random bars.
+
+| | value |
+|---|---|
+| recall, all notes | **48%** (attack after a gap 56%, gapless retrigger 34%, legato glide 23%) |
+| recall by length | short 40%, medium 52%, long 77% |
+| recall by figure | held 94%, pickup 88%, 1 + 2& longs 80%, **separated 8th stabs 72%**, random 47%, **COURT 27%**, 16th retrigger runs 21% |
+| precision | **73%** — false events spread out: 12% on a kick, 19% on a snare slot |
+| onset timing (attacks) | median +1.2 ms, p90 +14 ms; **16th-slot accuracy 100%** of detected notes |
+| short notes on a kick vs off | recall 29% vs 43% (on-kick shorts under-counted by ×0.67) |
+| length classes (rows true, cols read) | short → 85% S / 10% M / 5% L; medium → 21 / 64 / 15; long → 10 / 21 / 68 |
+| length floor | true 0.15–0.2 beat notes read 0.19 beats; nothing under ~0.10 beats is confirmed |
+
+A high-passed synthetic snare (150 Hz) gives the same numbers (recall 48%, precision 75%), so low
+end from the break isn't what limits it. **The blind spot is notes that run straight into the next
+note** — a COURT bar's "a" notes do exactly that. Everything below counts *detected* notes; where
+that bias matters, the calibration is quoted next to the number.
+
+### 13.1 Length classes
+
+**2801 note events** on the grid: **short (< 0.5 beat) 1047 (37%)**, medium 943 (34%), long 811 (29%).
+
+* All notes, in beats: p5 0.20, p25 0.41, **median 0.65**, p75 1.03, p90 1.53.
+* **Short notes:** p5 0.15, p25 0.25, **median 0.35**, p75 0.44 beats. By 0.05-beat bins from 0.10:
+  68, 72, 112, 154, 123, 139, 174, 205. Short notes are mostly **a 16th to an 8th long**, rising
+  toward the 8th; only 13% are under 0.2 beats.
+* **Floor:** nothing below 0.10 beats is confirmed. That is the detector (it needs ~45 ms of
+  steady pitch after the drop), not necessarily the music. Synthetic 0.15-beat notes are read
+  correctly, so notes of 0.15 beats and up are real.
+* What ends a short note: the next onset **61%**, its own release 39%. Most short notes are cut by
+  the next note, not gated into silence.
+* Timing: onsets sit a median **+10.8 ms** behind the grid (IQR −4.8 to +21 ms), slightly laid back.
+
+### 13.2 Placement in the bar
+
+Onset share per 16th slot, % of each class (uniform = 6.25%):
+
+| slot | 1 | 1e | 1& | 1a | 2 | 2e | 2& | 2a | 3 | 3e | 3& | 3a | 4 | 4e | 4& | 4a |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **short** | 9.8 | 4.1 | **10.5** | 3.2 | 7.3 | 3.4 | 7.2 | 5.3 | 6.7 | 4.4 | **9.5** | 5.9 | **9.8** | 3.3 | 6.2 | 3.4 |
+| medium | 10.7 | 3.4 | 4.5 | 4.1 | 11.2 | 1.9 | 7.2 | 5.1 | 8.2 | 4.6 | 8.9 | 3.5 | 10.2 | 6.8 | 7.0 | 2.8 |
+| long | 12.8 | 4.1 | 9.2 | 2.0 | 11.2 | 2.0 | 10.2 | 5.1 | 9.6 | 3.0 | 5.4 | 2.2 | **13.1** | 2.5 | 5.2 | 2.5 |
+| short ÷ long | 0.8 | 1.0 | 1.1 | 1.6 | 0.7 | 1.7 | 0.7 | 1.0 | 0.7 | 1.5 | **1.7** | **2.6** | 0.8 | 1.3 | 1.2 | 1.4 |
+
+| position in the beat | beat | & | e | a |
+|---|---|---|---|---|
+| short | 34% | **33%** | 15% | 18% |
+| medium | 40% | 28% | 17% | 15% |
+| long | **47%** | 30% | 11% | 12% |
+| (uniform) | 25% | 25% | 25% | 25% |
+
+* **Short notes live on the 8th grid:** 67% on beats and "&"s. The "&" carries as many shorts as the
+  beat (33% vs 34%), where long notes favour the beat (47%).
+* **Top short slots:** 1& 10.5%, 4 9.8%, 1 9.8%, 3& 9.5%, 2 7.3%.
+* **e and a are the minority:** 15% and 18%, below uniform. Relative to long notes, shorts take
+  the off-8th slots more — **3a ×2.6**, 3& ×1.7, 2e ×1.7, 1a ×1.6 — and those are pushes into the
+  next beat, mostly beat 4 (§13.4).
+
+### 13.3 Placement in the loop
+
+Cycles anchored on the first bar of each riff run (§11); notes from runs whose period divides the cycle.
+
+| cycle | bar 1 | bar 2 | bar 3 | bar 4 |
+|---|---|---|---|---|
+| 2-bar, short (847 notes) | 56% | 44% | | |
+| 2-bar, long (600) | 54% | 46% | | |
+| 4-bar, short | **29%** | 25% | 27% | **19%** |
+| 4-bar, long | 30% | 28% | 24% | 18% |
+
+* Share of a bar's shorts in its beat 4 (slots 12–15): 5–7% of the cycle per bar, about a quarter of
+  that bar's shorts — **no bunching at the end of the bar**.
+* Top short positions in the 4-bar cycle: bar 1 1& (3.9%), bar 2 beat 4 (3.8%), bar 1 beat 1
+  (3.3%), bar 1 3& (3.3%). Top long positions: bar 1 beat 1 (**7.7%**), bar 3 beat 4 (5.0%).
+* **The phrase thins toward its end rather than piling pickups there:** the 4th bar of a 4-bar
+  cycle has the fewest shorts (19%) *and* the fewest longs (18%). The riff states itself up front
+  and leaves room before it repeats.
+
+### 13.4 Context: what comes before and after a short note
+
+| time to the next onset | a 16th | an 8th | 3/16 | a beat | 5–8 16ths | > 2 beats |
+|---|---|---|---|---|---|---|
+| after a **short** note | **32%** | **50%** | 2% | 4% | 7% | 4% |
+| after a long note | 0% | 0% | 0% | 22% | 53% | 25% |
+
+* **A short note is almost never alone:** **89%** have another onset within a beat, **82%** within
+  an 8th. The next note is short **42%**, medium 33%, long **25%**.
+* **Pickups** (short, then a long note within a beat): **23%** of shorts. The long lands on beat 2
+  (15%), beat 3 (13%), 1& (11%), beat 4 (11%) — not especially on the downbeat.
+* **Repeated stabs** (short, then a same-pitch short within a beat): **14%** of shorts.
+* **Intervals.** Out of a short note: same pitch **35%**, step of 1–2 st **33%**, 3–4 st 6%,
+  4th/5th 10%, bigger 17%; up 32% / down 33%. Into a short note: 31% / 33% / 7% / 13% / 16%. Out of
+  a *long* note, leaps of 3 st or more are **40%**. **Short notes repeat or step; the leaps happen
+  off long notes.**
+* 92% of short-note onsets are attacked (1% slid, 7% gapless retriggers).
+
+### 13.5 The common figures
+
+**One-bar figures are extremely varied:** 758 bars with onsets hold **615 distinct** labelled
+figures, and the top 15 onset masks cover only 15% of bars. Top labelled figures
+(S = short onset, M = medium, L = long, bars of 16):
+
+| # | figure | bars |
+|---|---|---|
+| 1 | `L...│....│....│....` — one held note on 1 | 13 (1.7%) |
+| 2 | `....│....│..L.│....` — one held note on 3& | 8 (1.1%) |
+| 3 | `..S.│S...│S.S.│....` — 1&, 2, 3, 3& shorts | 8 (1.1%) |
+| 4 | `S.S.│M..S│L...│....` | 6 (0.8%) |
+| 5 | `S.S.│L...│L...│....` — 1, 1& shorts into held 2 and 3 | 6 (0.8%) |
+| 6 | `....│....│....│..L.` | 5 (0.7%) |
+| 7 | `....│....│L...│....` | 5 (0.7%) |
+| 8 | `....│....│.L..│....` | 5 (0.7%) |
+| 9 | `..S.│L...│....│....` — short on 1& into held 2 | 5 (0.7%) |
+| 10 | `....│M...│..M.│..S.` | 5 (0.7%) |
+| 11 | `..S.│....│....│....` | 4 (0.5%) |
+| 12 | `....│L...│..L.│....` | 4 (0.5%) |
+| 13 | `L...│..S.│L...│M...` | 4 (0.5%) |
+| 14 | `L...│....│....│L...` | 4 (0.5%) |
+| 15 | `S.S.│L...│....│....` | 4 (0.5%) |
+
+**Most common onset pairs in a bar:** 1 + 4 18%, 1 + 2 18%, **1 + 2& 16%**, 2& + 4 16%, 2 + 3& 14%,
+1& + 2 13%, 2 + 4 13%, 1 + 1& 13%.
+
+**Short-note figures** (a short note and what follows within a beat; 933 cases):
+
+| two notes | share | | three notes | share |
+|---|---|---|---|---|
+| **S on 1 → S on 1&** | **5.3%** | | **S 1, S 1&, M 2** | **2.7%** |
+| S on 3 → S on 3& | 3.2% | | **S 1, S 1&, L 2** | **2.5%** |
+| S on 1& → M on 2 | 3.1% | | S 1&, S 2, S 3 | 1.8% |
+| S on 1& → L on 2 | 2.9% | | S 2, S 3, S 3& | 1.6% |
+| S on 1& → S on 2 | 2.7% | | S 3&, S 4, S 4& | 1.5% |
+| S on 3& → S on 4 | 2.6% | | S 4&, S 1, S 1& | 1.2% |
+| S on 4 → M on 4& | 2.4% | | S 3, S 3&, S 4 | 1.0% |
+| S on 4 → S on 4& | 2.4% | | S 1&, M 2, S 2a | 1.0% |
+| S on 4 → M on 4e | 2.0% | | | |
+| S on 4& → M on 1 | 1.8% | | | |
+| **S on 3a → S on 4** | 1.7% | | | |
+| S on 2a → L on 3 | 1.6% | | | |
+| S on 2& → L on 3 | 1.6% | | | |
+| S on 4& → S on 1 | 1.6% | | | |
+| S on 3a → M on 4 | 1.5% | | | |
+
+**The signature figure is "da-da-DUM" on the 8th grid:** short on a beat, short on its "&", then a
+held note on the next beat (S 1, S 1&, M/L 2). The pushes into beat 4 come from 3& and 3a.
+
+### 13.6 Density — how rare is "8ths all over it"?
+
+| per bar with bass (758 bars) | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8+ |
+|---|---|---|---|---|---|---|---|---|---|
+| short notes | **32%** | 30% | 19% | 11% | 6% | 2% | 0.9% (6+) | | |
+| onsets (any length) | — | 11% | 15% | 23% | 21% | 15% | 10% | 5% | **1.6%** |
+
+* Detected: mean **1.38 short notes a bar**, median **4 onsets a bar**. Bars with ≥ 4 short notes:
+  **8.2%**. Bars with ≥ 8 onsets: **1.6%**.
+* Short-note recall is about 40–56% with 73% precision, so the true counts are perhaps
+  **1.4–2× these**: roughly 2–3 short notes a bar. The *shape* (a third of bars with none, 4+ in
+  under a tenth) is the measurement.
+* **8th-spaced runs:** 71 runs of ≥ 4 consecutive 8th-spaced onsets (11.9% of onsets), **one** run
+  of ≥ 8 in the whole set, longest 13. A bar of separated 8th stabs reads as an in-bar run of ≥ 4 in
+  73% of cases on the synthetic track. In the reference, **7.5%** of bars do: about **one bar in
+  ten** carries half a bar of 8th stabs, and a full bar of them is nearly absent.
+* **16th-spaced runs:** 12 runs of ≥ 4, none of ≥ 8, longest 5.
+* **The COURT OF APPEAL template** (onsets on all eight beat + "a" slots): **0 bars** with all 8,
+  **0.3%** with ≥ 6, 0.4% with ≥ 4 of them short. Template slots struck per bar: 0: 10%, 1: 27%,
+  2: 30%, 3: 21%, 4: 9%, 5: 2%, 6: 0%.
+
+### 13.7 Against the break
+
+Kicks from `rhythm_bars.npz`; snare slots = beats 2 and 4. The kick null shuffles kick patterns
+between bars of the same section and keeps each note's slot (500 draws).
+
+| stretch | notes | on a kick (null, p) | kick ± 1 slot | on a snare slot (uniform 12.5%) | kick or snare | in the gaps |
+|---|---|---|---|---|---|---|
+| break-kick sections, **short** | 598 | **36%** (23%, < 0.001) | 17% | 18% | 46% | 54% |
+| break-kick sections, long | 464 | **40%** (28%, < 0.001) | 21% | 25% | 55% | 45% |
+| **two-step 7:23–9:25, short** | 58 | 19% (18%, 0.41) | **55%** | 10% | 29% | 71% |
+| two-step 7:23–9:25, long | 116 | **6%** (12%, 0.996) | 15% | **32%** | 37% | 63% |
+| sparse / no-kick sections, short | 391 | 7% (8%, 0.91) | 12% | 17% | 23% | 77% |
+| sparse / no-kick sections, long | 231 | 9% (9%, 0.70) | 10% | 19% | 27% | 73% |
+
+* **Under a break kick, short bass notes double the kick:** 36% land on one against 23% by chance.
+  Correcting for the ×0.67 detection loss on kicks puts the true share near **45%**.
+* **Under the programmed two-step**, the kick sits on 1 (0.94), 2& (0.73) and 3 (0.48):
+  * **Short notes sit a 16th after the kicks:** 1e **24%** and 2a **17%**, versus 19% on the kick
+    itself, which is chance.
+  * **Long notes avoid the kick** (6%, against a 12% chance rate). They start on **1&** (33%) and
+    **beat 4 = the snare** (30%).
+
+  The bass steps out of a programmed kick's way instead of ducking under it (§6: no sidechain).
+* Without a kick, shorts go into the gaps (77%), with a slight lean to snare slots (17%).
+
+### 13.8 Verdicts
+
+**COURT OF APPEAL (8 short hits a bar, every beat and its "a") — essentially absent.**
+* **No full-template bars:** zero bars hit all 8 slots, 0.3% hit ≥ 6, and bars with 8+ onsets of
+  any kind are 1.6%.
+* **Wrong subdivision:** the reference's short notes favour the "&" (33%) over the "a" (18%). Its
+  8th runs sit on beat + "&", not beat + "a".
+* **Too dense:** a third of bars have no short note at all.
+
+  Caveat: the detector reads a real COURT bar as only ~2 onsets, mostly on beats, because the "a"
+  notes run into the beat. So the template count alone cannot rule it out. The absence of
+  dense bars and the "&" preference can: a bar of separated 8th stabs reads as ≥ 6 onsets 73% of
+  the time, and only 16% of reference bars do.
+
+  What makes it "not jungle" is *both* the density (every beat struck, every bar) and the
+  subdivision (the "a" pickup on every beat).
+
+**SUBLIMINAL MESSAGE (1 and 2&, held) — a common skeleton, but the reference decorates it.**
+* 1 + 2& is the third most common onset pair (**16%** of bars). **15.6%** of bass bars strike both;
+  **8.2%** hold both for ≥ 0.5 beat.
+* **Bare, it's rare:** only **0.3%** of bars have exactly those two onsets, and 1.8% have at most one
+  more. The detector finds this figure 80% of the time, so that rarity is real.
+* The reference keeps the 1 and 2& anchors and adds **2–3 short notes around them**: an 8th pickup
+  into 2 (S 1&, then 2), or a push from 3& / 3a into 4.
+
+### 13.9 Placement recipe for short notes
+
+1. **How many:** about **1.5–3 short notes a bar** (1.4 detected), and **none in about a third of
+   bars**. ≥ 4 shorts in under 1 bar in 10; ≥ 8 onsets of any kind in 1 bar in 60. Never all 8.
+2. **Where:** on the **8th grid**. Beats and "&"s take 67% of short notes, and the "&" matters as
+   much as the beat. Best slots: **1&, 1, 4, 3&, 2**. Spend e/a slots (33%) on pushes: **3a, 3&,
+   2e, 1a → the next beat**.
+3. **In pairs:** half of short notes are followed by another onset an **8th** later, a third a
+   **16th** later. Write "da-da-DUM" — **S on 1, S on 1&, held note on 2** — or **S 3&/3a → 4**.
+   Don't leave a short note hanging: 89% lead into something within a beat.
+4. **What they lead into:** another short (42%), a medium (33%) or a held note (25%). Aim pickups at
+   **2, 3, 1& or 4** rather than always the downbeat.
+5. **Pitch:** **repeat or step** out of a short note (68%: same pitch 35%, 1–2 st 33%). Save
+   4ths, 5ths and octaves for leaving long notes.
+6. **In the phrase:** put the most short notes in **bar 1** of a 4-bar riff (29%) and the fewest in
+   **bar 4** (19%). Thin the end of the phrase instead of stuffing pickups into it; no special
+   bunching in beat 4.
+7. **Against the drums:**
+   * *Break kick:* **double the break's kicks** with short notes (36% detected, ~45% corrected, vs
+     23% chance).
+   * *Programmed two-step (kick on 1, 2&, 3):* put shorts **a 16th after the kick** (1e, 2a) and
+     start held notes on **1&** and the **beat-4 snare**; keep off the kick.
+   * *No kick:* play in the gaps.
+8. **Avoid:**
+   * striking every beat plus its "a" (COURT: ≥ 6 of those 8 slots in 0.3% of bars)
+   * a full bar of 8th stabs (one ≥ 8-note run in 758 bars; ≥ 4-note 8th runs in only 7.5% of bars)
+   * 16th runs (12 runs of ≥ 4, none longer than 5)
+   * short notes shorter than ~0.15 beats
+   * the same one-bar figure every bar (615 distinct figures in 758 bars): keep the 1 / 2& anchors,
+     re-deal the shorts around them
+
+### 13.10 Sources
+
+* **Attack Magazine, "Creating 808-Style Basslines For Jungle, Trap And Footwork"** — *fetched*. It
+  is a sound-design walkthrough (layering and saturating an 808 bass, programming the bassline an
+  octave above a separate boom). It has **no** note-placement or rhythm detail, so it doesn't
+  inform this section.
+  <https://www.attackmagazine.com/technique/tutorials/creating-808-style-basslines-for-jungle-trap-and-footwork/>
+* **Transmission Samples, "Bass-lines in drum and bass MIDI arrangements"** — *fetched*. It frames
+  rhythm as what makes a DnB bassline groove (quarter, 8th, dotted and syncopated patterns,
+  off-beat movement). The page gives no slot-level placement; that sits in its video.
+  <https://www.transmissionsamples.com/tutorials/drum-and-bass-production/dnb-bass-tutorial>
+* **EDMProd, "How to Make Jungle Music"** — *fetched*. Its one concrete placement tip is to nudge
+  the drums so a kick or snare lands on most bass notes. Measured here: **roughly true under a break
+  kick** — 46% of detected shorts and 55% of longs sit on a kick or snare slot, and the kick part is
+  well above its shuffled-kick chance level (36% vs 23%, 40% vs 28%). **Not true** under the
+  two-step (29–37%) or in kick-less stretches (23–27%).
+  <https://www.edmprod.com/how-to-make-jungle-music/>
+
+Two forum threads (Dogs On Acid "Writing 90s jungle basslines", DnB Forum "jungle basslines")
+returned HTTP 403 and were not used.
+
+---
+
 # What this means for building a jungle track
 
 Numbers to build against. Where the reference contradicts the current plan I say so.
@@ -835,3 +1148,14 @@ Numbers to build against. Where the reference contradicts the current plan I say
     When a run ends, bring back the *same* riff after a one-bar fill or dropout about a third of
     the time (36%). Otherwise write a new riff (39%) or a partial rewrite (21%). Transpose rarely
     (3%).
+
+16. **Place short notes on the 8th grid, in pairs, and sparingly (§13).** Aim for about 1.5–3 short
+    notes a bar (none in a third of bars), 67% of them on beats and "&"s, with the "&" as important
+    as the beat. Best slots: 1&, 1, 4, 3&, 2. Write "da-da-DUM" — short on a beat, short on its
+    "&", held note on the next beat — and push into beat 4 from 3& / 3a. After a short note,
+    repeat or step (68%); leap only off long notes.
+    * **Break kick:** double the kick (36% of shorts on it vs 23% chance).
+    * **Programmed two-step:** play a 16th after the kick and start held notes on 1& and the
+      beat-4 snare.
+    * **Never** strike every beat plus its "a" (≥ 6 of those 8 slots in 0.3% of bars) or fill a
+      bar with 8th stabs (one ≥ 8-note run in 758 bars).

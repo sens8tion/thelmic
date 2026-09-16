@@ -1,28 +1,34 @@
-"""JUNGLE ROWS - playable rows built on the adopted jungle rules (tracks/2026-09-16_reaper/archetypes.md).
+"""JUNGLE ROWS - playable rows on the jungle scene rules (tracks/2026-09-16_jungle_scene_rules.md).
 
-Three sub-sections, each a pre-drop row and two drop rows. Inside a sub-section the drums and the 16ths
-hold while the riff changes (the riff is the fastest clock); between sub-sections the chop, the 16th
-carrier and the sub's signature all turn over together.
+Three sections, each a pre-drop row and two drop rows. A section holds an identity - the spine's voice,
+its signature hits, its main break, its 16th carrier, its sub - and every hit inside it has a CHANCE
+(Live's note probability), so each pass deals a fresh bar from the section's distribution rather than
+repeating a loop. Between sections everything turns over together.
 
-  rows (Live)  sub-section  chop                        16ths (carrier)                 sub
-  1-3          arrivals     Amen chop A                 THROW-UP: Amen hats             F-HOLE: clean sine, +30 st drop
-  4-6          court        Amen chop B, busier ghosts  TOPSOIL: Apache hats + hands    SUB-POENA: shaped, sharper drop
-  7-9          small print  Amen chop C, no break kick  SWEAT-SHOP: Cold Sweat, "a"s    SUB-LIMINAL: octave-doubled, glides
-                                                        + BOOT-LEG two-step in drops
+  rows (Live)  section   spine (1, 2, 4, "and" of 3)   main break           16th carrier          sub
+  1-3          arrivals  SPINE-TINGLER (Bonzo Kit)     AMEN-DMENT (Amen)    THROW-UP: Amen hats   F-HOLE
+  4-6          court     SPINAL-TAP (Vintage Madman)   COLD-CUTS (Cold Sweat) TOPSOIL: Apache     SUB-POENA
+  7-9          print     SPINELESS (909, two-step)     CHOPPER (Apache)     SWEAT-SHOP: Cold Sweat SUB-LIMINAL
 
-Rules followed: 170 BPM; slices placed exactly on 16ths with the drummer's feel inside each slice; bars
-A-B-C-D inside a returning 4-bar group; kick on 1 and snares on 2 and 4 (except the two-step section,
-where the programmed kick replaces the break's); no sub before a drop; no sidechain. The sub is in F# minor
-on the fundamental F#0: struck at the front of the bar, mostly repeats and steps, about one change a bar
-(half that under the two-step), and phrases that drop to a low "dum" on F#0 and leave a gap for the break.
+- Spine hits play at 100% (the "and" of 3 at the section's chance; the two-step always).
+- The main break fills every other 16th at the chance a contrasting reference section shows there: its
+  favoured positions are the signature hits. Slices are dealt per bar (A-B-C-D in the 4-bar group).
+- Variant pads come in at low chance: pitched snares and kick, a 32nd stutter fill on bar 4, reversed and
+  stretched hits (scripts/jungle_kits.py builds them).
+- Carriers play the 8ths always and the "e"s and "a"s at 70-80%.
+- The sub is in F# minor on the fundamental F#0: struck at the front of the bar, mostly repeats and steps,
+  about one change a bar (half under the two-step), phrases dropping to a low "dum" and leaving a gap.
+- Only clips whose notes differ are written; playback is never stopped for a clip write.
 
     python scripts/jungle_rows.py --dry-run
-    python scripts/jungle_rows.py
+    python scripts/jungle_rows.py [--rows 4,5] [--lanes COLD-CUTS] [--check-voices]
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import random
 import sys
 import time
 
@@ -132,12 +138,6 @@ def slide(notes, overlap=0.1):
     return out
 
 
-def eight(pitch, bar, vel=(116, 100)):
-    """Eight hits in a bar: every beat and its "a"."""
-    return [(pitch, bar * 4.0 + beat + o, 0.4 if o == 0 else 0.2, vel[0] if o == 0 else vel[1])
-            for beat in range(4) for o in (0.0, 0.75)]
-
-
 # ARRIVALS (F-HOLE) - "da da da daa, da da da da, dum": two 2-bar phrases. The first steps down and carries
 # on; the second drops to the fundamental on beat 3 of bar 4 and leaves the rest of the bar to the break.
 BASS_ARRIVALS = (hits(CS1, (0.0, 0.5, 1.0), 0.4, 114) + hits(CS1, (1.5,), 1.25, 110)
@@ -156,10 +156,29 @@ BASS_SERVED = (hits(E1, (0.0, 0.25), 0.22, 118) + hits(E1, (1.5,), 0.5, 108)
                + hits(D1, (4.0, 4.25), 0.22, 116) + hits(CS1, (5.5, 6.5), 0.5, 108)
                + hits(E1, (8.0, 8.25), 0.22, 118) + hits(B0, (9.5, 10.5), 0.5, 108)
                + hits(B0, (12.0, 12.25), 0.22, 116) + hits(FS0, (13.0,), 0.75, 122))
-# COURT OF APPEAL (SUB-POENA) - eight hits a bar, stepping down C# B A, then G# on the 1 and its "a" and the
-# drop to the fundamental on beat 2, leaving the back of bar 4 open.
-BASS_APPEAL = (eight(CS1, 0) + eight(B0, 1) + eight(A0, 2)
-               + [(GS0, 12.0, 0.4, 116), (GS0, 12.75, 0.2, 100)] + hits(FS0, (13.0,), 1.0, 122))
+# COURT OF APPEAL (SUB-POENA) - the reference's short-note recipe (bass.md section 13): 2-3 short notes a bar on
+# the 8th grid, in pairs - short on a beat, short on its "and", held on the next beat - and a push from the
+# "and" of 3 into a held beat 4. Repeat or step after a short note; move only off held notes. Most short
+# notes in bar 1, fewest in bar 4, which drops to the fundamental on beat 2 and leaves the rest open.
+SHORT, HELD = 0.3, 1.25
+
+
+def pair_bar(bar, pitch, push_to=None, lead=True):
+    """Short on 1 and its "and" into a held 2 (when `lead`), then a short on the "and" of 3 pushing into a
+    held 4 on `push_to` (the same note, or a step)."""
+    at = bar * 4.0
+    notes = []
+    if lead:
+        notes += hits(pitch, (at, at + 0.5), SHORT, 110) + hits(pitch, (at + 1.0,), HELD, 116)
+    notes += hits(pitch, (at + 2.5,), SHORT, 108) + hits(push_to or pitch, (at + 3.0,), 0.9, 114)
+    return notes
+
+
+BASS_APPEAL = (pair_bar(0, CS1, push_to=B0)                                   # bar 1: 3 short
+               + pair_bar(1, B0)                                              # bar 2: 3 short
+               + hits(A0, (8.0,), HELD, 116) + hits(A0, (9.5, 10.5), SHORT, 107)   # bar 3: held, 2 short,
+               + hits(A0, (11.0,), 0.9, 114)                                       # a held 4
+               + hits(GS0, (12.0, 12.5), SHORT, 110) + hits(FS0, (13.0,), 1.0, 122))   # bar 4: 2 short, dum
 # SUBLIMINAL MESSAGE (SUB-LIMINAL, over the two-step) - near-still: the root on 1 and the "and" of 2, a slide
 # up to A and back in bar 4, a slide up a fifth in bars 6-7 and back down to the fundamental in bar 8, then a gap.
 BASS_MESSAGE = (slide([n for b in (0, 1, 2, 4, 5) for n in hits(FS0, (b * 4.0, b * 4.0 + 1.5), 1.25, 112)]
@@ -184,25 +203,128 @@ SUB_VOICES = {
 }
 SHAPER_TYPE_RAW = 1         # the first non-off shaper curve; its name is read back and reported
 
-# ---------------------------------------------------------------- rows: (scene, name, {track: (notes)})
+# ---------------------------------------------------------------- scene drums (tracks/2026-09-16_jungle_scene_rules.md)
+# A scene holds an identity (spine voice, signature hits, main break, 16th carrier); inside it, every hit
+# has a CHANCE (Live's note probability), so each pass deals a fresh bar from the scene's distribution.
+# Notes here are (pitch, start, duration, velocity, chance).
+try:
+    with open(os.path.join(SCRIPTS_DIR, "jungle_kit_map.json")) as _fh:
+        KIT_MAP = json.load(_fh)
+except FileNotFoundError:                   # scripts/jungle_kits.py writes it
+    KIT_MAP = {"spines": {}, "variants": {}}
+
+SPINE_SLOTS = (0, 4, 10, 12)                # kick on 1, snare on 2, kick on the "and" of 3, snare on 4
+SECTIONS = {
+    # section: (spine track, main break track, break slices, 16th carrier track, chance per 16th, "and" of 3 kick)
+    # Chance maps are the mid-band occupancy of a contrasting reference section (rhythm.md section 1):
+    # the positions it favours are that scene's signature hits. Spine slots are played by the spine lane.
+    "arrivals": ("SPINE-TINGLER", "AMEN-DMENT", AMEN, "THROW-UP",
+                 [0.97, 0.09, 0.79, 0.43, 0.97, 0.04, 0.88, 0.88, 0.40, 0.51, 0.97, 0.09, 0.99, 0.40, 0.53, 0.78], 0.96),
+    "court": ("SPINAL-TAP", "COLD-CUTS", SWEAT, "TOPSOIL",
+              [0.76, 0.30, 0.82, 0.46, 0.97, 0.06, 0.81, 0.54, 1.00, 0.07, 0.96, 0.12, 0.93, 0.19, 0.93, 0.13], 0.70),
+    "print": ("SPINELESS", "CHOPPER", TOP, "SWEAT-SHOP",
+              [0.95, 0.07, 0.45, 0.07, 1.00, 0.00, 0.75, 0.93, 0.95, 0.07, 0.95, 0.09, 0.95, 0.82, 0.82, 0.27], 1.0),
+}
+# variant pads, the same layout on every main break (scripts/jungle_kits.py)
+V_SNARE_UP12, V_SNARE_UP7, V_KICK_DOWN, V_STUTTER, V_REV_SNARE, V_REV_LIGHT, V_STRETCH_2, V_STRETCH_15 = range(72, 80)
+
+
+def kind_of(brk, s):
+    parts = brk.parts[s]
+    if any(p == "kick" for p in parts):
+        return "kick"
+    if "snare" in parts:
+        return "snare"
+    if "snare_soft" in parts:
+        return "soft"
+    return "light"                          # hats, ghosts, bongos, congas
+
+
+def spine_lane(section):
+    spine, *_, kick_3and = SECTIONS[section]
+    pads = KIT_MAP["spines"].get(spine, {"kick": 36, "snare": 38})
+    k, sn = pads["kick"], pads["snare"]
+    out = []
+    for b in range(BARS):
+        at = b * 4.0
+        out += [(k, at, 0.45, 122, 1.0), (sn, at + 1.0, 0.6, 118, 1.0),
+                (k, at + 2.5, 0.4, 112, kick_3and), (sn, at + 3.0, 0.6, 118, 1.0)]
+    return out
+
+
+def chop_lane(section, seed, dealt=None):
+    """The scene's chop: every 16th except the spine's gets one slice at that position's chance. The slice
+    dealt changes per bar (A-B-C-D inside the 4-bar group): `dealt` bar maps where given (the approved
+    WAITING ROOM chop), otherwise drawn from the break by kind. Variant pads - pitch, stutter, reverse,
+    stretch - come in at low chance, with the fill on bar 4."""
+    _, _, brk, _, chance, _ = SECTIONS[section]
+    rnd = random.Random(seed)
+    pools = {k: [s for s in range(len(brk.home)) if kind_of(brk, s) == k] for k in ("kick", "snare", "soft", "light")}
+    hits = {}                               # (bar, 16th) -> [pad, velocity, chance, natural length]
+    for b in range(BARS):
+        for slot in range(16):
+            if slot in SPINE_SLOTS or chance[slot] < 0.05:
+                continue
+            if dealt and slot in dealt[b]:
+                s = dealt[b][slot]
+                kind = kind_of(brk, s)
+            else:
+                kinds = ["kick", "soft", "soft", "light"] if slot == 8 else \
+                        ["light", "light", "soft", "kick"] if slot % 2 == 0 else ["light", "light", "light", "soft"]
+                kind = rnd.choice([k for k in kinds if pools[k]])
+                s = rnd.choice(pools[kind])
+            vel = {"kick": 108, "snare": 104, "soft": 96, "light": 88}[kind] - (10 if slot % 2 else 0)
+            hits[(b, slot)] = [36 + s, vel, round(chance[slot], 2), brk.natural(s)]
+    # low-chance variants replace whatever was dealt on their 16th
+    for pad, b, slot, vel, p, natural in [
+            (V_SNARE_UP7, 0, 15, 96, 0.25, 0.25),     # a snare up a fifth as the pickup into bar 2
+            (V_REV_LIGHT, 1, 14, 90, 0.35, 0.25),     # a reversed hat or hand drum
+            (V_KICK_DOWN, 2, 2, 104, 0.30, 0.5),      # the kick pitched down
+            (V_STRETCH_15, 2, 6, 94, 0.30, 0.5),      # a stretched snare
+            (V_REV_SNARE, 3, 14, 100, 0.25, 0.5),     # a reversed snare swelling into the downbeat
+            (V_SNARE_UP12, 3, 15, 100, 0.30, 0.25)]:  # a snare an octave up to end the group
+        hits[(b, slot)] = [pad, vel, p, natural]
+    notes = [(pad, b * 4.0 + slot * 0.25, nat, vel, p) for (b, slot), (pad, vel, p, nat) in hits.items()]
+    notes += [(V_STUTTER, 15.25 + k * 0.125, 0.12, 92 + 4 * k, 0.30) for k in range(3)]   # the fill: a 32nd stutter
+    notes.sort(key=lambda n: n[1])
+    out = []
+    for j, (pad, t, nat, vel, p) in enumerate(notes):
+        nxt = next((n[1] for n in notes[j + 1:] if n[1] > t + 1e-6), LEN)
+        out.append((pad, round(t, 4), round(max(0.05, min(nat, nxt - t) - 0.012), 4), vel, p))
+    return out
+
+
+def with_chance(notes, off8=0.7):
+    """Carrier 16ths: the 8th positions always play; the "e"s and "a"s play at `off8` chance."""
+    return [(p, t, d, v, off8 if round(t * 4) % 2 else 1.0) for p, t, d, v in notes]
+
+
+def drums(section, carrier, seed, dealt=None):
+    spine, chop_track, _, carrier_track, _, _ = SECTIONS[section]
+    return {spine: spine_lane(section), chop_track: chop_lane(section, seed, dealt), carrier_track: carrier}
+
+
+# ---------------------------------------------------------------- rows: (scene, name, {track: notes})
 ROWS = [
-    (0, "WAITING ROOM", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen"}),
-    (1, "ARRIVALS", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": BASS_ARRIVALS}),
-    (2, "DEPARTURES", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": BASS_DEPARTURES}),
-    (3, "THE DOCK", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache"}),
-    (4, "SUB-POENA SERVED", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": BASS_SERVED}),
-    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": BASS_APPEAL}),
-    (6, "SMALL PRINT", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat"}),
-    (7, "SUBLIMINAL MESSAGE", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                               "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": BASS_MESSAGE}),
-    (8, "COMING DOWN", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                        "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": BASS_COMING_DOWN}),
+    (0, "WAITING ROOM", drums("arrivals", "carrier_amen", 11, CHOP_A)),
+    (1, "ARRIVALS", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_ARRIVALS}),
+    (2, "DEPARTURES", {**drums("arrivals", "carrier_amen", 11, CHOP_A), "F-HOLE": BASS_DEPARTURES}),
+    (3, "THE DOCK", drums("court", "carrier_apache", 22)),
+    (4, "SUB-POENA SERVED", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_SERVED}),
+    (5, "COURT OF APPEAL", {**drums("court", "carrier_apache", 22), "SUB-POENA": BASS_APPEAL}),
+    (6, "SMALL PRINT", drums("print", "carrier_sweat", 33)),
+    (7, "SUBLIMINAL MESSAGE", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_MESSAGE}),
+    (8, "COMING DOWN", {**drums("print", "carrier_sweat", 33), "SUB-LIMINAL": BASS_COMING_DOWN}),
 ]
 CARRIERS = {
-    "carrier_amen": [(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)],
-    "carrier_apache": lane(TOP, CARRIER_APACHE, cap=0.22, soften_off8=10),
-    "carrier_sweat": lane(SWEAT, CARRIER_SWEAT, cap=0.22, soften_off8=18, accent_slots=(3, 7, 11, 15), accent=16),
+    "carrier_amen": with_chance([(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)]),
+    "carrier_apache": with_chance(lane(TOP, CARRIER_APACHE, cap=0.22, soften_off8=10), off8=0.8),
+    "carrier_sweat": with_chance(lane(SWEAT, CARRIER_SWEAT, cap=0.22, soften_off8=18,
+                                      accent_slots=(3, 7, 11, 15), accent=16)),
 }
+# clips the previous drum model left on lanes these rows no longer use (the Amen chops B and C, the old
+# two-step kick lane - the spine carries it now)
+STALE = [("AMEN-DMENT", s) for s in range(3, 9)] + [("BOOT-LEG", 7), ("BOOT-LEG", 8)]
 
 
 def lane_value(value):
@@ -326,9 +448,23 @@ def same_clip(ch, t, scene, notes, length):
     except Exception:
         return False
     got = got.get("notes", got) if isinstance(got, dict) else got
-    key = lambda p, s, d, v: (int(p), round(float(s), 3), round(float(d), 3), int(round(float(v))))
-    have = sorted(key(x["pitch"], x["start_time"], x["duration"], x["velocity"]) for x in got)
+    key = lambda p, s, d, v, c=1.0: (int(p), round(float(s), 3), round(float(d), 3), int(round(float(v))), round(float(c), 2))
+    have = sorted(key(x["pitch"], x["start_time"], x["duration"], x["velocity"], x.get("probability", 1.0)) for x in got)
     return have == sorted(key(*n) for n in notes)
+
+
+def write_notes(ch, t, slot, name, notes, length):
+    """Write a clip whose notes may carry a chance (5th field): Live 12 note probability."""
+    from jungle_build import ensure_scenes
+    ensure_scenes(ch, slot + 1)
+    try:
+        ch.create_clip(t, slot, float(length)).result(timeout=8)
+    except Exception as e:
+        print(f"    [warn] create_clip(track {t}, slot {slot}): {e}")
+    ch.set_clip_name(t, slot, name).result(timeout=3)
+    specs = [{"pitch": int(n[0]), "start_time": float(n[1]), "duration": float(n[2]), "velocity": int(n[3]),
+              "probability": float(n[4]) if len(n) > 4 else 1.0} for n in notes]
+    ch.add_notes_to_clip(t, slot, specs, replace=True).result(timeout=10)
 
 
 def build(rows=None, lanes=None, check_voices=False):
@@ -360,11 +496,21 @@ def build(rows=None, lanes=None, check_voices=False):
                     ch.clear_clip(t, scene).result(timeout=5)
                 except Exception:
                     pass
-                write_clip(ch, t, scene, name.lower(), notes, length)
+                write_notes(ch, t, scene, name.lower(), notes, length)
                 written += 1
                 print(f"  row {scene + 1} {name}: wrote {track}")
             ch.set_scene_name(scene, name).result(timeout=3)
-        print(f"  {written} clip(s) written, {skipped} already up to date")
+        cleared = 0
+        for track, scene in STALE:
+            if (rows and scene + 1 not in rows) or (lanes and track not in lanes) or track not in idx:
+                continue
+            try:
+                ch.get_clip_notes(idx[track], scene).result(timeout=5)
+            except Exception:
+                continue                        # already empty
+            ch.clear_clip(idx[track], scene).result(timeout=5)
+            cleared += 1
+        print(f"  {written} clip(s) written, {skipped} already up to date, {cleared} stale clip(s) cleared")
     finally:
         try:
             if metered:
