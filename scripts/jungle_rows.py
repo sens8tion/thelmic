@@ -273,12 +273,17 @@ def meter(ch, track_name, t, slot, secs=2.0):
     return peak
 
 
-def ensure_sub_voices(ch):
+def ensure_sub_voices(ch, check=False):
+    """Create any missing sub voice (a copy of F-HOLE), set it and meter a test note. Voices that already
+    exist are left alone unless `check`: re-applying settings and metering stops playback and is slow."""
     from jungle_space import set_number, set_string, _param
     from jungle_build import write_clip
     scenes = ch.get_scene_count().result(timeout=5)["count"]
     for voice, settings in SUB_VOICES.items():
         idx = names(ch)
+        if voice in idx and not check:
+            continue
+        ch.set_launch_quantization(0).result(timeout=3)
         if voice not in idx:
             src = idx["F-HOLE"]
             ch.duplicate_track(src).result(timeout=60)
@@ -311,30 +316,60 @@ def ensure_sub_voices(ch):
             raise SystemExit(f"{voice} is silent - stopping before writing rows")
 
 
-def build():
+def same_clip(ch, t, scene, notes, length):
+    """True when the slot already holds exactly these notes at this length, so it needn't be rewritten."""
+    try:
+        props = ch.get_clip_props(t, scene).result(timeout=5)
+        if props.get("length") is None or abs(float(props["length"]) - length) > 1e-3:
+            return False
+        got = ch.get_clip_notes(t, scene).result(timeout=10)
+    except Exception:
+        return False
+    got = got.get("notes", got) if isinstance(got, dict) else got
+    key = lambda p, s, d, v: (int(p), round(float(s), 3), round(float(d), 3), int(round(float(v))))
+    have = sorted(key(x["pitch"], x["start_time"], x["duration"], x["velocity"]) for x in got)
+    return have == sorted(key(*n) for n in notes)
+
+
+def build(rows=None, lanes=None, check_voices=False):
+    """Write only what differs: rows limited to `rows` (Live row numbers), tracks limited to `lanes`, and any
+    clip that already holds the same notes is skipped. Playback is never stopped unless voices are metered."""
     from jungle_build import write_clip
     from thelmic.live_channel import LiveChannel
     ch = LiveChannel(lower_priority=False)
     ch.start()
+    metered = False
     try:
-        ch.set_launch_quantization(0).result(timeout=3)
-        ensure_sub_voices(ch)
+        if check_voices or any(v not in names(ch) for v in SUB_VOICES):
+            ensure_sub_voices(ch, check=check_voices)
+            metered = True
         idx = names(ch)
-        for scene, name, lanes in ROWS:
-            for track, value in lanes.items():
+        written = skipped = 0
+        for scene, name, row_lanes in ROWS:
+            if rows and scene + 1 not in rows:
+                continue
+            for track, value in row_lanes.items():
+                if lanes and track not in lanes:
+                    continue
                 notes, length = lane_value(value)
                 t = idx[track]
+                if same_clip(ch, t, scene, notes, length):
+                    skipped += 1
+                    continue
                 try:
                     ch.clear_clip(t, scene).result(timeout=5)
                 except Exception:
                     pass
                 write_clip(ch, t, scene, name.lower(), notes, length)
+                written += 1
+                print(f"  row {scene + 1} {name}: wrote {track}")
             ch.set_scene_name(scene, name).result(timeout=3)
-            print(f"  row {scene + 1}: {name}")
+        print(f"  {written} clip(s) written, {skipped} already up to date")
     finally:
         try:
-            ch.stop_all_clips().result(timeout=3)
-            ch.set_launch_quantization(1).result(timeout=3)
+            if metered:
+                ch.stop_all_clips().result(timeout=3)
+                ch.set_launch_quantization(1).result(timeout=3)
         finally:
             ch.stop()
 
@@ -342,10 +377,16 @@ def build():
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Write the adopted-rules jungle rows into the session.")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--rows", help="comma-separated Live row numbers to write (default: all)")
+    ap.add_argument("--lanes", help="comma-separated track names to write (default: all)")
+    ap.add_argument("--check-voices", action="store_true",
+                    help="re-apply the sub voices' settings and meter them (stops playback)")
     args = ap.parse_args(argv)
     dry_run()
     if not args.dry_run:
-        build()
+        rows = {int(r) for r in args.rows.split(",")} if args.rows else None
+        lanes = set(args.lanes.split(",")) if args.lanes else None
+        build(rows, lanes, args.check_voices)
 
 
 if __name__ == "__main__":
