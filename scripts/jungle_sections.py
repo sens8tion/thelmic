@@ -9,22 +9,23 @@ and 16ths come from clips the user has heard (tracks/2026-09-16_jungle_boards_cl
 blocks of their break, built the way the heard chops were (scripts/jungle_rows.py), with any variant pad written
 in at a fixed place. Every spine keeps the kick on 1 and the snares on 2 and 4 in every bar.
 
-  row  scene                spine                           chop                                   bass
+  row  scene                spine                           chop                                   bass riff (4 bars)
   1    TRAPDOOR             kick 1, snares 2+4, kick &3     Amen A-B-C-D (the WAITING ROOM chop)    the user's descent, as written
-  2    ARRIVALS             snare 4 leads, kick pickup      Amen, busier ghosts (CHOP_B)            repeats: C#1 2 bars, B0 2 bars
+  2    ARRIVALS             snare 4 leads, kick pickup      Amen, busier ghosts (CHOP_B)            C#1 struck x3 bars, falls to F#0
                             on the "a" of 4 in bar 4
-  3    SUB-POENA SERVED     kicks on 3 and &3, as the       Cold Sweat A-B-C-D, ghost turnaround    tracks: C#1 B0 A0 B0
+  3    SUB-POENA SERVED     kicks on 3 and &3, as the       Cold Sweat A-B-C-D, ghost turnaround    C#1 / B0 C#1 / C#1 / B0 F#0
                             Cold Sweat drummer plays
-  4    DEPARTURES           sparse: the &3 kick only in     Cold Sweat B-A-flip, snare up an        tracks: F#0 G#0 A0 B0
-                            bars 2 and 4                    octave to end bar 4                    A0 G#0 G#0 F#0
-  5    SUBLIMINAL MESSAGE   kick on the "a" of 3            Apache, break kicks dropped,            repeats: F#0 6 bars,
-                                                            hand-drum turnaround                   G#0 2 bars
-  6    COMING DOWN          softer, a snare drag at the     Apache with its kicks, reversed snare   tracks: A0 G#0 F#0 G#0
+  4    DEPARTURES           sparse: the &3 kick only in     Cold Sweat B-A-flip, snare up an        B0 / A0 / B0 / A0 F#0, twice
+                            bars 2 and 4                    octave to end bar 4
+  5    SUBLIMINAL MESSAGE   kick on the "a" of 3            Apache, break kicks dropped,            A0 on 1 and 2& x3 bars, falls
+                                                            hand-drum turnaround                   to F#0, twice
+  6    COMING DOWN          softer, a snare drag at the     Apache with its kicks, reversed snare   A0 / G#0 / A0 / F#0
                             end of bar 4                    into bar 3, snare-drag turnaround
 
-Basslines take one of the user's two shapes: REPEATS (one pitch struck in the rhythm the heard line had,
-changing by a step at a 2-bar line) or TRACKS (a 3.5-beat note a bar, each a repeat or a 1-2 semitone step,
-the loop's wrap included). No hops.
+The bass is a rhythmic device (tracks/2026-09-16_reaper/bass.md sections 11-13, and the user's ear): a 4-bar
+riff that repeats exactly, as struck notes on one pitch or long notes a step apart, moving by repeats or 1-2
+semitone steps up top, then falling on bar 4 - the riff's thinnest bar - to its lowest note, and jumping back
+up when it comes round. Nothing walks bar to bar in one direction (that reads as a riser).
 
 Each row's THROW-UP 16ths have their own velocity shape, subtle and the same every bar:
   1 straight   the beat leads, the e and a sit back
@@ -141,34 +142,63 @@ CHOPS = [
 BREAK_LANES = ("AMEN-DMENT", "COLD-CUTS", "CHOPPER")
 VARIANT_FROM = 72
 FS0, GS0, A0, B0, CS1 = 30, 32, 33, 35, 37
-TRACK_LEN, TRACK_VEL = 3.5, 108
-# scene name, break track, bass: ("as is", archive track, key) | ("repeats", archive track, key, pitch per bar)
-#                                | ("tracks", pitch per bar)
+SHORT, HELD = 100, 110
+
+
+def struck(pitch):
+    """A bar of one pitch: short on 1 and 1&, held on 2, short on 3&, held into 4."""
+    return [(pitch, 0.0, 0.4, SHORT), (pitch, 0.5, 0.4, SHORT), (pitch, 1.0, 1.25, HELD),
+            (pitch, 2.5, 0.4, SHORT), (pitch, 3.0, 0.75, HELD)]
+
+
+RIFFS = {
+    "ARRIVALS": [struck(CS1), struck(CS1), struck(CS1),
+                 [(CS1, 0.0, 0.4, SHORT), (CS1, 0.5, 0.4, SHORT), (FS0, 1.0, 1.5, HELD)]],
+    "SUB-POENA SERVED": [[(CS1, 0.0, 3.5, HELD)],
+                         [(B0, 0.0, 1.5, HELD), (CS1, 2.0, 1.5, HELD)],
+                         [(CS1, 0.0, 3.5, HELD)],
+                         [(B0, 0.0, 1.0, HELD), (FS0, 1.0, 1.5, HELD)]],
+    "DEPARTURES": [[(B0, 0.0, 3.5, HELD)], [(A0, 0.0, 3.5, HELD)], [(B0, 0.0, 3.5, HELD)],
+                   [(A0, 0.0, 1.5, HELD), (FS0, 1.5, 1.5, HELD)]],
+    "SUBLIMINAL MESSAGE": [[(A0, 0.0, 1.25, HELD), (A0, 1.5, 2.25, HELD)]] * 3
+                          + [[(FS0, 0.0, 2.0, HELD)]],
+    "COMING DOWN": [[(A0, 0.0, 3.5, HELD)], [(GS0, 0.0, 3.5, HELD)], [(A0, 0.0, 3.5, HELD)],
+                    [(FS0, 0.0, 2.0, HELD)]],
+}
+# scene name, break track, bass: ("as is", archive track, key) | ("riff", clip bars)
 ROWS = [
     ("TRAPDOOR", "AMEN-DMENT", ("as is", "F-HOLE", 21)),
-    ("ARRIVALS", "AMEN-DMENT", ("repeats", "F-HOLE", "arrivals", [CS1, CS1, B0, B0])),
-    ("SUB-POENA SERVED", "COLD-CUTS", ("tracks", [CS1, B0, A0, B0])),
-    ("DEPARTURES", "COLD-CUTS", ("tracks", [FS0, GS0, A0, B0, A0, GS0, GS0, FS0])),
-    ("SUBLIMINAL MESSAGE", "CHOPPER", ("repeats", "SUB-LIMINAL", "subliminal message", [FS0] * 6 + [GS0] * 2)),
-    ("COMING DOWN", "CHOPPER", ("tracks", [A0, GS0, FS0, GS0])),
+    ("ARRIVALS", "AMEN-DMENT", ("riff", 4)),
+    ("SUB-POENA SERVED", "COLD-CUTS", ("riff", 4)),
+    ("DEPARTURES", "COLD-CUTS", ("riff", 8)),
+    ("SUBLIMINAL MESSAGE", "CHOPPER", ("riff", 8)),
+    ("COMING DOWN", "CHOPPER", ("riff", 4)),
 ]
 
 
-def bassline(spec):
-    """(name, notes, length) for a row's bass spec."""
-    kind = spec[0]
-    if kind == "tracks":
-        pitches = spec[1]
-        return "tracks", [(p, 4.0 * b, TRACK_LEN, TRACK_VEL) for b, p in enumerate(pitches)], 4.0 * len(pitches)
+def check_riff(scene, bars):
+    """Up top only repeats and 1-2 semitone steps; bar 4 sounds the least and ends on the riff's lowest note."""
+    notes = [n for b, bar in enumerate(bars) for n in [(p, b * 4.0 + st) for p, st, _, _ in bar]]
+    pitches = [p for p, _ in notes]
+    exit_from = next(i for i, (_, t) in enumerate(notes) if t >= 12.0)
+    for a, b in zip(pitches[:exit_from], pitches[1:exit_from]):
+        assert abs(b - a) <= 2, f"{scene}: a hop of {abs(b - a)} before the exit bar"
+    assert pitches[-1] == min(pitches), f"{scene}: bar 4 doesn't end on the lowest note"
+    sounding = [sum(d for _, _, d, _ in bar) for bar in bars]
+    assert sounding[3] < min(sounding[:3]), f"{scene}: bar 4 isn't the thinnest bar ({sounding})"
+
+
+def bassline(scene, spec):
+    """(shape, notes, length) for a row's bass."""
+    if spec[0] == "riff":
+        bars = RIFFS[scene]
+        check_riff(scene, bars)
+        clip_bars = spec[1]
+        notes = [(p, round((k * 4 + b) * 4.0 + st, 4), d, v)
+                 for k in range(clip_bars // 4) for b, bar in enumerate(bars) for p, st, d, v in bar]
+        return f"riff x{clip_bars // 4}", notes, clip_bars * 4.0
     clip = archived(spec[1], spec[2])
-    length = float(clip["length"])
-    notes = plain(clip)
-    if kind == "repeats":
-        per_bar = spec[3]
-        assert len(per_bar) * 4.0 == length, (spec, length)
-        notes = [(per_bar[int(st // 4)], st, d, v) for p, st, d, v in notes]
-        return "repeats", notes, length
-    return "as written", notes, length
+    return "as written", plain(clip), float(clip["length"])
 
 
 def moves(notes):
@@ -278,7 +308,7 @@ def main():
     try:
         sixteenths = archived(*SIXTEENTHS)
         for row, (scene, brk, bass_spec) in enumerate(ROWS):
-            bass_shape, bass_notes, bass_len = bassline(bass_spec)
+            bass_shape, bass_notes, bass_len = bassline(scene, bass_spec)
             shape_name, shape = SHAPES[row]
             lanes = [("SPINE-TINGLER", *SPINES[row], 16.0), (brk, *CHOPS[row], 16.0),
                      ("THROW-UP", f"16ths {shape_name}", shaped(plain(sixteenths), shape), float(sixteenths["length"])),
