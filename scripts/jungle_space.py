@@ -81,9 +81,7 @@ SETTINGS: list[tuple[str, str, str, float | str]] = [
     ("THROW-UP", "EQ Eight", "1 Frequency A", 500.0),
     ("RASP-UTIN", "EQ Eight", "1 Frequency A", 120.0),
     ("RASP-UTIN", "EQ Eight", "2 Frequency A", 300.0),
-    ("HALO-PERIDOL", "EQ Eight", "1 Frequency A", 300.0),
-    ("LIP-SERVICE", "EQ Eight", "1 Frequency A", 150.0),
-    ("RASP-UTIN", "Utility", "Bass Mono", "On"),
+    ("RASP-UTIN", "Utility", "Bass Mono", "On"),      # the pad and lead cuts are set further down
     # THROW-UP: nothing but echoes, bouncing side to side, above the snare's body
     ("THROW-UP", "Echo", "Channel Mode", "Ping Pong"),
     ("THROW-UP", "Echo", "Feedback", 55.0),
@@ -94,7 +92,8 @@ SETTINGS: list[tuple[str, str, str, float | str]] = [
     ("THROW-UP", "Echo", "Dry Wet", 100.0),
     # lead: a slower ping-pong (dotted quarter) than the bell's dotted eighth; the hall stays behind it
     ("LIP-SERVICE", "Echo", "Channel Mode", "Ping Pong"),
-    ("LIP-SERVICE", "Echo", "L Synced", "1/4"),
+    ("LIP-SERVICE", "Echo", "L Sync Mode", "Synced"),
+    ("LIP-SERVICE", "Echo", "L Synced", "1/8"),      # 176 ms: the reference's second delay is 181 ms
     ("LIP-SERVICE", "Echo", "Feedback", 35.0),
     ("LIP-SERVICE", "Echo", "HP Freq", 300.0),
     ("LIP-SERVICE", "Echo", "LP Freq", 7000.0),
@@ -136,11 +135,12 @@ SETTINGS: list[tuple[str, str, str, float | str]] = [
     ("BOOT-LEG", "EQ Eight", "2 Frequency A", 90.0),
     ("RASP-BERRY", "EQ Eight", "1 Frequency A", 120.0),
     ("RASP-BERRY", "EQ Eight", "2 Frequency A", 300.0),
-    ("BELL-END", "EQ Eight", "1 Frequency A", 350.0),
+    # the bell and pad now play an octave lower (233-784 Hz), so their cuts come down with them
+    ("BELL-END", "EQ Eight", "1 Frequency A", 220.0),
     ("LIP-SERVICE", "EQ Eight", "1 Frequency A", 250.0),
-    ("HALO-PERIDOL", "EQ Eight", "1 Frequency A", 350.0),
-    # the pad gets out of the bell and lead's way with a dip where they live
-    ("HALO-PERIDOL", "EQ Eight", "2 Frequency A", 2000.0),
+    ("HALO-PERIDOL", "EQ Eight", "1 Frequency A", 180.0),
+    # the pad gets out of the lead's way with a dip where the lead's fundamentals sit
+    ("HALO-PERIDOL", "EQ Eight", "2 Frequency A", 800.0),
     ("HALO-PERIDOL", "EQ Eight", "2 Gain A", -4.0),
     # STAB-VEST: nothing under 200 Hz, a short 3/16 ping-pong tail
     ("STAB-VEST", "EQ Eight", "1 Frequency A", 200.0),
@@ -149,6 +149,38 @@ SETTINGS: list[tuple[str, str, str, float | str]] = [
     ("STAB-VEST", "Echo", "HP Freq", 500.0),
     ("STAB-VEST", "Echo", "LP Freq", 8000.0),
     ("STAB-VEST", "Echo", "Dry Wet", 18.0),
+
+    # ---- from the reference (tracks/2026-09-16_reaper/) ----
+    # Delays: it uses 1/8 triplet (~120 ms), 1/8 (~181 ms) and a 45 ms slapback, and NOTHING at 1/4 or
+    # longer. Ours were a dotted 8th (529 ms) and a dotted quarter.
+    ("BELL-END", "Echo", "L Sync Mode", "Triplet"),         # 1/8 triplet = 118 ms at 170
+    ("BELL-END", "Echo", "L Synced", "1/8"),
+    ("STAB-VEST", "Echo", "L Sync", "Off"),                 # slapback: shorter than Echo's 1/16 sync
+    ("STAB-VEST", "Echo", "L Time", 45.0),
+    ("STAB-VEST", "Echo", "R Time", 45.0),
+    ("STAB-VEST", "Echo", "Feedback", 20.0),
+    # Tails are short but constant (T20 median 299 ms), not long
+    ("TOPSOIL", "High Verb", "Decay Time", 900.0),
+    ("SWEAT-SHOP", "High Verb", "Decay Time", 900.0),
+    ("BELL-END", "Reverb", "Decay Time", 900.0),
+    ("LIP-SERVICE", "Keys Bastille", "Decay", 1200.0),
+    # A 10 dB valley at 233 Hz is what separates its bass from its hooks (bass stops at 174 Hz, hooks
+    # start at 233). The sub is clean, but our reeses have harmonics up there: notch them instead.
+    ("RASP-BERRY", "EQ Eight", "3 Frequency A", 233.0),
+    ("RASP-BERRY", "EQ Eight", "3 Gain A", -10.0),
+    ("RASP-BERRY", "EQ Eight", "3 Q A", 3.5),
+    ("RASP-UTIN", "EQ Eight", "3 Frequency A", 233.0),
+    ("RASP-UTIN", "EQ Eight", "3 Gain A", -10.0),
+    ("RASP-UTIN", "EQ Eight", "3 Q A", 3.5),
+    # Its stereo movement is event-driven - bar-locked autocorrelation only 0.13-0.21, so no auto-panner
+    # anywhere. The short ping-pong delays do that job now; these stay in the chain, one click from back.
+    ("TOPSOIL", "Pan Around The Head", "Device On", "Off"),
+    ("SWEAT-SHOP", "Pan Pendulum", "Device On", "Off"),
+    ("HALO-PERIDOL", "Pan Wander Trip", "Device On", "Off"),
+    # gain staging: the pad's rack arrives 7 dB down and the EQ was making up +10 dB after it. Same net
+    # level, but the makeup belongs on the instrument, not on a trim stage.
+    ("HALO-PERIDOL", "Orchid Strings", "Volume", 3.0),
+    ("HALO-PERIDOL", "EQ Eight", "Output", 0.0),
 ]
 
 # Track pan. Kick, sub, breaks and stabs' weight stay centred; the voices that share the top octave

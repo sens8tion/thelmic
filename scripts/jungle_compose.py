@@ -7,7 +7,7 @@ are 1 bar and sit under the groove they belong to. Launch quantization is 1 bar.
    0   TOPSOIL ONLY                   8   Apache tops + hands
    1   PRE-AMBLE                      8   + FM bell, strings pad
    2   DRONE ON                       8   + reese bed, Amen hats (the lead waits for the drop)
-   3   WIND-UP MERCHANT               8   build: Amen snares, no kick/sub; rolls into a gap
+   3   WIND-UP MERCHANT               8   build by SUBTRACTION: full drums, the low end leaves
    4   BOTTOM FEEDER                  8   drop A, the LEAD's row: lead + bell, no pad
    5   BOTTOM FEEDER >> FILL          1   roll + gap
    6   BOTTOM FEEDER II               8   drop A reordered, the PAD's row: pad + bell, no lead
@@ -23,6 +23,7 @@ are 1 bar and sit under the groove they belong to. Launch quantization is 1 bar.
   16   TERMINAL VELOCITY >> FILL      1   longer roll
   17   EXIT WOUND                     8   plain Amen + kick + sub: mix-out
   18   EXIT WOUND >> TOPS             8   tops + bell + lead
+  19   ALPHABET SOUP                  8   the experiment: A-B-C-D bars, repeating at 4, not 3-then-disturb
 
 Playing it: a FILL row plays its roll then loops, so launch it in the bar before the phrase you
 want and launch the next groove row while it plays. (No automatic return: Live's LOM does not
@@ -302,12 +303,12 @@ def reese_line(sub, style, vel=96):
     return out
 
 
-PAD_CHORDS = {                   # voiced Ab4-G5 so the sustain sits in the upper mids; every chord holds an F or its colour
-    "Fm9":     [68, 72, 75, 79],   # Ab C Eb G
-    "Dbmaj9":  [65, 68, 72, 75],   # F Ab C Eb
-    "Bbm9":    [68, 72, 73, 77],   # Ab C Db F
-    "Eb9sus4": [68, 70, 73, 77],   # Ab Bb Db F
-    "Cm11":    [67, 70, 75, 77],   # G Bb Eb F
+PAD_CHORDS = {                   # voiced Ab3-G4 (196-392 Hz): the reference keeps its hooks in 233-392 Hz,
+    "Fm9":     [56, 60, 63, 67],   # Ab C Eb G      an octave below where these used to sit, which is why
+    "Dbmaj9":  [53, 56, 60, 63],   # F Ab C Eb      our highs read as saccharine. Every chord holds an F
+    "Bbm9":    [56, 60, 61, 65],   # Ab C Db F      or its colour, over the sub's F pedal.
+    "Eb9sus4": [56, 58, 61, 65],   # Ab Bb Db F
+    "Cm11":    [55, 58, 63, 65],   # G Bb Eb F
 }
 PROGRESSION = ["Fm9", "Dbmaj9", "Bbm9", "Eb9sus4"]
 PAD_PROGRESSION = [(c, k * 16.0, 16.0) for k, c in enumerate(PROGRESSION)]   # 16 bars
@@ -361,13 +362,13 @@ def lead(theme, length, *, window=(0.0, 1e9), vel=96):
     return [(p, s, d, vel + (8 if s % UNIT == 0 else 0)) for p, s, d in theme if a <= s < b], length
 
 
-BELL_MOTIFS = {                  # 2-bar shapes (8 beats), F minor, Ab5-G6; no two alike
-    "call":    [(80, 0.0, 0.4), (84, 0.75, 0.25), (87, 1.5, 0.4), (85, 2.0, 0.9)],
-    "answer":  [(84, 4.75, 0.25), (82, 5.5, 0.4), (77, 6.0, 1.5)],
-    "fall":    [(91, 0.0, 0.3), (87, 0.5, 0.3), (84, 1.0, 0.3), (80, 1.5, 1.2)],
-    "offbeat": [(82, 0.5, 0.2), (85, 2.5, 0.2), (82, 4.5, 0.2), (89, 6.5, 0.6)],
-    "held":    [(89, 0.0, 3.5)],                               # one F6; the Echo does the moving
-    "climb":   [(77, 4.0, 0.3), (80, 4.5, 0.3), (84, 5.0, 0.3), (87, 5.5, 0.3), (89, 6.0, 1.5)],
+BELL_MOTIFS = {                  # 2-bar shapes (8 beats), F minor, Ab4-G5 (415-784 Hz); no two alike.
+    "call":    [(68, 0.0, 0.4), (72, 0.75, 0.25), (75, 1.5, 0.4), (73, 2.0, 0.9)],
+    "answer":  [(72, 4.75, 0.25), (70, 5.5, 0.4), (65, 6.0, 1.5)],
+    "fall":    [(79, 0.0, 0.3), (75, 0.5, 0.3), (72, 1.0, 0.3), (68, 1.5, 1.2)],
+    "offbeat": [(70, 0.5, 0.2), (73, 2.5, 0.2), (70, 4.5, 0.2), (77, 6.5, 0.6)],
+    "held":    [(77, 0.0, 3.5)],                               # one F5; the Echo does the moving
+    "climb":   [(65, 4.0, 0.3), (68, 4.5, 0.3), (72, 5.0, 0.3), (75, 5.5, 0.3), (77, 6.0, 1.5)],
 }
 
 
@@ -431,15 +432,40 @@ def row_drone_on():
 
 
 def row_build1():
+    """Build by SUBTRACTION, the way the reference does it: 82% of its drops are approached with the
+    break still running at full density while the low end is pulled ~19 dB down, no riser anywhere, and
+    a hole of one 16th if any. So: same drums for all eight bars, the break's own kicks stop halfway,
+    the reese bed leaves, and the last 16th is silent. Compare with SWEAT EQUITY, which still rolls."""
     L = 32.0
-    amen = a_build1(0) + a_tops(8) + a_build3(16) + a_build4(24)
-    top = t_home(0) + t_home(8) + t_home(16) + before(t_home(24), 30.5)
-    reese = [(41, 0.0, 15.9, 88), (44, 16.0, 7.9, 92), (48, 24.0, 6.4, 96)]   # roots climb, no sub
+    amen = hole(a_home(0) + a_home(8) + a_tops(16) + a_tops(24), 31.75, L)
+    top = hole(t_home(0) + t_home(8) + t_home(16) + t_home(24), 31.75, L)
     return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "TOPSOIL": break_notes(TOP, top, L),
-               "BELL-END": bell_plan(32.0, [(0, "offbeat"), (16, "climb")]), "RASP-BERRY": reese,
-               "HALO-PERIDOL": pad([("Fm9", 0.0, 16.0), ("Dbmaj9", 16.0, 8.0), ("Eb9sus4", 24.0, 6.5)])[0],
+               "BELL-END": bell_plan(32.0, [(0, "offbeat")]),
+               "RASP-BERRY": [(41, 0.0, 15.9, 88)],             # the bed goes at the halfway point
+               "HALO-PERIDOL": pad(punct(["Fm9", "Dbmaj9"], every=16.0))[0],
                "STAB-VEST": stab_notes([(3, "push")], L),       # three stabs across the gap into the drop
                "THROW-UP": break_notes(AMEN, throws([30.375], slice_index=17), L)}
+
+
+def row_abcd():
+    """ALPHABET SOUP - the reference's bar logic, for comparison with the drops next door. Measured, its
+    bars go A-B-C-D and repeat at 4: consecutive bars are the LEAST alike (lag-1 similarity 0.355, the
+    lowest in its profile) while bar N matches bar N-4 (0.486). Our other rows do the opposite - three
+    units the same, the fourth disturbed. Launch this against BOTTOM FEEDER and pick one."""
+    L = 32.0
+    shapes = [lambda at: block(AMEN, 0, 4, at),                                  # A: home bar 1
+              lambda at: block(AMEN, 4, 4, at),                                  # B: home bar 2
+              lambda at: block(AMEN, 0, 2, at) + block(AMEN, 6, 2, at + 2),      # C: bar 1, bar 2's ending
+              lambda at: block(AMEN, 4, 2, at) + block(AMEN, 2, 2, at + 2)]      # D: halves swapped
+    amen = []
+    for b in range(8):
+        amen += shapes[b % 4](b * BAR)
+    sub = sub_line(["A", "A!", "A", "A!"], L)
+    return L, {"AMEN-DMENT": break_notes(AMEN, amen, L), "BOOT-LEG": kick_layer(amen, L), "F-HOLE": sub,
+               "RASP-BERRY": reese_line(sub, "slide"), "TOPSOIL": break_notes(TOP, t_turnaround(3 * UNIT), L),
+               "BELL-END": bell_plan(64.0, [(8, "call+answer")]),
+               "STAB-VEST": stab_notes([(1, "pair"), (3, "push")], L),
+               "THROW-UP": break_notes(AMEN, throws([14.96, 30.96]), L)}
 
 
 def groove_row(amen_fns, sub_cells, bell_windows=(), *, reese="follow", reese_lane="RASP-BERRY",
@@ -478,8 +504,9 @@ def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=(), top_hat
     """One bar: `first` (break events up to roll_from), 16th snares for a beat, 32nds to 3.5, gap.
     The pad holds the Eb9sus4 tension; the last roll hit is thrown into the echo."""
     L = BAR
+    # the gap left at the end is ONE 16TH: the reference's median pre-drop hole is 80 ms, not half a beat
     amen = (before(first, roll_from) + roll(A_SNARE_16, roll_from, roll_from + 1.0, 0.25, 96, 112)
-            + roll(A_SNARE_32, roll_from + 1.0, 3.5, 0.125, 112, 127))
+            + roll(A_SNARE_32, roll_from + 1.0, 3.75, 0.125, 112, 127))
     sub = [(F1, 0.0, round(roll_from - 0.05, 4), 112)]   # holds, then lets go for the roll
     top = before(block(TOP, 0, 4, 0, only={"bongo", "conga"}), roll_from)
     if top_hats:
@@ -497,6 +524,12 @@ def fill_row(first, *, roll_from=2.0, reese_lane="RASP-BERRY", sweat=(), top_hat
 # Chord spans for a row that wants the pad in only part of its 8 bars.
 PAD_FIRST_HALF = [("Fm9", 0.0, 16.0)]
 PAD_SECOND_HALF = [("Bbm9", 16.0, 8.0), ("Eb9sus4", 24.0, 8.0)]
+
+
+def punct(chords, at=0.0, every=8.0, dur=1.5):
+    """Chord spans as PUNCTUATION, not a bed: one short hit every `every` beats. 81% of the reference's
+    melodic events are under two beats, and it has no sustained voice in this register at all."""
+    return [(c, at + k * every, dur) for k, c in enumerate(chords)]
 
 
 def row_hole():
@@ -575,7 +608,8 @@ ROWS = [
     ("BOTTOM FEEDER >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0))),
     ("BOTTOM FEEDER II", lambda: groove_row([a_home, a_home, a_reorder, a_edit1], ["B", "B", "B", "B!"],
                                             [(16, "offbeat"), (48, "climb")], reese="octaves",
-                                            pad_spans=PAD_PROGRESSION, throw_at=(14.96, 30.96))),
+                                            pad_spans=punct(["Fm9", "Fm9", "Dbmaj9", "Bbm9"]),
+                                            throw_at=(14.96, 30.96))),
     ("CHOP SUEY", lambda: groove_row([a_reorder, a_reorder, a_reorder, a_edit2], ["B", "B", "B", "B!"],
                                      [(32, "held")], reese="stabs", top_hats=0.6, throw_at=(22.96, 30.96),
                                      stabs=[(1, "pair"), (3, "push")])),
@@ -587,16 +621,17 @@ ROWS = [
     # drop 2: the lead leads F-ALL over four bars of pad; TERMINAL VELOCITY is the drums' row again
     ("F-ALL", lambda: groove_row([a_home, a_reorder, a_home, a_edit1], ["A", "A", "A", "A!"],
                                  reese="slide", reese_lane="RASP-UTIN", theme=THEME_B,
-                                 pad_spans=PAD_FIRST_HALF, sweat=(1, 3), stabs=[(1, "pair")])),
+                                 pad_spans=punct(["Fm9", "Fm9"]), sweat=(1, 3), stabs=[(1, "pair")])),
     ("F-ALL >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), reese_lane="RASP-UTIN", sweat=(0,))),
     ("TERMINAL VELOCITY", lambda: groove_row([a_edit2, a_reorder, a_edit2, a_edit1], ["B", "B", "B", "B!"],
                                              [(0, "offbeat"), (40, "held")], reese="octaves", reese_lane="RASP-UTIN",
-                                             pad_spans=PAD_SECOND_HALF, sweat=(0, 2),
+                                             pad_spans=punct(["Bbm9", "Eb9sus4"], at=16.0), sweat=(0, 2),
                                              throw_at=(14.96, 30.96), stabs=[(3, "push")])),
     ("TERMINAL VELOCITY >> FILL", lambda: fill_row(block(AMEN, 0, 2, 0), roll_from=1.5, reese_lane="RASP-UTIN",
                                                    sweat=(0,))),
     ("EXIT WOUND", row_exit),
     ("EXIT WOUND >> TOPS", row_exit_tops),
+    ("ALPHABET SOUP", row_abcd),        # the experiment: A-B-C-D bars, against BOTTOM FEEDER's repeats
 ]
 
 LANES = ["AMEN-DMENT", "SWEAT-SHOP", "TOPSOIL", "BOOT-LEG", "F-HOLE", "RASP-BERRY", "RASP-UTIN",
