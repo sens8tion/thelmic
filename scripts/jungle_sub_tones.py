@@ -36,6 +36,8 @@ from jungle_sections import ROWS  # noqa: E402
 
 OFF = None
 AMP_ENVELOPE = [("Ae Attack", 3.0), ("Ae Release", 80.0)]      # ms
+# free-running oscillators: a note repeated inside the last one's release restarted its sine mid-cycle and clicked
+FREE_RUNNING = ["Osc-A Retrig", "Osc-B Retrig"]
 TONES = [  # (drop: Pe Amount raw, bell: Osc-B Level dB or OFF, grit: Shaper Mix %)
     (1.0, OFF, 0.0),
     (1.0, -20.0, 0.0),
@@ -66,7 +68,14 @@ def main():
         from jungle_space import set_number
         for pname, ms in AMP_ENVELOPE:
             set_number(ch, t, 0, pname, ms)
-        for pname, v in (("Osc-B Level", 0.0), ("Pe Amount", 1.0), ("Shaper Mix", 0.0)):
+        for pname in FREE_RUNNING:
+            if _param(ch, t, 0, pname)["value"] > 0.5:
+                ch.set_device_param(t, 0, _param(ch, t, 0, pname)["index"], 0.0).result(timeout=5)
+        # the clean base values, only while no clip carries envelopes yet: touching an enveloped parameter
+        # while its row plays would override the row's tone
+        enveloped = any(ch.inspect_clip_envelopes(t, row).result(timeout=10).get("has_envelopes")
+                        for row in range(len(ROWS)))
+        for pname, v in (() if enveloped else (("Osc-B Level", 0.0), ("Pe Amount", 1.0), ("Shaper Mix", 0.0))):
             if abs(float(_param(ch, t, 0, pname)["value"]) - v) > 1e-4:
                 ch.set_device_param(t, 0, _param(ch, t, 0, pname)["index"], v).result(timeout=5)
         for row, ((scene, _, _), (drop, bell, grit)) in enumerate(zip(ROWS, TONES)):
