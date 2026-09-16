@@ -134,14 +134,14 @@ def per_bar(pitches, hits=DOUBLES, glide=False, vel=(116, 108)):
     return out, len(pitches) * 4.0
 
 
-def climb(start, bars=8, **kw):
-    """The user's octave-crossing doubles: hits on one note per bar, then the next bar steps up to the next
-    note of F minor, crossing into the next octave - and a bar of rest before it goes back to the start (the
-    user's ask, and the reference's normal one-bar hole). 7 steps + the gap keeps the phrase at 8 bars, in
-    phase with the 4-bar drums."""
+def descend(land=F1, bars=8, **kw):
+    """The user's octave-crossing doubles: repeated hits on one note per bar, each bar a step DOWN the key,
+    crossing the octave and landing on the fundamental - then a bar of rest before it goes back to the top
+    (the user's ask, and the reference's normal one-bar hole). 7 steps + the gap keeps the phrase at 8 bars,
+    in phase with the 4-bar drums: from the 7th above (Eb2) down to F1."""
     scale = [F1 - 12 + 12 * o + s for o in range(4) for s in F_MINOR]
-    i = scale.index(start)
-    return per_bar(scale[i:i + bars - 1] + [None], **kw)
+    i = scale.index(land)
+    return per_bar([scale[i + k] for k in range(bars - 2, -1, -1)] + [None], **kw)
 
 
 RIFF_ARRIVALS = twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
@@ -150,10 +150,10 @@ RIFF_SERVED = twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 
                      (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)])
 # F for two bars, Eb for two, four hits a bar, gliding into the change
 RIFF_MESSAGE = per_bar([F1, F1, EB1, EB1], hits=FOUR, glide=True, vel=(114, 104, 110, 104))
-# the second drop of each section climbs the key in doubles, over 8 bars (the drums loop twice under it)
-CLIMB_ESCALATOR = climb(F1)                                                            # F1 .. F2, two hits a bar
-CLIMB_APPEAL = climb(AB1, hits=EIGHT, vel=(118, 100, 112, 100))                       # Ab1 .. G2, eight hits a bar
-CLIMB_LEVITATION = climb(EB1, hits=FOUR, glide=True, vel=(114, 104, 110, 104))        # Eb1 .. Eb2, four hits, gliding up
+# the second drop of each section walks down the key to F1 over 8 bars (the drums loop twice under it)
+DESCENT_ESCALATOR = descend(hits=FOUR, vel=(116, 106, 112, 106))                        # four clean hits a bar
+DESCENT_APPEAL = descend(hits=EIGHT, vel=(118, 100, 112, 100))                          # eight hits a bar
+DESCENT_COMING_DOWN = descend(hits=FOUR, glide=True, vel=(114, 104, 110, 104))          # four hits, gliding down
 
 # ---------------------------------------------------------------- sub signatures (copies of F-HOLE)
 SUB_VOICES = {
@@ -172,15 +172,15 @@ SHAPER_TYPE_RAW = 1         # the first non-off shaper curve; its name is read b
 ROWS = [
     (0, "WAITING ROOM", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen"}),
     (1, "ARRIVALS", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": RIFF_ARRIVALS}),
-    (2, "ESCALATOR", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": CLIMB_ESCALATOR}),
+    (2, "DOWN ESCALATOR", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": DESCENT_ESCALATOR}),
     (3, "THE DOCK", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache"}),
     (4, "SUB-POENA SERVED", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": RIFF_SERVED}),
-    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": CLIMB_APPEAL}),
+    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": DESCENT_APPEAL}),
     (6, "SMALL PRINT", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat"}),
     (7, "SUBLIMINAL MESSAGE", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
                                "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": RIFF_MESSAGE}),
-    (8, "LEVITATION", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                       "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": CLIMB_LEVITATION}),
+    (8, "COMING DOWN", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
+                        "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": DESCENT_COMING_DOWN}),
 ]
 CARRIERS = {
     "carrier_amen": [(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)],
