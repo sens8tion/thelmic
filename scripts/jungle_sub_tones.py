@@ -63,6 +63,10 @@ def main():
     ch = LiveChannel(lower_priority=False)
     ch.start()
     try:
+        from jungle_reset import track_names
+        if "F-HOLE" not in track_names(ch):
+            raise SystemExit("F-HOLE was dropped on 2026-09-17 (the bare Operator wasn't jungly): these tones were "
+                             "its Operator's. Redo the row tones for the sub the user picks.")
         t = index_of(ch, "F-HOLE")
         # a 1 ms attack and 40 ms release clicked at note ends (under two cycles of F#0): soften both a little
         from jungle_space import set_number

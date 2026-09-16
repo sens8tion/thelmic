@@ -140,6 +140,9 @@ CHOPS = [
 ]
 
 BREAK_LANES = ("AMEN-DMENT", "COLD-CUTS", "CHOPPER")
+# the sub lanes: BOO-MERANGUE (the 808, chosen 2026-09-17) and WOBBLE-BOARD (muted, not chosen) - the bass
+# goes to each one present. F-HOLE and TONE-DEAF were dropped.
+SUB_LANES = ("BOO-MERANGUE", "WOBBLE-BOARD")
 VARIANT_FROM = 72
 FS0, GS0, A0, B0, CS1 = 30, 32, 33, 35, 37
 SHORT, HELD = 100, 110
@@ -307,12 +310,15 @@ def main():
     ch.start()
     try:
         sixteenths = archived(*SIXTEENTHS)
+        from jungle_reset import track_names
+        present = set(track_names(ch))
         for row, (scene, brk, bass_spec) in enumerate(ROWS):
             bass_shape, bass_notes, bass_len = bassline(scene, bass_spec)
             shape_name, shape = SHAPES[row]
             lanes = [("SPINE-TINGLER", *SPINES[row], 16.0), (brk, *CHOPS[row], 16.0),
                      ("THROW-UP", f"16ths {shape_name}", shaped(plain(sixteenths), shape), float(sixteenths["length"])),
-                     ("F-HOLE", scene.lower(), no_overlap(bass_notes, bass_len), bass_len)]
+                     ] + [(sub_lane, scene.lower(), no_overlap(bass_notes, bass_len), bass_len)
+                          for sub_lane in SUB_LANES if sub_lane in present]
             written = []
             for track, name, notes, length in lanes:
                 t = index_of(ch, track)

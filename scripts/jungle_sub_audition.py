@@ -119,6 +119,9 @@ def main():
     ch = LiveChannel(lower_priority=False)
     ch.start()
     try:
+        if "F-HOLE" not in track_names(ch):
+            raise SystemExit("F-HOLE and TONE-DEAF were dropped on 2026-09-17; BOOM-ERANG and WOBBLE-BOARD are "
+                             "the subs left to audition. Nothing to copy from.")
         fh = index_of(ch, "F-HOLE")
         level = next(x["index"] for x in devices(ch, fh) if x["name"] == "LEVEL")
         from jungle_sidechain import parse_display
