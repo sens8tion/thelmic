@@ -12,8 +12,9 @@ carrier and the sub's signature all turn over together.
 
 Rules followed: 170 BPM; slices placed exactly on 16ths with the drummer's feel inside each slice; bars
 A-B-C-D inside a returning 4-bar group; kick on 1 and snares on 2 and 4 (except the two-step section,
-where the programmed kick replaces the break's); no sub before a drop; the sub moves about once a bar
-(the two-step section's barely moves); the second bar of a 2-bar riff sits lower; no sidechain.
+where the programmed kick replaces the break's); no sub before a drop; no sidechain. The sub is in F# minor
+on the fundamental F#0: struck at the front of the bar, mostly repeats and steps, about one change a bar
+(half that under the two-step), and phrases that drop to a low "dum" on F#0 and leave a gap for the break.
 
     python scripts/jungle_rows.py --dry-run
     python scripts/jungle_rows.py
@@ -103,57 +104,72 @@ CARRIER_SWEAT = [{**{k: SWEAT_EVEN[(k // 2 + b) % 6] for k in range(0, 16, 2)}, 
 
 TWO_STEP = [(36, b * 4 + t, 0.4, v) for b in range(BARS) for t, v in ((0.0, 122), (2.5, 112))]
 
-# ---------------------------------------------------------------- sub riffs (F minor)
-DB1, EB1, F1, G1, AB1, BB1, C2 = 25, 27, 29, 31, 32, 34, 36
+# ---------------------------------------------------------------- sub basslines (F# minor)
+# The bass archetype, as the user described and wrote it and as the reference measures it:
+#   - notes struck at the front of the bar; mostly repeats and scale steps, a fourth or fifth now and then
+#   - about one pitch change a bar (0.5 under the two-step, where the reference's bass barely moves)
+#   - phrases that DROP to a low "dum" on the fundamental and leave a gap. The gap lifts the break ~6 dB
+#     against the low end without touching it. About one phrase in two or three ends that way; the rest
+#     carry on into the next.
+# The dry run checks every note against F# minor.
+FS0, GS0, A0, B0, CS1, D1, E1 = 30, 32, 33, 35, 37, 38, 40          # F# minor up from the fundamental F#0 (46.25 Hz)
+F_SHARP_MINOR = {6, 8, 9, 11, 1, 2, 4}                               # pitch classes F# G# A B C# D E
 
 
-def twice(riff):
-    return riff + [(p, s + 8.0, d, v) for p, s, d, v in riff]
+def hits(pitch, starts, dur, vel=110):
+    """The same note struck at each start (beats), each lasting `dur`."""
+    return [(pitch, float(s), float(dur), vel) for s in starts]
 
 
-F_MINOR = [0, 2, 3, 5, 7, 8, 10]                   # F natural minor, as semitones above F
-
-
-DOUBLES = ((0.0, 1.0), (1.5, 1.0))                              # two hits a bar: on 1 and the "and" of 2
-FOUR = ((0.0, 0.6), (0.75, 0.6), (2.0, 0.6), (2.75, 0.6))      # twice the hits: that figure in both halves
-EIGHT = tuple((b + o, 0.4 if o == 0 else 0.2) for b in range(4) for o in (0.0, 0.75))  # twice again: every beat and its "a"
-
-
-def per_bar(pitches, hits=DOUBLES, glide=False, vel=(116, 108)):
-    """One note per bar, struck at `hits`. With `glide`, the bar's last hit runs into the next bar's first
-    hit wherever the note changes, so SUB-LIMINAL's glide slides into it. -> (notes, clip length)."""
+def slide(notes, overlap=0.1):
+    """Stretch each note into the next wherever the pitch changes, so SUB-LIMINAL's glide slides."""
+    notes = sorted(notes, key=lambda n: n[1])
     out = []
-    for b, pitch in enumerate(pitches):
-        if pitch is None:                               # a bar of rest
-            continue
-        nxt = pitches[b + 1] if b + 1 < len(pitches) else None
-        for k, (at, dur) in enumerate(hits):
-            if glide and k == len(hits) - 1 and nxt is not None and nxt != pitch:
-                dur = 4.0 - at + 0.1
-            out.append((pitch, b * 4.0 + at, round(dur, 4), vel[k % len(vel)]))
-    return out, len(pitches) * 4.0
+    for k, (p, s, d, v) in enumerate(notes):
+        if k + 1 < len(notes) and notes[k + 1][0] != p:
+            d = max(d, notes[k + 1][1] - s + overlap)
+        out.append((p, s, round(d, 4), v))
+    return out
 
 
-def descend(land=F1, bars=8, **kw):
-    """The user's octave-crossing doubles: repeated hits on one note per bar, each bar a step DOWN the key,
-    crossing the octave and landing on the fundamental - then a bar of rest before it goes back to the top
-    (the user's ask, and the reference's normal one-bar hole). 7 steps + the gap keeps the phrase at 8 bars,
-    in phase with the 4-bar drums: from the 7th above (Eb2) down to F1."""
-    scale = [F1 - 12 + 12 * o + s for o in range(4) for s in F_MINOR]
-    i = scale.index(land)
-    return per_bar([scale[i + k] for k in range(bars - 2, -1, -1)] + [None], **kw)
+def eight(pitch, bar, vel=(116, 100)):
+    """Eight hits in a bar: every beat and its "a"."""
+    return [(pitch, bar * 4.0 + beat + o, 0.4 if o == 0 else 0.2, vel[0] if o == 0 else vel[1])
+            for beat in range(4) for o in (0.0, 0.75)]
 
 
-RIFF_ARRIVALS = twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
-                       (EB1, 4.0, 1.25, 114), (EB1, 5.5, 0.5, 106)])
-RIFF_SERVED = twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 110), (AB1, 2.5, 0.5, 112),
-                     (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)])
-# F for two bars, Eb for two, four hits a bar, gliding into the change
-RIFF_MESSAGE = per_bar([F1, F1, EB1, EB1], hits=FOUR, glide=True, vel=(114, 104, 110, 104))
-# the second drop of each section walks down the key to F1 over 8 bars (the drums loop twice under it)
-DESCENT_ESCALATOR = descend(hits=FOUR, vel=(116, 106, 112, 106))                        # four clean hits a bar
-DESCENT_APPEAL = descend(hits=EIGHT, vel=(118, 100, 112, 100))                          # eight hits a bar
-DESCENT_COMING_DOWN = descend(hits=FOUR, glide=True, vel=(114, 104, 110, 104))          # four hits, gliding down
+# ARRIVALS (F-HOLE) - "da da da daa, da da da da, dum": two 2-bar phrases. The first steps down and carries
+# on; the second drops to the fundamental on beat 3 of bar 4 and leaves the rest of the bar to the break.
+BASS_ARRIVALS = (hits(CS1, (0.0, 0.5, 1.0), 0.4, 114) + hits(CS1, (1.5,), 1.25, 110)
+                 + hits(B0, (4.0, 4.5, 5.0, 5.5), 0.4, 108) + hits(B0, (6.0,), 1.75, 104)
+                 + hits(CS1, (8.0, 8.5, 9.0), 0.4, 114) + hits(CS1, (9.5,), 1.25, 110)
+                 + hits(B0, (12.0, 12.5), 0.4, 108) + hits(A0, (13.0, 13.5), 0.4, 106)
+                 + hits(FS0, (14.0,), 0.9, 120))
+# DEPARTURES (F-HOLE) - 8 bars walking round the root on 1 and the "and" of 2 (repeats and steps), a fifth
+# leap up in bar 7, and the fall to the fundamental in bar 8 with the rest of that bar empty.
+BASS_DEPARTURES = ([n for b, p in enumerate((FS0, GS0, A0, GS0, B0, A0, CS1))
+                    for n in hits(p, (b * 4.0, b * 4.0 + 1.5), 1.0, 112 if b % 2 == 0 else 106)]
+                   + hits(FS0, (28.0,), 1.5, 120), 32.0)
+# SUB-POENA SERVED (SUB-POENA) - busier and shorter: 16th pairs on the 1, answers on the "and"s, stepping
+# down to the fundamental on beat 2 of bar 4, then a long gap.
+BASS_SERVED = (hits(E1, (0.0, 0.25), 0.22, 118) + hits(E1, (1.5,), 0.5, 108)
+               + hits(D1, (4.0, 4.25), 0.22, 116) + hits(CS1, (5.5, 6.5), 0.5, 108)
+               + hits(E1, (8.0, 8.25), 0.22, 118) + hits(B0, (9.5, 10.5), 0.5, 108)
+               + hits(B0, (12.0, 12.25), 0.22, 116) + hits(FS0, (13.0,), 0.75, 122))
+# COURT OF APPEAL (SUB-POENA) - eight hits a bar, stepping down C# B A, then G# on the 1 and its "a" and the
+# drop to the fundamental on beat 2, leaving the back of bar 4 open.
+BASS_APPEAL = (eight(CS1, 0) + eight(B0, 1) + eight(A0, 2)
+               + [(GS0, 12.0, 0.4, 116), (GS0, 12.75, 0.2, 100)] + hits(FS0, (13.0,), 1.0, 122))
+# SUBLIMINAL MESSAGE (SUB-LIMINAL, over the two-step) - near-still: the root on 1 and the "and" of 2, a slide
+# up to A and back in bar 4, a slide up a fifth in bars 6-7 and back down to the fundamental in bar 8, then a gap.
+BASS_MESSAGE = (slide([n for b in (0, 1, 2, 4, 5) for n in hits(FS0, (b * 4.0, b * 4.0 + 1.5), 1.25, 112)]
+                      + hits(FS0, (12.0,), 1.25, 112) + hits(A0, (13.5,), 1.25, 108)
+                      + hits(CS1, (24.0, 25.5), 1.25, 110) + hits(FS0, (28.0,), 1.5, 120)), 32.0)
+# COMING DOWN (SUB-LIMINAL) - up then down: F# to A to B, a push up to C# on the "and" of 3 in bar 3, and a
+# slide down a fifth onto the fundamental in bar 4, then a gap.
+BASS_COMING_DOWN = slide(hits(FS0, (0.0, 1.5), 1.25, 112) + hits(A0, (4.0, 5.5), 1.25, 110)
+                         + hits(B0, (8.0, 9.5), 1.0, 110) + hits(CS1, (10.5,), 1.0, 112)
+                         + hits(FS0, (12.0,), 1.5, 120))
 
 # ---------------------------------------------------------------- sub signatures (copies of F-HOLE)
 SUB_VOICES = {
@@ -171,16 +187,16 @@ SHAPER_TYPE_RAW = 1         # the first non-off shaper curve; its name is read b
 # ---------------------------------------------------------------- rows: (scene, name, {track: (notes)})
 ROWS = [
     (0, "WAITING ROOM", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen"}),
-    (1, "ARRIVALS", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": RIFF_ARRIVALS}),
-    (2, "DOWN ESCALATOR", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": DESCENT_ESCALATOR}),
+    (1, "ARRIVALS", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": BASS_ARRIVALS}),
+    (2, "DEPARTURES", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": BASS_DEPARTURES}),
     (3, "THE DOCK", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache"}),
-    (4, "SUB-POENA SERVED", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": RIFF_SERVED}),
-    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": DESCENT_APPEAL}),
+    (4, "SUB-POENA SERVED", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": BASS_SERVED}),
+    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": BASS_APPEAL}),
     (6, "SMALL PRINT", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat"}),
     (7, "SUBLIMINAL MESSAGE", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                               "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": RIFF_MESSAGE}),
+                               "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": BASS_MESSAGE}),
     (8, "COMING DOWN", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                        "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": DESCENT_COMING_DOWN}),
+                        "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": BASS_COMING_DOWN}),
 ]
 CARRIERS = {
     "carrier_amen": [(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)],
@@ -202,14 +218,33 @@ def changes_per_bar(riff, length=LEN):
     return moves / (length / 4.0)
 
 
+def bass_report(notes, length):
+    """The archetype checks: in key, pitch changes a bar, the move mix, and whether it drops to the
+    fundamental and leaves a gap before the loop."""
+    notes = sorted(notes, key=lambda n: n[1])
+    off_key = sorted({p for p, *_ in notes if p % 12 not in F_SHARP_MINOR})
+    pitches = [p for p, *_ in notes]
+    moves = [abs(b - a) for a, b in zip(pitches, pitches[1:] + pitches[:1])]
+    rep = sum(m == 0 for m in moves) / len(moves)
+    step = sum(1 <= m <= 2 for m in moves) / len(moves)
+    leap = sum(m >= 5 for m in moves) / len(moves)
+    last = notes[-1]
+    gap16 = (length - (last[1] + last[2])) * 4
+    lands = last[0] == min(pitches) and last[0] % 12 == 6
+    return (f"{changes_per_bar(notes, length):.2f} changes/bar, repeats {rep:.0%} steps {step:.0%} leaps {leap:.0%}, "
+            f"{'drops to F#0' if lands else 'ends elsewhere'}, gap {gap16:.0f}/16ths"
+            + (f", OFF KEY {off_key}" if off_key else ""))
+
+
 def dry_run():
     for scene, name, lanes in ROWS:
         parts = []
         for track, value in lanes.items():
             notes, length = lane_value(value)
-            extra = f", {changes_per_bar(notes, length):.2f} changes/bar" if track in ("F-HOLE", *SUB_VOICES) else ""
-            extra += f" ({length / 4:g} bars)" if length != LEN else ""
+            extra = f" ({length / 4:g} bars)" if length != LEN else ""
             parts.append(f"{track} {len(notes)}{extra}")
+            if track in ("F-HOLE", *SUB_VOICES):
+                parts.append(bass_report(notes, length))
         print(f"  row {scene + 1:<2} {name:<20} | " + " | ".join(parts))
 
 
@@ -268,7 +303,7 @@ def ensure_sub_voices(ch):
                    ("Shaper Type", "Shaper Drive", "Algorithm", "Osc-B On", "B Coarse", "Osc-B Level",
                     "Pe On", "Pe Init", "Pe Decay", "Glide On", "Glide Time")}
         test_slot = scenes - 1
-        write_clip(ch, t, test_slot, "test", [(29, 0.0, 3.5, 120)], 4.0)
+        write_clip(ch, t, test_slot, "test", [(FS0, 0.0, 3.5, 120)], 4.0)
         peak = meter(ch, voice, t, test_slot)
         ch.clear_clip(t, test_slot).result(timeout=5)
         print(f"  {voice}: F1 test note meters {peak:.3f} | {summary}")
