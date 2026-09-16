@@ -35,6 +35,7 @@ from jungle_reset import index_of  # noqa: E402
 from jungle_sections import ROWS  # noqa: E402
 
 OFF = None
+AMP_ENVELOPE = [("Ae Attack", 3.0), ("Ae Release", 80.0)]      # ms
 TONES = [  # (drop: Pe Amount raw, bell: Osc-B Level dB or OFF, grit: Shaper Mix %)
     (1.0, OFF, 0.0),
     (1.0, -20.0, 0.0),
@@ -61,6 +62,10 @@ def main():
     ch.start()
     try:
         t = index_of(ch, "F-HOLE")
+        # a 1 ms attack and 40 ms release clicked at note ends (under two cycles of F#0): soften both a little
+        from jungle_space import set_number
+        for pname, ms in AMP_ENVELOPE:
+            set_number(ch, t, 0, pname, ms)
         for pname, v in (("Osc-B Level", 0.0), ("Pe Amount", 1.0), ("Shaper Mix", 0.0)):
             if abs(float(_param(ch, t, 0, pname)["value"]) - v) > 1e-4:
                 ch.set_device_param(t, 0, _param(ch, t, 0, pname)["index"], v).result(timeout=5)
