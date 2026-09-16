@@ -111,28 +111,36 @@ def twice(riff):
     return riff + [(p, s + 8.0, d, v) for p, s, d, v in riff]
 
 
-def octave_double(riff, home):
-    """An on-key octave-crossing double as the pickup back into the loop: the riff's home note on the "e" of
-    beat 4, the same note an octave up on the "and" (held an 8th), landing back on the home note on the 1.
-    Once per 4 bars: octave moves are rare in the reference (1.8% of bass transitions)."""
-    trimmed = [(p, s, round(min(d, 15.0 - s - 0.02), 4), v) for p, s, d, v in riff if s < 15.0]
-    return trimmed + [(home, 15.25, 0.22, 112), (home + 12, 15.5, 0.45, 106)]
+F_MINOR = [0, 2, 3, 5, 7, 8, 10]                   # F natural minor, as semitones above F
 
 
-RIFF_ARRIVALS = octave_double(twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
-                                     (EB1, 4.0, 1.25, 114), (EB1, 5.5, 0.5, 106)]), F1)
-RIFF_BAGGAGE = octave_double(twice([(AB1, 0.0, 0.75, 116), (AB1, 0.75, 0.5, 104), (AB1, 2.0, 1.25, 110),
-                                    (G1, 4.0, 0.5, 114), (G1, 4.75, 1.0, 106), (G1, 6.5, 0.5, 104)]), AB1)
-RIFF_SERVED = octave_double(twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 110), (AB1, 2.5, 0.5, 112),
-                                   (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)]), F1)
-RIFF_CONTEMPT = octave_double(twice([(C2, 0.0, 0.5, 118), (C2, 0.75, 0.25, 104), (BB1, 1.5, 0.5, 110), (BB1, 2.5, 0.5, 108),
-                                     (AB1, 4.0, 0.5, 116), (AB1, 4.75, 0.25, 104), (AB1, 5.5, 0.5, 110)]), C2)
-# barely moving, with overlaps into the changes so the glide slides between them; the octave double here
-# overlaps too, so it slides up the octave instead of jumping
+def climb(start, bars=8, hits=((0.0, 1.0), (1.5, 1.0)), glide=False, vel=(116, 108)):
+    """The user's octave-crossing doubles: two sub hits on one note per bar, then the next bar steps up to
+    the next note of the key, crossing into the octave above. The second hit of a bar can run into the next
+    bar's first hit so SUB-LIMINAL's glide slides up the step. -> (notes, clip length in beats)."""
+    scale = [F1 - 12 + 12 * o + s for o in range(4) for s in F_MINOR]
+    i = scale.index(start)
+    out = []
+    for b in range(bars):
+        pitch = scale[i + b]
+        for k, (at, dur) in enumerate(hits):
+            if glide and k == len(hits) - 1 and b < bars - 1:
+                dur = 4.0 - at + 0.1                    # overlap into the next bar's first hit
+            out.append((pitch, b * 4.0 + at, dur, vel[min(k, len(vel) - 1)]))
+    return out, bars * 4.0
+
+
+RIFF_ARRIVALS = twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
+                       (EB1, 4.0, 1.25, 114), (EB1, 5.5, 0.5, 106)])
+RIFF_SERVED = twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 110), (AB1, 2.5, 0.5, 112),
+                     (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)])
+# barely moving, with overlaps into the changes so the glide slides between them
 RIFF_MESSAGE = [(F1, 0.0, 3.0, 112), (F1, 4.0, 2.0, 106), (F1, 6.5, 1.65, 108),
-                (EB1, 8.0, 3.0, 112), (EB1, 12.0, 2.9, 106), (F1, 14.75, 0.65, 108), (F1 + 12, 15.25, 0.7, 104)]
-RIFF_CONTROL = [(AB1, 0.0, 3.0, 112), (AB1, 4.0, 2.25, 106), (AB1, 6.5, 1.65, 108),
-                (G1, 8.0, 3.0, 112), (G1, 12.0, 2.7, 106), (AB1, 14.75, 0.65, 108), (AB1 + 12, 15.25, 0.7, 104)]
+                (EB1, 8.0, 3.0, 112), (EB1, 12.0, 2.9, 106), (F1, 14.75, 1.2, 108)]
+# the second drop of each section climbs the key in doubles, over 8 bars (the drums loop twice under it)
+CLIMB_ESCALATOR = climb(F1)                                            # F1 .. F2
+CLIMB_APPEAL = climb(AB1, hits=((0.0, 0.5), (1.5, 0.5)), vel=(118, 110))   # Ab1 .. Ab2, short and punchy
+CLIMB_LEVITATION = climb(EB1, hits=((0.0, 1.25), (1.5, 1.0)), glide=True)   # Eb1 .. Eb2, sliding up each step
 
 # ---------------------------------------------------------------- sub signatures (copies of F-HOLE)
 SUB_VOICES = {
@@ -151,15 +159,15 @@ SHAPER_TYPE_RAW = 1         # the first non-off shaper curve; its name is read b
 ROWS = [
     (0, "WAITING ROOM", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen"}),
     (1, "ARRIVALS", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": RIFF_ARRIVALS}),
-    (2, "BAGGAGE CLAIM", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": RIFF_BAGGAGE}),
+    (2, "ESCALATOR", {"AMEN-DMENT": lane(AMEN, CHOP_A), "THROW-UP": "carrier_amen", "F-HOLE": CLIMB_ESCALATOR}),
     (3, "THE DOCK", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache"}),
     (4, "SUB-POENA SERVED", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": RIFF_SERVED}),
-    (5, "CONTEMPT OF COURT", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": RIFF_CONTEMPT}),
+    (5, "COURT OF APPEAL", {"AMEN-DMENT": lane(AMEN, CHOP_B), "TOPSOIL": "carrier_apache", "SUB-POENA": CLIMB_APPEAL}),
     (6, "SMALL PRINT", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat"}),
     (7, "SUBLIMINAL MESSAGE", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
                                "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": RIFF_MESSAGE}),
-    (8, "MIND CONTROL", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
-                         "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": RIFF_CONTROL}),
+    (8, "LEVITATION", {"AMEN-DMENT": lane(AMEN, CHOP_C), "SWEAT-SHOP": "carrier_sweat",
+                       "BOOT-LEG": TWO_STEP, "SUB-LIMINAL": CLIMB_LEVITATION}),
 ]
 CARRIERS = {
     "carrier_amen": [(p, t, min(d, 0.22), v - 8) for p, t, d, v in lane(AMEN, CARRIER_AMEN)],
@@ -168,18 +176,26 @@ CARRIERS = {
 }
 
 
-def changes_per_bar(riff):
+def lane_value(value):
+    """A lane is a carrier name, a note list (4-bar clip), or (notes, clip length)."""
+    if isinstance(value, str):
+        return CARRIERS[value], LEN
+    return value if isinstance(value, tuple) else (value, LEN)
+
+
+def changes_per_bar(riff, length=LEN):
     pitches = [p for p, *_ in sorted(riff, key=lambda n: n[1])]
     moves = sum(1 for a, b in zip(pitches, pitches[1:] + pitches[:1]) if a != b)
-    return moves / BARS
+    return moves / (length / 4.0)
 
 
 def dry_run():
     for scene, name, lanes in ROWS:
         parts = []
-        for track, notes in lanes.items():
-            notes = CARRIERS.get(notes, notes) if isinstance(notes, str) else notes
-            extra = f", {changes_per_bar(notes):.2f} changes/bar" if track in ("F-HOLE", *SUB_VOICES) else ""
+        for track, value in lanes.items():
+            notes, length = lane_value(value)
+            extra = f", {changes_per_bar(notes, length):.2f} changes/bar" if track in ("F-HOLE", *SUB_VOICES) else ""
+            extra += f" ({length / 4:g} bars)" if length != LEN else ""
             parts.append(f"{track} {len(notes)}{extra}")
         print(f"  row {scene + 1:<2} {name:<20} | " + " | ".join(parts))
 
@@ -257,14 +273,14 @@ def build():
         ensure_sub_voices(ch)
         idx = names(ch)
         for scene, name, lanes in ROWS:
-            for track, notes in lanes.items():
-                notes = CARRIERS[notes] if isinstance(notes, str) else notes
+            for track, value in lanes.items():
+                notes, length = lane_value(value)
                 t = idx[track]
                 try:
                     ch.clear_clip(t, scene).result(timeout=5)
                 except Exception:
                     pass
-                write_clip(ch, t, scene, name.lower(), notes, LEN)
+                write_clip(ch, t, scene, name.lower(), notes, length)
             ch.set_scene_name(scene, name).result(timeout=3)
             print(f"  row {scene + 1}: {name}")
     finally:
