@@ -27,7 +27,7 @@ from jungle_reset import index_of, track_names  # noqa: E402
 # its old fader (its hits no longer drop out by chance), and every lane is 2 dB under, so Main peaks below 0 dBFS
 # when every hit plays.
 LEVELS = {"SPINE-TINGLER": -8.6, "AMEN-DMENT": -4.2, "COLD-CUTS": -14.0, "CHOPPER": -11.2, "THROW-UP": -1.5,
-          "BOO-MERANGUE": -7.6}      # the 808: F-HOLE's -3.6, 4 dB under, not yet matched on the meter
+          "BOO-MERANGUE": -1.7}      # the 808, as the user matched it by ear (2026-09-17)
 UNITY = 0.85                 # mixer volume raw value for 0 dB
 
 
