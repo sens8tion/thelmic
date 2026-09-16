@@ -10,17 +10,21 @@ blocks of their break, built the way the heard chops were (scripts/jungle_rows.p
 in at a fixed place. Every spine keeps the kick on 1 and the snares on 2 and 4 in every bar.
 
   row  scene                spine                           chop                                   bass
-  1    TRAPDOOR             kick 1, snares 2+4, kick &3     Amen A-B-C-D (the WAITING ROOM chop)    hand-written descent
-  2    ARRIVALS             snare 4 leads, kick pickup      Amen, busier ghosts (CHOP_B)            arrivals
+  1    TRAPDOOR             kick 1, snares 2+4, kick &3     Amen A-B-C-D (the WAITING ROOM chop)    the user's descent, as written
+  2    ARRIVALS             snare 4 leads, kick pickup      Amen, busier ghosts (CHOP_B)            repeats: C#1 2 bars, B0 2 bars
                             on the "a" of 4 in bar 4
-  3    SUB-POENA SERVED     kicks on 3 and &3, as the       Cold Sweat A-B-C-D, ghost turnaround    sub-poena served,
-                            Cold Sweat drummer plays                                               one note on the one
-  4    DEPARTURES           sparse: the &3 kick only in     Cold Sweat B-A-flip, snare up an        departures (8 bars)
-                            bars 2 and 4                    octave to end bar 4
-  5    SUBLIMINAL MESSAGE   kick on the "a" of 3            Apache, break kicks dropped,            subliminal message
-                                                            hand-drum turnaround                   (8 bars)
-  6    COMING DOWN          softer, a snare drag at the     Apache with its kicks, reversed snare   coming down
+  3    SUB-POENA SERVED     kicks on 3 and &3, as the       Cold Sweat A-B-C-D, ghost turnaround    tracks: C#1 B0 A0 B0
+                            Cold Sweat drummer plays
+  4    DEPARTURES           sparse: the &3 kick only in     Cold Sweat B-A-flip, snare up an        tracks: F#0 G#0 A0 B0
+                            bars 2 and 4                    octave to end bar 4                    A0 G#0 G#0 F#0
+  5    SUBLIMINAL MESSAGE   kick on the "a" of 3            Apache, break kicks dropped,            repeats: F#0 6 bars,
+                                                            hand-drum turnaround                   G#0 2 bars
+  6    COMING DOWN          softer, a snare drag at the     Apache with its kicks, reversed snare   tracks: A0 G#0 F#0 G#0
                             end of bar 4                    into bar 3, snare-drag turnaround
+
+Basslines take one of the user's two shapes: REPEATS (one pitch struck in the rhythm the heard line had,
+changing by a step at a 2-bar line) or TRACKS (a 3.5-beat note a bar, each a repeat or a 1-2 semitone step,
+the loop's wrap included). No hops.
 
 Each row's THROW-UP 16ths have their own velocity shape, subtle and the same every bar:
   1 straight   the beat leads, the e and a sit back
@@ -136,15 +140,40 @@ CHOPS = [
 
 BREAK_LANES = ("AMEN-DMENT", "COLD-CUTS", "CHOPPER")
 VARIANT_FROM = 72
-# scene name, break track, (bass track, bass clip name or slot in the archive)
+FS0, GS0, A0, B0, CS1 = 30, 32, 33, 35, 37
+TRACK_LEN, TRACK_VEL = 3.5, 108
+# scene name, break track, bass: ("as is", archive track, key) | ("repeats", archive track, key, pitch per bar)
+#                                | ("tracks", pitch per bar)
 ROWS = [
-    ("TRAPDOOR", "AMEN-DMENT", ("F-HOLE", 21)),
-    ("ARRIVALS", "AMEN-DMENT", ("F-HOLE", "arrivals")),
-    ("SUB-POENA SERVED", "COLD-CUTS", ("SUB-POENA", "sub-poena served")),
-    ("DEPARTURES", "COLD-CUTS", ("F-HOLE", "departures")),
-    ("SUBLIMINAL MESSAGE", "CHOPPER", ("SUB-LIMINAL", "subliminal message")),
-    ("COMING DOWN", "CHOPPER", ("SUB-LIMINAL", "coming down")),
+    ("TRAPDOOR", "AMEN-DMENT", ("as is", "F-HOLE", 21)),
+    ("ARRIVALS", "AMEN-DMENT", ("repeats", "F-HOLE", "arrivals", [CS1, CS1, B0, B0])),
+    ("SUB-POENA SERVED", "COLD-CUTS", ("tracks", [CS1, B0, A0, B0])),
+    ("DEPARTURES", "COLD-CUTS", ("tracks", [FS0, GS0, A0, B0, A0, GS0, GS0, FS0])),
+    ("SUBLIMINAL MESSAGE", "CHOPPER", ("repeats", "SUB-LIMINAL", "subliminal message", [FS0] * 6 + [GS0] * 2)),
+    ("COMING DOWN", "CHOPPER", ("tracks", [A0, GS0, FS0, GS0])),
 ]
+
+
+def bassline(spec):
+    """(name, notes, length) for a row's bass spec."""
+    kind = spec[0]
+    if kind == "tracks":
+        pitches = spec[1]
+        return "tracks", [(p, 4.0 * b, TRACK_LEN, TRACK_VEL) for b, p in enumerate(pitches)], 4.0 * len(pitches)
+    clip = archived(spec[1], spec[2])
+    length = float(clip["length"])
+    notes = plain(clip)
+    if kind == "repeats":
+        per_bar = spec[3]
+        assert len(per_bar) * 4.0 == length, (spec, length)
+        notes = [(per_bar[int(st // 4)], st, d, v) for p, st, d, v in notes]
+        return "repeats", notes, length
+    return "as written", notes, length
+
+
+def moves(notes):
+    pitches = [n[0] for n in sorted(notes, key=lambda n: n[1])]
+    return [abs(b - a) for a, b in zip(pitches, pitches[1:] + pitches[:1])]
 SIXTEENTHS = ("THROW-UP", "arrivals")
 
 
@@ -209,26 +238,6 @@ def no_overlap(notes, length):
     return out
 
 
-def single_on_the_one(notes, length):
-    """A 16th double on the one (the same note twice) becomes one note lasting as long as the pair: the user
-    didn't like the doubles on SUB-POENA SERVED."""
-    notes = sorted(notes, key=lambda n: n[1])
-    out, skip = [], set()
-    for i, (p, st, d, v) in enumerate(notes):
-        if i in skip:
-            continue
-        nxt = notes[i + 1] if i + 1 < len(notes) else None
-        if st % 4 == 0 and nxt and nxt[0] == p and abs(nxt[1] - (st + 0.25)) < 1e-6:
-            out.append((p, st, round(nxt[1] + nxt[2] - st, 4), v))
-            skip.add(i + 1)
-        else:
-            out.append((p, st, d, v))
-    return out
-
-
-BASS_EDITS = {"SUB-POENA SERVED": single_on_the_one}
-
-
 def put(ch, t, slot, name, notes, length):
     """Replace the notes of a clip that already has this length, so its clip envelopes survive; create it
     otherwise."""
@@ -268,15 +277,12 @@ def main():
     ch.start()
     try:
         sixteenths = archived(*SIXTEENTHS)
-        for row, (scene, brk, (bass_from, bass_key)) in enumerate(ROWS):
-            bass = archived(bass_from, bass_key)
+        for row, (scene, brk, bass_spec) in enumerate(ROWS):
+            bass_shape, bass_notes, bass_len = bassline(bass_spec)
             shape_name, shape = SHAPES[row]
             lanes = [("SPINE-TINGLER", *SPINES[row], 16.0), (brk, *CHOPS[row], 16.0),
                      ("THROW-UP", f"16ths {shape_name}", shaped(plain(sixteenths), shape), float(sixteenths["length"])),
-                     ("F-HOLE", bass["name"] or "trapdoor",
-                      no_overlap(BASS_EDITS.get(scene, lambda n, _: n)(plain(bass), float(bass["length"])),
-                                 float(bass["length"])),
-                      float(bass["length"]))]
+                     ("F-HOLE", scene.lower(), no_overlap(bass_notes, bass_len), bass_len)]
             written = []
             for track, name, notes, length in lanes:
                 t = index_of(ch, track)
@@ -291,8 +297,8 @@ def main():
                         written.append(f"-{other}")
             ch.set_scene_name(row, scene).result(timeout=3)
             print(f"  row {row + 1} {scene:<19} {SPINES[row][0]:<13} {CHOPS[row][0]:<19} 16ths {shape_name:<8} "
-                  f"bass {bass['name'] or 'hand-written'} "
-                  f"({bass['length'] / 4:g} bars) | {'wrote ' + ', '.join(written) if written else 'unchanged'}")
+                  f"bass {bass_shape} ({bass_len / 4:g} bars, largest move {max(moves(bass_notes))} st) | "
+                  f"{'wrote ' + ', '.join(written) if written else 'unchanged'}")
     finally:
         ch.stop()
 
