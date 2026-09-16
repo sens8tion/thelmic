@@ -111,19 +111,28 @@ def twice(riff):
     return riff + [(p, s + 8.0, d, v) for p, s, d, v in riff]
 
 
-RIFF_ARRIVALS = twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
-                       (EB1, 4.0, 1.25, 114), (EB1, 5.5, 0.5, 106)])
-RIFF_BAGGAGE = twice([(AB1, 0.0, 0.75, 116), (AB1, 0.75, 0.5, 104), (AB1, 2.0, 1.25, 110),
-                      (G1, 4.0, 0.5, 114), (G1, 4.75, 1.0, 106), (G1, 6.5, 0.5, 104)])
-RIFF_SERVED = twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 110), (AB1, 2.5, 0.5, 112),
-                     (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)])
-RIFF_CONTEMPT = twice([(C2, 0.0, 0.5, 118), (C2, 0.75, 0.25, 104), (BB1, 1.5, 0.5, 110), (BB1, 2.5, 0.5, 108),
-                       (AB1, 4.0, 0.5, 116), (AB1, 4.75, 0.25, 104), (AB1, 5.5, 0.5, 110)])
-# barely moving, with overlaps into the changes so the glide slides between them
+def octave_double(riff, home):
+    """An on-key octave-crossing double as the pickup back into the loop: the riff's home note on the "e" of
+    beat 4, the same note an octave up on the "and" (held an 8th), landing back on the home note on the 1.
+    Once per 4 bars: octave moves are rare in the reference (1.8% of bass transitions)."""
+    trimmed = [(p, s, round(min(d, 15.0 - s - 0.02), 4), v) for p, s, d, v in riff if s < 15.0]
+    return trimmed + [(home, 15.25, 0.22, 112), (home + 12, 15.5, 0.45, 106)]
+
+
+RIFF_ARRIVALS = octave_double(twice([(F1, 0.0, 1.0, 116), (F1, 1.5, 0.5, 106), (F1, 2.5, 0.75, 110),
+                                     (EB1, 4.0, 1.25, 114), (EB1, 5.5, 0.5, 106)]), F1)
+RIFF_BAGGAGE = octave_double(twice([(AB1, 0.0, 0.75, 116), (AB1, 0.75, 0.5, 104), (AB1, 2.0, 1.25, 110),
+                                    (G1, 4.0, 0.5, 114), (G1, 4.75, 1.0, 106), (G1, 6.5, 0.5, 104)]), AB1)
+RIFF_SERVED = octave_double(twice([(F1, 0.0, 0.5, 118), (F1, 0.75, 0.25, 104), (F1, 1.5, 0.5, 110), (AB1, 2.5, 0.5, 112),
+                                   (EB1, 4.0, 0.5, 116), (EB1, 4.75, 0.25, 104), (EB1, 5.5, 0.75, 110)]), F1)
+RIFF_CONTEMPT = octave_double(twice([(C2, 0.0, 0.5, 118), (C2, 0.75, 0.25, 104), (BB1, 1.5, 0.5, 110), (BB1, 2.5, 0.5, 108),
+                                     (AB1, 4.0, 0.5, 116), (AB1, 4.75, 0.25, 104), (AB1, 5.5, 0.5, 110)]), C2)
+# barely moving, with overlaps into the changes so the glide slides between them; the octave double here
+# overlaps too, so it slides up the octave instead of jumping
 RIFF_MESSAGE = [(F1, 0.0, 3.0, 112), (F1, 4.0, 2.0, 106), (F1, 6.5, 1.65, 108),
-                (EB1, 8.0, 3.0, 112), (EB1, 12.0, 2.9, 106), (F1, 14.75, 1.2, 108)]
+                (EB1, 8.0, 3.0, 112), (EB1, 12.0, 2.9, 106), (F1, 14.75, 0.65, 108), (F1 + 12, 15.25, 0.7, 104)]
 RIFF_CONTROL = [(AB1, 0.0, 3.0, 112), (AB1, 4.0, 2.25, 106), (AB1, 6.5, 1.65, 108),
-                (G1, 8.0, 3.0, 112), (G1, 12.0, 3.7, 106)]
+                (G1, 8.0, 3.0, 112), (G1, 12.0, 2.7, 106), (AB1, 14.75, 0.65, 108), (AB1 + 12, 15.25, 0.7, 104)]
 
 # ---------------------------------------------------------------- sub signatures (copies of F-HOLE)
 SUB_VOICES = {
