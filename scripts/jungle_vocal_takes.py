@@ -47,11 +47,15 @@ PHRASES = {
     "hop": (phrase("hop", CS4, "this", word_phonemes=["hh", "ao", "p"]), "hop like this",
             [CS4, CS4, CS4 - 3]),
     "bump": (phrase("bump", CS4, "that"), "bump like that", [CS4, CS4, CS4 - 3]),
-    # "lick" is the holdout: under-sung by 15-20 dB and heard as "look"/"make"/"big". It was the
-    # only word up on E, and CMUdict ends it in a stop closure (l ih k cl) which eats the level.
-    # Down to C# with the others, and the closure dropped.
-    "lick": (phrase("lick", CS4, "this", scoop=-1.6, lead_beats=0.95,
-                    word_phonemes=["l", "ih", "k"]), "lick like this", [CS4, CS4, CS4 - 3]),
+    # "lick like this" failed at every timing: "lick" and "like" are near-identical, the model
+    # sang the second and swallowed the first. "it" gives the k a vowel to release into and puts
+    # a different word between them. Lands on 3 like the others.
+    "lick": ([{"lyric": "lick", "midi": CS4, "beats": 0.7, "scoop": -1.6, "scoop_beats": 0.15},
+              {"lyric": "it", "midi": CS4, "beats": 0.3},
+              {"lyric": "like", "midi": CS4 + 0.7, "beats": 0.5},
+              {"lyric": "this", "midi": CS4 - 3, "beats": 0.5, "fall": -1.0, "fall_beats": 0.3},
+              {"rest": True, "beats": 2.0}],
+             "lick it like this", [CS4, CS4, CS4, CS4 - 3]),
     "bubble": ([{"phonemes": ["b", "ah"], "midi": A3, "beats": 0.4, "scoop": -1.2, "scoop_beats": 0.15},
                 {"phonemes": ["b", "ax", "l"], "midi": A3, "beats": 0.35},
                 {"lyric": "like", "midi": A3 + 0.7, "beats": 0.6},
