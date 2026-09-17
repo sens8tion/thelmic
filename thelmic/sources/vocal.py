@@ -83,6 +83,15 @@ class VocalSpec:
 
     A note may carry ``phonemes`` (a list) instead of ``lyric``, which is how syllables of
     one word go on different pitches.
+
+    Emphasis is per note, and it is COLOUR, not loudness — the voicebank has no energy input:
+
+        ``gender`` (alias ``colour``)   +0.2 is measurably brighter at no cost in level. Negative
+                                        values thin the word and then destroy it: keep it >= 0.
+        ``velocity`` (alias ``speed``)  small and tonal, 0.9 brighter, 1.15 darker; never level.
+
+    Measured in the renderer's bench/diag_emphasis.py against a noise floor of +-0.5 dB and
+    +-100 Hz. For level, put gain on the rendered take (scripts/jungle_vocal_emphasis.py).
     """
 
     notes: list[dict]
