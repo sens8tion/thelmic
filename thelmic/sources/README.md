@@ -14,9 +14,17 @@ Live as Simpler/Sampler clips.
 | `nasa`             | Public domain (NASA media usage guidelines)          | Yes          | Yes                |
 | `fma`              | Disabled (API decommissioned 2018)                   | —            | —                  |
 | `epidemic`         | Disabled (subscription-gated, not royalty-free)      | —            | —                  |
+| `vocal`            | **Voicebank CC BY-NC-ND 4.0 + Commons Clause; vocoder weights CC BY-NC-SA 4.0** | Yes | **No** — both components are NonCommercial |
 
 `Sound.license` is populated where the upstream API exposes it. Always treat
 it as load-bearing — never assume "royalty-free" means "do anything".
+
+`vocal` is a generator, not a library: it is commissioned with
+`vocal.render(VocalSpec(...))`, `find()` skips it, and its row is the strictest here.
+Both of its mandatory components are NonCommercial — the vocoder as well as the
+voicebank — and picking another English DiffSinger voicebank does not change that; all
+of those checked sell commercial rights separately. Whether NonCommercial weights
+encumber the rendered audio is an unsettled legal question: it is flagged, not resolved.
 
 ## Setup
 

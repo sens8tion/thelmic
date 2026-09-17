@@ -10,6 +10,12 @@ Unified API:
 Each adapter exposes ``search(query, *, limit, **filters) -> list[Sound]`` and
 ``fetch(sound) -> Path``. ``find()`` fans out across all enabled adapters.
 
+Generators (``GENERATOR = True``) are the exception: there is nothing to search, so
+``find()`` skips them and they are commissioned directly::
+
+    from thelmic.sources import vocal
+    sound = vocal.render(vocal.VocalSpec(notes=[...], bpm=170))
+
 Licensing (READ THIS):
     freesound        — CC0 / CC-BY / CC-Sampling+ (per-sound; check Sound.license)
     bbc              — Personal / educational / research use only. NOT commercial.
@@ -17,6 +23,11 @@ Licensing (READ THIS):
     nasa             — Public domain.
     fma              — Per-item CC. (API was deprecated; adapter is best-effort.)
     epidemic         — Subscription-gated; stubbed. Not royalty-free.
+    vocal            — STRICTEST ROW. Voicebank CC BY-NC-ND 4.0 + Commons Clause;
+                       vocoder weights CC BY-NC-SA 4.0. Personal use yes, commercial
+                       release NO — both components are NonCommercial, and no English
+                       DiffSinger bank checked is commercial-clear by default. Whether NC
+                       weights encumber rendered audio is unsettled; see vocal.py.
 """
 
 from __future__ import annotations
@@ -28,7 +39,7 @@ from . import _config  # noqa: F401  — populates os.environ from ~/.thelmic/.e
 from ._base import Sound, SourceError
 from ._cache import cache_root
 
-from . import freesound, bbc, internet_archive, nasa, fma, epidemic
+from . import freesound, bbc, internet_archive, nasa, fma, epidemic, vocal
 
 _ADAPTERS = {
     "freesound": freesound,
@@ -37,6 +48,7 @@ _ADAPTERS = {
     "nasa": nasa,
     "fma": fma,
     "epidemic": epidemic,
+    "vocal": vocal,
 }
 
 
@@ -57,6 +69,8 @@ def find(
         mod = _ADAPTERS.get(name)
         if mod is None or not mod.available():
             continue
+        if getattr(mod, "GENERATOR", False):
+            continue        # commissioned, not searched — see vocal.render()
         try:
             buckets.append(list(mod.search(query, limit=limit)))
         except SourceError:
