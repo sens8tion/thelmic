@@ -27,6 +27,14 @@ riff that repeats exactly, as struck notes on one pitch or long notes a step apa
 semitone steps up top, then falling on bar 4 - the riff's thinnest bar - to its lowest note, and jumping back
 up when it comes round. Nothing walks bar to bar in one direction (that reads as a riser).
 
+Every row also carries the two OTHER breaks (FILLS), so the crossfader (AMEN + spine on A, COLD-CUTS + CHOPPER
+on B) has something on both sides in any row. Each fill is its own chop, suited to the row's spine, and uses the
+chop dimensions deterministically - a snare roll, a pitched snare, a reversed snare, a stretched snare, doubled
+kicks - never chance:
+  AMEN-DMENT  rows 3-6  roll / sparse + stretch / reversed pickups, no kicks / pitched snares
+  COLD-CUTS   rows 1,2,5,6  roll / stretch + pitched pickup / ghosts, no kicks / offset-snare drag
+  CHOPPER     rows 1-4  straight / pitched / doubled kicks + snare repeats / sparse + stretch, no kicks
+
 Each row's THROW-UP 16ths have their own velocity shape, subtle and the same every bar:
   1 straight   the beat leads, the e and a sit back
   2 lift       the "and" leads: offbeat hats
@@ -35,9 +43,11 @@ Each row's THROW-UP 16ths have their own velocity shape, subtle and the same eve
   5 3-3-2      accents on 16ths 1, 4, 7 of each half bar
   6 fall       each bar starts loud and sinks
 
-Writes only clips that differ from what is there.
+The user plays and edits this set by hand, so by default this only fills EMPTY slots: a clip that differs from
+what the script would write is kept and reported. --overwrite replaces those (notes in place, envelopes kept).
 
     python scripts/jungle_sections.py
+    python scripts/jungle_sections.py --overwrite
 """
 from __future__ import annotations
 
@@ -53,7 +63,7 @@ if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
 from jungle_reset import ARCHIVE, index_of  # noqa: E402
-from jungle_rows import (AMEN, CHOP_A, CHOP_B, SWEAT, TOP, V_REV_SNARE, V_SNARE_UP12, VEL,  # noqa: E402
+from jungle_rows import (AMEN, CHOP_A, CHOP_B, CHOP_C, SWEAT, TOP, V_REV_SNARE, V_SNARE_UP12, VEL,  # noqa: E402
                          blocks, home_bars)
 
 KICK, SNARE = 36, 38
@@ -110,6 +120,12 @@ def _apache_drag():
     return bars
 
 
+# variant pads (scripts/jungle_kits.py): 72 snare +12, 73 snare +7, 74 kick -3, 75 snare from 30% in, 76 reversed
+# snare, 77 reversed hat/hand, 78 snare stretched x2, 79 stretched x1.5
+PAD_LEN = {72: 0.25, 73: 0.25, 74: 0.5, 75: 0.25, 76: 0.5, 77: 0.5, 78: 1.0, 79: 0.75}
+PAD_VEL = {75: 92}
+
+
 def chop(brk, bars):
     """Notes from bar maps {16th: slice or pad(note)}: velocity by what the slice holds (off-16ths 12 softer),
     each hit ringing until the next one. Every note plays."""
@@ -118,7 +134,7 @@ def chop(brk, bars):
         for slot, what in sorted(bar.items()):
             t = b * 4.0 + slot * 0.25
             if isinstance(what, tuple):
-                hits.append((what[1], t, 0.5, 100))
+                hits.append((what[1], t, PAD_LEN.get(what[1], 0.5), PAD_VEL.get(what[1], 100)))
             else:
                 vel = max(VEL.get(part, 96) for part in brk.parts[what]) - (12 if slot % 2 else 0)
                 hits.append((36 + what, t, brk.natural(what), vel))
@@ -138,6 +154,93 @@ CHOPS = [
     ("apache no kicks", chop(TOP, blocks(TOP, {13: 13, 14: 20, 15: 27}, drop_kicks=True))),
     ("apache drag", chop(TOP, _apache_drag())),
 ]
+
+V_KICK_DOWN, V_OFFSET, V_REV_LIGHT, V_STRETCH_2, V_STRETCH_15, V_SNARE_UP7 = 74, 75, 77, 78, 79, 73
+
+
+def _cold_roll():
+    a, b = home_bars(SWEAT)
+    return [a, b, a, {**{k: v for k, v in b.items() if k < 12}, 12: 17, 13: 12, 14: 17, 15: 12}]
+
+
+def _cold_stretch():
+    a, b = home_bars(SWEAT)
+    c = {**{k: v for k, v in a.items() if k < 8}, **{k: v for k, v in b.items() if k >= 8}}
+    d = {**{k: v for k, v in b.items() if k < 13}, 13: 9, 14: pad(V_SNARE_UP7), 15: 4}
+    return [a, {**b, 14: pad(V_STRETCH_15)}, c, d]
+
+
+def _cold_ghosts():
+    bars = blocks(SWEAT, {13: 19, 14: 4, 15: 14}, drop_kicks=True)
+    bars[1] = {**bars[1], 6: pad(V_REV_LIGHT)}
+    return bars
+
+
+def _cold_offset():
+    a, b = home_bars(SWEAT)
+    return [b, a, b, {**{k: v for k, v in a.items() if k < 12}, 12: 7, 14: pad(V_OFFSET), 15: pad(V_OFFSET)}]
+
+
+def _apache_pitched():
+    bars = blocks(TOP, {12: 25, 14: 22, 15: pad(V_SNARE_UP7)})
+    bars[1] = {**bars[1], 14: pad(V_SNARE_UP12)}
+    return bars
+
+
+def _apache_doubles():
+    a, b = home_bars(TOP)
+    a2, b2 = {**a, 8: 0}, {**b, 8: 14}
+    return [a2, b2, a2, {**{k: v for k, v in b2.items() if k < 12}, 12: 18, 13: 25, 14: 18, 15: 25}]
+
+
+def _apache_sparse():
+    ghosts = {s_ for s_, parts in enumerate(TOP.parts) if parts == ["ghost"]}
+    bars = blocks(TOP, {12: pad(V_STRETCH_2)}, drop_kicks=True)
+    return [{k: v for k, v in bar.items() if isinstance(v, tuple) or v not in ghosts} for bar in bars]
+
+
+# Amen: the file is itself a chop, so the bars are written from its slice labels - kicks 0 1 7 12 20 25,
+# snares 2 4 9 15 17 21, soft snares 6 11 14 19 23 24, hats 3 5 8 10 16 18 22, ghost 13
+AMEN_ROLL = [{0: 0, 2: 3, 4: 2, 6: 16, 7: 13, 8: 7, 10: 12, 12: 21, 14: 5, 15: 24},
+             {0: 0, 2: 8, 3: 13, 4: 15, 6: 10, 8: 20, 10: 1, 12: 9, 13: 13, 14: 18},
+             {0: 25, 2: 3, 4: 17, 5: 13, 6: 16, 8: 7, 10: 12, 11: 14, 12: 21, 14: 22},
+             {0: 0, 2: 5, 4: 2, 6: 18, 8: 12, 10: 20, 12: 21, 13: 21, 14: 21, 15: 21}]
+AMEN_REVERSE = [{2: 3, 4: 2, 6: 5, 7: 13, 8: 16, 10: 10, 12: 9, 14: 22},
+                {2: 8, 4: 15, 6: 18, 8: 5, 9: 13, 10: 3, 12: 21, 14: pad(V_REV_SNARE)},
+                {2: 16, 4: 17, 6: 22, 7: 13, 8: 3, 10: 8, 12: 21, 14: 5},
+                {2: 3, 4: 4, 6: 10, 8: 18, 10: 16, 11: 14, 12: 9, 14: pad(V_REV_SNARE)}]
+AMEN_PITCHED = [{0: 0, 2: 3, 4: 4, 6: 5, 8: 7, 10: 1, 12: 9, 14: 16},
+                {0: 0, 2: 8, 3: 13, 4: 21, 6: 10, 8: 12, 12: 17, 14: 22, 15: pad(V_SNARE_UP7)},
+                {0: 25, 2: 3, 4: 2, 6: 18, 8: 7, 10: 20, 12: 15, 14: 5},
+                {0: 0, 2: 8, 4: 4, 6: 10, 8: 12, 12: 21, 13: 24, 14: pad(V_SNARE_UP12), 15: 23}]
+AMEN_SPARSE = [dict(bar) for bar in CHOP_C]
+AMEN_SPARSE[1] = {**AMEN_SPARSE[1], 14: pad(V_STRETCH_2)}
+
+# (row, break track) -> (clip name, notes): the breaks that aren't a row's own
+FILLS = {
+    (0, "COLD-CUTS"): ("cold sweat roll", chop(SWEAT, _cold_roll())),
+    (0, "CHOPPER"): ("apache straight", chop(TOP, blocks(TOP, {13: 8, 14: 11, 15: 13}))),
+    (1, "COLD-CUTS"): ("cold sweat stretch", chop(SWEAT, _cold_stretch())),
+    (1, "CHOPPER"): ("apache pitched", chop(TOP, _apache_pitched())),
+    (2, "AMEN-DMENT"): ("amen roll", chop(AMEN, AMEN_ROLL)),
+    (2, "CHOPPER"): ("apache doubles", chop(TOP, _apache_doubles())),
+    (3, "AMEN-DMENT"): ("amen sparse stretch", chop(AMEN, AMEN_SPARSE)),
+    (3, "CHOPPER"): ("apache sparse stretch", chop(TOP, _apache_sparse())),
+    (4, "AMEN-DMENT"): ("amen reverse", chop(AMEN, AMEN_REVERSE)),
+    (4, "COLD-CUTS"): ("cold sweat ghosts", chop(SWEAT, _cold_ghosts())),
+    (5, "AMEN-DMENT"): ("amen pitched", chop(AMEN, AMEN_PITCHED)),
+    (5, "COLD-CUTS"): ("cold sweat offset", chop(SWEAT, _cold_offset())),
+}
+
+
+def check_chops():
+    """Every chop on the grid is its own, and every bar keeps the break's snare on 2."""
+    every = [n for _, n in CHOPS] + [n for _, n in FILLS.values()]
+    assert len({tuple(n) for n in every}) == len(every), "two chops are the same"
+    for name, notes in list(CHOPS) + list(FILLS.values()):
+        for b in range(4):
+            on_two = [n for n in notes if abs(n[1] - (b * 4 + 1.0)) < 1e-6]
+            assert on_two, f"{name}: bar {b + 1} has nothing on 2"
 
 BREAK_LANES = ("AMEN-DMENT", "COLD-CUTS", "CHOPPER")
 # the sub lane: BOO-MERANGUE, the 808 chosen 2026-09-17 (F-HOLE, TONE-DEAF and WOBBLE-BOARD were dropped)
@@ -303,8 +406,13 @@ def same(ch, t, slot, notes, length):
                and abs(a[4] - b[4]) < 1e-3 for a, b in zip(have, want))
 
 
-def main():
+def main(argv=None):
+    import argparse
     from thelmic.live_channel import LiveChannel
+    ap = argparse.ArgumentParser(description="Write the section rows: empty slots only, unless --overwrite.")
+    ap.add_argument("--overwrite", action="store_true", help="replace clips that differ from the script")
+    args = ap.parse_args(argv)
+    check_chops()
     ch = LiveChannel(lower_priority=False)
     ch.start()
     try:
@@ -316,24 +424,25 @@ def main():
             shape_name, shape = SHAPES[row]
             lanes = [("SPINE-TINGLER", *SPINES[row], 16.0), (brk, *CHOPS[row], 16.0),
                      ("THROW-UP", f"16ths {shape_name}", shaped(plain(sixteenths), shape), float(sixteenths["length"])),
-                     ] + [(sub_lane, scene.lower(), no_overlap(bass_notes, bass_len), bass_len)
-                          for sub_lane in SUB_LANES if sub_lane in present]
-            written = []
+                     ] + [(track, *FILLS[(row, track)], 16.0) for track in BREAK_LANES if (row, track) in FILLS] \
+                + [(sub_lane, scene.lower(), no_overlap(bass_notes, bass_len), bass_len)
+                   for sub_lane in SUB_LANES if sub_lane in present]
+            wrote, kept = [], []
             for track, name, notes, length in lanes:
                 t = index_of(ch, track)
-                if not same(ch, t, row, notes, length):
+                if ch.get_clip_props(t, row).result(timeout=5).get("length") is None:
                     put(ch, t, row, name, notes, length)
-                    written.append(track)
-            for other in BREAK_LANES:
-                if other != brk:
-                    t = index_of(ch, other)
-                    if ch.get_clip_props(t, row).result(timeout=5).get("length") is not None:
-                        ch.clear_clip(t, row).result(timeout=5)
-                        written.append(f"-{other}")
-            ch.set_scene_name(row, scene).result(timeout=3)
-            print(f"  row {row + 1} {scene:<19} {SPINES[row][0]:<13} {CHOPS[row][0]:<19} 16ths {shape_name:<8} "
-                  f"bass {bass_shape} ({bass_len / 4:g} bars, largest move {max(moves(bass_notes))} st) | "
-                  f"{'wrote ' + ', '.join(written) if written else 'unchanged'}")
+                    wrote.append(track)
+                elif same(ch, t, row, notes, length):
+                    continue
+                elif args.overwrite:
+                    put(ch, t, row, name, notes, length)
+                    wrote.append(track)
+                else:
+                    kept.append(track)
+            print(f"  row {row + 1} {scene:<19} "
+                  + (f"wrote {', '.join(wrote)}" if wrote else "nothing to write")
+                  + (f" | kept yours: {', '.join(kept)}" if kept else ""))
     finally:
         ch.stop()
 
