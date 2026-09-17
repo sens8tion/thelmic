@@ -40,6 +40,10 @@ if SCRIPTS_DIR not in sys.path:
 from jungle_vocal import A3, CS4, E4, FS3, KEPT, SPEAKER, phrase, session_bpm  # noqa: E402
 
 TAKES = 6
+# Render unhurried and warp to the grid in Live (the user's idea): at half the session tempo every
+# word gets double the time, so nothing is starved, and one bar warps to one bar at 2x on Complex
+# Pro. RENDER_BPM=None renders at the session tempo instead.
+RENDER_BPM_RATIO = 0.5
 # name -> (notes, the words as the transcriber should hear them, the note each word sits on)
 PHRASES = {
     # "hop" from CMUdict is hh aa p - an American open vowel, heard as "hope"/"hot". ao is the
@@ -52,7 +56,7 @@ PHRASES = {
     "lick": ([{"phonemes": ["l", "ih", "k"], "midi": CS4, "beats": 0.7, "scoop": -1.6,
                "scoop_beats": 0.15, "word": "lick"},
               {"phonemes": ["ih", "t"], "midi": CS4, "beats": 0.3, "word": "it"},
-              {"lyric": "like", "midi": CS4 + 0.7, "beats": 0.5, "word": "like"},
+              {"lyric": "like", "midi": CS4, "beats": 0.5, "word": "like"},
               {"lyric": "this", "midi": CS4 - 3, "beats": 0.5, "fall": -1.0, "fall_beats": 0.3,
                "word": "this"},
               {"rest": True, "beats": 2.0}],
@@ -60,7 +64,7 @@ PHRASES = {
     "bubble": ([{"phonemes": ["b", "ah"], "midi": A3, "beats": 0.4, "scoop": -1.2,
                  "scoop_beats": 0.15, "word": "bubble"},
                 {"phonemes": ["b", "ax", "l"], "midi": A3, "beats": 0.35, "word": "bubble"},
-                {"lyric": "like", "midi": A3 + 0.7, "beats": 0.6, "word": "like"},
+                {"lyric": "like", "midi": A3, "beats": 0.6, "word": "like"},
                 {"phonemes": ["dh", "ae", "t"], "midi": FS3, "beats": 0.65, "fall": -1.0,
                  "fall_beats": 0.3, "word": "that"},
                 {"rest": True, "beats": 2.0}],
@@ -225,10 +229,11 @@ def main(argv=None):
     names = argv or sys.argv[1:] or list(PHRASES)
     if names and names[0] == "--measure":
         return remeasure(session_bpm())
-    bpm = session_bpm()
+    session = session_bpm()
+    bpm = session * RENDER_BPM_RATIO      # unhurried: warped back to the grid in Live
     KEPT.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
-    print(f"bpm {bpm:g}  speaker {SPEAKER}  cpu  {TAKES} takes each\n")
+    print(f"session {session:g} bpm; rendering at {bpm:g}, warped {1 / RENDER_BPM_RATIO:g}x onto the grid; speaker {SPEAKER}; cpu; {TAKES} takes each")
     summary = []
     for name in names:
         notes, truth, midis = PHRASES[name]
@@ -253,7 +258,7 @@ def main(argv=None):
             mark = "  <- best" if roll == best else ""
             print(f"   roll {i}  WER {r['wer']:5.1f}%  heard {r['heard']!r:<22} "
                   + ("; ".join(flags) if flags else "clean") + mark)
-        kept = KEPT / f"phrase-{name}-{stamp}.wav"
+        kept = KEPT / f"phrase-{name}-{bpm:.0f}bpm-{stamp}.wav"
         shutil.copy2(best, kept)
         m = measure(best, notes, bpm, words, midis)
         summary.append((name, kept, faults(m, words)))
