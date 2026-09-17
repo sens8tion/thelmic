@@ -1,7 +1,7 @@
 """JUNGLE LEVELS, NATIVE - the levelled mix moves off the mixer faders, so the MIDImix faders can own them.
 
 Each lane gets a Utility called LEVEL at the end of its chain, holding the level the balancing gave its fader;
-every mixer fader (and Main) goes to 0 dB. The MIDImix faders are then mapped natively to the mixer volumes
+every mixer fader goes to 0 dB (Main is the user's). The MIDImix faders are then mapped natively to the mixer volumes
 with 0 dB at the top of their travel: all faders up is exactly the levelled mix, and pulling one down drops
 that lane from its level rather than jumping to wherever the slider sits.
 
@@ -75,10 +75,7 @@ def main():
             ch.set_track_volume(t, UNITY).result(timeout=3)
             chain = " > ".join(x["name"] for x in devices(ch, t))
             print(f"  {name:<14} LEVEL {gain} {shown:<9} fader {_mixer_db(ch, t)} | {chain}")
-        # Main: the bridge has no master-volume command, but the MIDImix binding still holds the master fader
-        # (range 0..0.85): a simulated fader at the top writes 0 dB
-        state = ch.midimix_simulate([[0xB0, 62, 127]]).result(timeout=5)["state"]
-        print(f"  Main           {state['master']['display'] if state['master'] else 'unbound'}")
+        # Main is left alone: the bridge has no master-volume command
         print("== sound check")
         from jungle_kits import meter_test
         for name, notes in (("SPINE-TINGLER", [(36, 0.0, 0.5, 120), (38, 1.0, 0.5, 120)]),

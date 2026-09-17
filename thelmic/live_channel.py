@@ -845,18 +845,6 @@ class LiveChannel:
             "color_index": int(color_index),
         })
 
-    def midimix_bind(self, spec: dict | None = None) -> Future:
-        """Bind the Akai MIDImix to `spec` (see live_remote_script/midimix.py); the remote script saves it
-        and rebinds it at startup. With no spec, rebind the saved one."""
-        return self._enqueue("midimix_bind", {} if spec is None else {"spec": spec})
-
-    def midimix_state(self) -> Future:
-        return self._enqueue("midimix_state", {})
-
-    def midimix_simulate(self, messages: list[list[int]]) -> Future:
-        """Feed raw MIDI messages through the MIDImix binding as if the controller sent them."""
-        return self._enqueue("midimix_simulate", {"messages": [list(m) for m in messages]})
-
     def move_track(self, track_index: int, target_position: int) -> Future:
         return self._enqueue("move_track", {
             "track_index": track_index, "target_position": int(target_position),

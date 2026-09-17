@@ -1,34 +1,18 @@
-"""JUNGLE RESET - strip the section-board set down to six lanes on the Akai MIDImix.
+"""JUNGLE RESET - strip the section-board set down to six lanes.
 
 Run it on a Save-As copy: the original set keeps the section boards. Every MIDI clip's notes are archived
 first, to tracks/2026-09-16_jungle_boards_clips.json.
 
-  strip  track          knob 1 (top)             knob 2                  knob 3                 fader
-  1      SPINE-TINGLER  drive (Drum Buss)        transients (Drum Buss)  room (Drums Room wet)  level
-  2      AMEN-DMENT     low cut 30 Hz - 1 kHz    crush (Redux wet)       -                      level
-  3      COLD-CUTS      low cut                  crush                   -                      level
-  4      CHOPPER        low cut                  crush                   -                      level
-  5      THROW-UP       high-pass 80 Hz - 4 kHz  throw (Echo wet)        -                      level
-  6      F-HOLE         pitch drop (Pe Amount)   bell (FM from osc B)    grit (shaper mix)      level
-  master fader: Main volume. Buttons: mute (lit while sounding), rec arm cuts the lane while held, SOLO+mute
-  solos, bank < snaps every knob back to the launched row.
-
-No knob adds randomness or thins notes: the user's experience is that true random makes rhythm illegible,
-so character comes from the sound, not from which hits play. (A velocity-gate density knob was tried: Live's
-Velocity device in Gate mode also drops velocity 127 whenever Lowest is above 0.)
-
-Every knob's zero is where the lane sits now, except the knobs on the effects this adds: Redux, Echo, the
-bell and the grit all start at 0% and sound like nothing until turned.
+  Lanes: SPINE-TINGLER, AMEN-DMENT, COLD-CUTS, CHOPPER, THROW-UP, F-HOLE (the sub, later replaced by BOO-MERANGUE).
+  The MIDImix is mapped natively by the user; this script no longer binds it.
 
     python scripts/jungle_reset.py            # dry run: what would be deleted, kept and added
     python scripts/jungle_reset.py --go       # do it
-    python scripts/jungle_reset.py --bind     # only (re)send the MIDImix mapping
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import time
@@ -45,44 +29,6 @@ STRIPS = ["SPINE-TINGLER", "AMEN-DMENT", "COLD-CUTS", "CHOPPER", "THROW-UP", "F-
 BREAKS = ["AMEN-DMENT", "COLD-CUTS", "CHOPPER"]
 ROWS = 8
 COLOR = {"SPINE-TINGLER": 14, "AMEN-DMENT": 15, "COLD-CUTS": 15, "CHOPPER": 15, "THROW-UP": 17, "F-HOLE": 9}
-
-
-def eq_raw(hz: float) -> float:
-    """EQ Eight frequency: raw 0..1 with hz = 10 * 2200 ** raw."""
-    return math.log(hz / 10.0) / math.log(2200.0)
-
-
-def fader():
-    return {"mixer": "volume", "lo": 0.0, "hi": 1.0}
-
-
-def break_strip(track):
-    return {"track": track, "fader": fader(), "knobs": [
-        {"device": "EQ Eight", "param": "1 Frequency A", "lo": eq_raw(30), "hi": eq_raw(1000), "label": "low cut"},
-        {"device": "Redux", "param": "Dry/Wet", "lo": 0.0, "hi": 1.0, "label": "crush"},
-        None]}
-
-
-SPEC = {
-    "strips": [
-        {"track": "SPINE-TINGLER", "fader": fader(), "knobs": [
-            {"device": "Drum Buss", "param": "Drive", "lo": 0.0, "hi": 1.0, "label": "drive"},
-            {"device": "Drum Buss", "param": "Transients", "lo": -1.0, "hi": 1.0, "label": "transients"},
-            {"device": "Drums Room", "param": "Dry/Wet", "lo": 0.0, "hi": 0.6, "label": "room"}]},
-        break_strip("AMEN-DMENT"),
-        break_strip("COLD-CUTS"),
-        break_strip("CHOPPER"),
-        {"track": "THROW-UP", "fader": fader(), "knobs": [
-            {"device": "EQ Eight", "param": "1 Frequency A", "lo": eq_raw(80), "hi": eq_raw(4000), "label": "high-pass"},
-            {"device": "Echo", "param": "Dry Wet", "lo": 0.0, "hi": 0.5, "label": "throw"},
-            None]},
-        {"track": "F-HOLE", "fader": fader(), "knobs": [
-            {"device": "Operator", "param": "Pe Amount", "lo": 0.0, "hi": 1.0, "label": "drop"},
-            {"device": "Operator", "param": "Osc-B Level", "lo": 0.0, "hi": 0.85, "label": "bell"},
-            {"device": "Operator", "param": "Shaper Mix", "lo": 0.0, "hi": 100.0, "label": "grit"}]},
-    ],
-    "master": {"mixer": "volume", "lo": 0.0, "hi": 0.85},
-}
 
 
 def track_names(ch) -> list[str]:
@@ -202,36 +148,14 @@ def colour(ch):
         ch.set_track_color(index_of(ch, name), c).result(timeout=3)
 
 
-def bind(ch):
-    state = ch.midimix_bind(SPEC).result(timeout=10)
-    for s in state["strips"]:
-        knobs = " | ".join(f"{k['label']} {k['display']}" if k else "-" for k in s["knobs"])
-        fdr = s["fader"]["display"] if s["fader"] else "-"
-        print(f"  strip {s['strip']} {s['track']:<14} {knobs} | fader {fdr}")
-    if state["master"]:
-        print(f"  master fader {state['master']['display']}")
-    for u in state["unresolved"]:
-        print(f"  [unresolved] {u}")
-    names = track_names(ch)
-    order = [nm for nm in names if nm in STRIPS]
-    if order != STRIPS:
-        print(f"  track order is {order}: drag them into {STRIPS} so Push columns match the strips "
-              "(the MIDImix follows names, so it is right either way)")
-    return state
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Strip the section boards down to six MIDImix lanes.")
     ap.add_argument("--go", action="store_true", help="make the changes (default: dry run)")
-    ap.add_argument("--bind", action="store_true", help="only send the MIDImix mapping")
     args = ap.parse_args(argv)
     from thelmic.live_channel import LiveChannel
     ch = LiveChannel(lower_priority=False)
     ch.start()
     try:
-        if args.bind:
-            bind(ch)
-            return
         print("== archive the clips")
         archive(ch)
         print("== tracks")
@@ -247,8 +171,6 @@ def main(argv=None):
         check_sound(ch)
         colour(ch)
         ch.set_launch_quantization(1).result(timeout=3)
-        print("== MIDImix")
-        bind(ch)
     finally:
         ch.stop()
 

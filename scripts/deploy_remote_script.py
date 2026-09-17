@@ -20,7 +20,7 @@ SEARCH_ROOTS = [
     Path.home() / "Documents" / "Ableton" / "User Library" / "Remote Scripts",
 ]
 PACKAGE = "ThelmicLive"
-FILES = ("__init__.py", "_upstream.py", "midimix.py")
+FILES = ("__init__.py", "_upstream.py")
 
 
 def find_targets() -> list[Path]:

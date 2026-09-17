@@ -11,7 +11,6 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from _Framework.ControlSurface import ControlSurface
-import os
 import socket
 import json
 import threading
@@ -22,10 +21,6 @@ try:
     import Queue as queue
 except ImportError:
     import queue
-
-from . import midimix
-
-MIDIMIX_SPEC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midimix.json")
 
 DEFAULT_PORT = 9878  # one above upstream (9877) so both can run side-by-side
 HOST = "localhost"
@@ -171,10 +166,6 @@ _UI_THREAD_COMMANDS = {
     "set_scene_color",
     "set_scene_name",
     "set_clip_color",
-    # Akai MIDImix binding (midimix.py)
-    "midimix_bind",
-    "midimix_state",
-    "midimix_simulate",
 }
 
 
@@ -187,21 +178,11 @@ class ThelmicLive(ControlSurface):
         self.server_thread = None
         self.running = False
         self._song = self.song()
-        self._midimix = midimix.MidiMix(
-            lambda b: self._send_midi(tuple(b)), self.log_message,
-            schedule=lambda fn: self.schedule_message(1, fn),
-            version=self._live_version())
-        self.schedule_message(1, self._midimix_bind_saved)
         self._start_server()
         self.show_message("ThelmicLive listening on " + str(DEFAULT_PORT))
 
     def disconnect(self):
         self.running = False
-        try:
-            self._midimix.unbind()
-            self._midimix.leds_off()
-        except Exception:
-            pass
         if self.server:
             try:
                 self.server.close()
@@ -210,59 +191,6 @@ class ThelmicLive(ControlSurface):
         if self.server_thread and self.server_thread.is_alive():
             self.server_thread.join(1.0)
         ControlSurface.disconnect(self)
-
-    # ------------------------------------------------------------------
-    # Akai MIDImix (see midimix.py)
-    # ------------------------------------------------------------------
-
-    def _live_version(self):
-        try:
-            app = self.application()
-            return (app.get_major_version(), app.get_minor_version(), app.get_bugfix_version())
-        except Exception:
-            return (12, 0, 0)
-
-    def _midimix_bind_saved(self):
-        spec = {}
-        try:
-            with open(MIDIMIX_SPEC_PATH) as fh:
-                spec = json.load(fh)
-        except (IOError, OSError, ValueError):
-            pass
-        state = self._midimix.bind(self._song, spec)
-        if state["unresolved"]:
-            self.log_message("MidiMix unresolved: " + "; ".join(state["unresolved"]))
-
-    def _midimix_bind(self, spec):
-        if spec is not None:
-            with open(MIDIMIX_SPEC_PATH, "w") as fh:
-                json.dump(spec, fh, indent=1)
-        else:
-            spec = self._midimix.spec
-        return self._midimix.bind(self._song, spec)
-
-    def build_midi_map(self, midi_map_handle):
-        ControlSurface.build_midi_map(self, midi_map_handle)
-        if getattr(self, "_midimix", None) is None:
-            return
-        import Live
-        script = self._c_instance.handle()
-        for cc in midimix.ALL_CCS:
-            Live.MidiMap.forward_midi_cc(script, midi_map_handle, midimix.CHANNEL, cc)
-        for note in midimix.ALL_NOTES:
-            Live.MidiMap.forward_midi_note(script, midi_map_handle, midimix.CHANNEL, note)
-
-    def receive_midi(self, midi_bytes):
-        mix = getattr(self, "_midimix", None)
-        if mix is not None and mix.receive(midi_bytes):
-            return
-        ControlSurface.receive_midi(self, midi_bytes)
-
-    def refresh_state(self):
-        ControlSurface.refresh_state(self)
-        if getattr(self, "_midimix", None) is not None:
-            self._midimix.refresh_leds()
-            self.schedule_message(5, self._midimix.identity_request)
 
     def _start_server(self):
         try:
@@ -854,13 +782,6 @@ class ThelmicLive(ControlSurface):
             )
         if cmd_type == "get_listener_snapshot":
             return self._get_listener_snapshot()
-        if cmd_type == "midimix_bind":
-            return self._midimix_bind(params.get("spec"))
-        if cmd_type == "midimix_state":
-            return self._midimix.state()
-        if cmd_type == "midimix_simulate":
-            handled = [self._midimix.receive(tuple(int(b) for b in m)) for m in params["messages"]]
-            return {"handled": handled, "state": self._midimix.state()}
         raise ValueError("unhandled UI command: " + cmd_type)
 
     # ------------------------------------------------------------------
