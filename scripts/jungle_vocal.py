@@ -36,7 +36,12 @@ sys.path.insert(0, str(REPO))
 KEPT = REPO / "tracks" / "vocals"
 SPEAKER = "tiger_electric"          # the brightest mode: it cuts a dense mix
 
-CS4, E4, A3, FS3 = 61, 64, 57, 54   # C#, E, A, F# - all in F# minor, in the hook's register
+CS4, E4, A3, FS3 = 61, 64, 57, 54
+# Every stop-final word comes back from the dictionary with a trailing "cl", the stop closure, and
+# the renderer gives it ~46 ms: at the end of a phrase that closure sounds as a voiced "uh" (heard
+# by the user, then found in bench/diag_durations.py). These are the same pronunciations without it.
+NO_CLOSURE = {"hop": ["hh", "ao", "p"], "bump": ["b", "ah", "m", "p"], "lick": ["l", "ih", "k"],
+              "that": ["dh", "ae", "t"], "it": ["ih", "t"]}   # C#, E, A, F# - all in F# minor, in the hook's register
 
 
 def hit(word, midi, beats=0.5, scoop=-1.2):
@@ -68,12 +73,15 @@ def phrase(word, midi, tail, tail_midi=None, *, word_phonemes=None, scoop=-1.2,
       * the scoop is 0.15 beats: on a 176 ms note a 0.2-beat scoop was most of the note.
     """
     tags = 2.0 - lead_beats            # the phrase always lands on beat 3
-    lead = {"midi": midi, "beats": lead_beats, "scoop": scoop, "scoop_beats": 0.15}
-    lead.update({"phonemes": list(word_phonemes)} if word_phonemes else {"lyric": word})
+    lead = {"midi": midi, "beats": lead_beats, "scoop": scoop, "scoop_beats": 0.15, "word": word}
+    lead.update({"phonemes": list(word_phonemes or NO_CLOSURE.get(word) or [])} if (word_phonemes or word in NO_CLOSURE)
+                else {"lyric": word})
+    tail_note = {"midi": (tail_midi if tail_midi is not None else midi - 3), "word": tail,
+                 "beats": round(tags * 0.52, 3), "fall": -1.0, "fall_beats": 0.3}
+    tail_note.update({"phonemes": list(NO_CLOSURE[tail])} if tail in NO_CLOSURE else {"lyric": tail})
     return [lead,
-            {"lyric": "like", "midi": midi + like_lift, "beats": round(tags * 0.48, 3)},
-            {"lyric": tail, "midi": (tail_midi if tail_midi is not None else midi - 3),
-             "beats": round(tags * 0.52, 3), "fall": -1.0, "fall_beats": 0.3},
+            {"lyric": "like", "midi": midi + like_lift, "beats": round(tags * 0.48, 3), "word": "like"},
+            tail_note,
             rest(2.0)]
 
 

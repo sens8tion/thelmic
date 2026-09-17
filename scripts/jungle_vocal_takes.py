@@ -44,22 +44,25 @@ TAKES = 6
 PHRASES = {
     # "hop" from CMUdict is hh aa p - an American open vowel, heard as "hope"/"hot". ao is the
     # rounder one. "bubble" is split so each syllable gets its own note rather than blurring.
-    "hop": (phrase("hop", CS4, "this", word_phonemes=["hh", "ao", "p"]), "hop like this",
-            [CS4, CS4, CS4 - 3]),
+    "hop": (phrase("hop", CS4, "this"), "hop like this", [CS4, CS4, CS4 - 3]),
     "bump": (phrase("bump", CS4, "that"), "bump like that", [CS4, CS4, CS4 - 3]),
     # "lick like this" failed at every timing: "lick" and "like" are near-identical, the model
     # sang the second and swallowed the first. "it" gives the k a vowel to release into and puts
     # a different word between them. Lands on 3 like the others.
-    "lick": ([{"lyric": "lick", "midi": CS4, "beats": 0.7, "scoop": -1.6, "scoop_beats": 0.15},
-              {"lyric": "it", "midi": CS4, "beats": 0.3},
-              {"lyric": "like", "midi": CS4 + 0.7, "beats": 0.5},
-              {"lyric": "this", "midi": CS4 - 3, "beats": 0.5, "fall": -1.0, "fall_beats": 0.3},
+    "lick": ([{"phonemes": ["l", "ih", "k"], "midi": CS4, "beats": 0.7, "scoop": -1.6,
+               "scoop_beats": 0.15, "word": "lick"},
+              {"phonemes": ["ih", "t"], "midi": CS4, "beats": 0.3, "word": "it"},
+              {"lyric": "like", "midi": CS4 + 0.7, "beats": 0.5, "word": "like"},
+              {"lyric": "this", "midi": CS4 - 3, "beats": 0.5, "fall": -1.0, "fall_beats": 0.3,
+               "word": "this"},
               {"rest": True, "beats": 2.0}],
              "lick it like this", [CS4, CS4, CS4, CS4 - 3]),
-    "bubble": ([{"phonemes": ["b", "ah"], "midi": A3, "beats": 0.4, "scoop": -1.2, "scoop_beats": 0.15},
-                {"phonemes": ["b", "ax", "l"], "midi": A3, "beats": 0.35},
-                {"lyric": "like", "midi": A3 + 0.7, "beats": 0.6},
-                {"lyric": "that", "midi": FS3, "beats": 0.65, "fall": -1.0, "fall_beats": 0.3},
+    "bubble": ([{"phonemes": ["b", "ah"], "midi": A3, "beats": 0.4, "scoop": -1.2,
+                 "scoop_beats": 0.15, "word": "bubble"},
+                {"phonemes": ["b", "ax", "l"], "midi": A3, "beats": 0.35, "word": "bubble"},
+                {"lyric": "like", "midi": A3 + 0.7, "beats": 0.6, "word": "like"},
+                {"phonemes": ["dh", "ae", "t"], "midi": FS3, "beats": 0.65, "fall": -1.0,
+                 "fall_beats": 0.3, "word": "that"},
                 {"rest": True, "beats": 2.0}],
                "bubble like that", [A3, A3, A3, FS3]),
 }
@@ -118,24 +121,23 @@ def cents(hz, midi):
 
 
 def windows(notes, bpm):
-    """(word, start_s, end_s) for each sung note, from the score's own timing.
+    """(label, start_s, end_s) per word, from the score's own timing.
 
-    Blind segmentation joined the whole phrase into one blob once the gaps got down to 35 ms,
-    which said more about the threshold than the take. The score knows where each word starts.
+    Notes carry an optional "word" key (the renderer ignores it): two notes sharing a word are
+    one window, which is how "bub"+"ble" stays one word. Without it, consecutive phoneme notes
+    would be merged blindly - that is what made "like" and "that" read as one 441 ms word.
     """
-    beat = 60.0 / bpm
-    out, t, pending = [], 0.0, None
-    for n in notes:
+    beat, out, t = 60.0 / bpm, [], 0.0
+    for i, n in enumerate(notes):
         dur = float(n["beats"]) * beat
         if n.get("rest"):
             t += dur
             continue
-        word = n.get("lyric") or "".join(n.get("phonemes", []))
-        if pending and not n.get("lyric"):        # syllables of one word: extend it
+        label = n.get("word") or n.get("lyric") or "".join(n.get("phonemes", []))
+        if out and n.get("word") and n["word"] == out[-1][0]:
             out[-1] = (out[-1][0], out[-1][1], t + dur)
         else:
-            out.append((word, t, t + dur))
-        pending = word
+            out.append((label, t, t + dur))
         t += dur
     return out
 
@@ -157,7 +159,22 @@ def measure(path: Path, notes, bpm, words: list[str], midis: list[int]) -> dict:
                     "window": b - a,
                     "level_db": 20 * math.log10(max(max(rms, default=0), 1e-12) / peak),
                     "hz": hz, "cents": cents(hz, midis[i]) if i < len(midis) else None})
-    return {"peak": peak, "segments": got, "expected": len(words)}
+    # the stop closure at the end of a phrase: a VOICED tail after a gap. A plosive's burst is
+    # part of the word, so this needs both voicing and length before it counts.
+    last_end = windows(notes, bpm)[-1][2]
+    tail = x[int((last_end - 0.14) * sr):int((last_end + 0.10) * sr)]
+    win, hop = int(0.02 * sr), int(0.005 * sr)
+    trailing, gap = 0.0, False
+    for j in range(0, max(1, len(tail) - win), hop):
+        f = tail[j:j + win]
+        r = np.sqrt(np.mean(f ** 2))
+        voiced = np.mean(np.abs(np.diff(np.sign(f)))) / 2 * sr / 2 < 900
+        if r <= peak * 0.03:
+            gap = True
+        elif gap and voiced:
+            trailing += hop / sr
+    trailing = trailing if trailing >= 0.03 else 0.0
+    return {"peak": peak, "segments": got, "expected": len(words), "trailing_ms": trailing * 1000}
 
 
 def faults(m: dict, words: list[str]) -> list[str]:
@@ -171,6 +188,8 @@ def faults(m: dict, words: list[str]) -> list[str]:
             out.append(f"{s_['word']!r} is {-s_['level_db']:.0f} dB under the take's peak")
         if s_["cents"] is not None and 60 < abs(s_["cents"]) <= 300:
             out.append(f"{s_['word']!r} is {s_['cents']:+.0f} cents off")
+    if m.get("trailing_ms"):
+        out.append(f"a voiced release of {m['trailing_ms']:.0f} ms after the last word (the \"uh\")")
     if m["peak"] > 0.98:
         out.append("clipped")
     return out
