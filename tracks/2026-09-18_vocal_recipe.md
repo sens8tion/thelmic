@@ -13,7 +13,7 @@ single take proves nothing. Tools: `local-sung-vocals/bench/sweep_hook.py`, `dia
 | Voice | **tiger_glam** | 6/6 takes legible, against 2/6 for tiger_electric |
 | Tempo | **render at half tempo, warp onto the grid** | words fill 90-95% of their slots, against 60-70% |
 | Register | **root E4 (64) or below** | 6/6 at every root from D3 to E4; 2/6 at G#4 |
-| Lead word | **0.7 beats or more** at the render tempo | 6/6 at 0.7+; 4/6 at 0.4 |
+| Lead word | **as long as the word is.** Two-syllable and open words 0.7 beats or more; **percussive words short** (0.35-0.4 beats, ~110 ms once warped) | the 0.7 rule came from "bubble"; for "hop" 0.35 beats scored the same as 1.25. Longer made the user hear sung vowels where the word is a hit |
 | Ornaments | **a scoop, any depth from -0.6 to -2.4 st** | 6/6 with, 4/6 without |
 | Emphasis | **velocity 0.9 on the stressed word** | 6/6 and brighter; gender costs legibility at every setting |
 | Consonant caps | **leave them alone** | default 6/6; looser 4/6, tighter 5/6 |
