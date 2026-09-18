@@ -48,7 +48,8 @@ KITS = {
     "BIG-MOUTH": (1.0, "jungle_vocal_chops_long"),
 }
 TAKES = {"hop-ah": "call-hop-ah-85bpm-104852.wav", "bump-ooh": "call-bump-ooh-85bpm-104852.wav",
-         "bubble-now": "call-bubble-now-85bpm-104406.wav"}
+         "bubble-now": "call-bubble-now-85bpm-104406.wav",
+         "bump-to-the-mix": "call-bump-to-the-mix-85bpm-114829.wav"}   # heard "Bump to the mix."
 # pad note -> (call, words the chop spans, name). Push's 4x4 starts at 36: words low, whole calls up top.
 PADS = {
     36: ("hop-ah", ["hop"], "hop"),
@@ -66,6 +67,10 @@ PADS = {
     48: ("hop-ah", None, "hop-ah-a-like-this"),
     49: ("bump-ooh", None, "bump-ooh-a-like-that"),
     50: ("bubble-now", None, "bubble-now-bubble"),
+    # the user: "bump to the mix" - bump is already on 41; the rest plays after it
+    51: ("bump-to-the-mix", ["to", "the", "mix"], "to-the-mix"),
+    52: ("bump-to-the-mix", ["mix"], "mix"),
+    53: ("bump-to-the-mix", None, "bump-to-the-mix"),
 }
 # pad -> version. New names, because Live holds the old files open on the pads.
 # v2: these chops lost the start of their word ("now" was heard as "ow") and are cut again, leading
@@ -153,7 +158,10 @@ def _word_start(db, fa, fb, floor_db, lookback):
     lo = max(0, first - lookback)
     silent = np.nonzero(db[lo:first] <= floor_db)[0]
     if len(silent):
-        return lo + int(silent[-1]) + 1
+        # from the START of the last silent frame: a plosive bursts out of its closure, and the "t"
+        # of "to" began inside the frame the cut used to start at (cuts before 2026-09-18 11:50
+        # start one frame later: pads 37-46 v2/v3)
+        return lo + int(silent[-1])
     # the note's own first frame is a candidate too: still falling into it ("now" into the closure
     # of "bubble") means the boundary is the note, not a ripple inside the vowel before it
     seq = db[lo:first + 1]
@@ -163,7 +171,27 @@ def _word_start(db, fa, fb, floor_db, lookback):
     return lo + min(dips, key=lambda k: (seq[k], -k))      # deepest; on a tie, nearest the note
 
 
-def tighten(x, sr, a, b, nxt=None, floor_db=-40.0, lookback_s=0.15):
+UNVOICED_END = {"s", "k", "t", "p", "f", "th", "sh", "ch", "hh"}
+
+
+def _unvoiced_end(x, sr, stop, floor_db, hiss_hz=4000.0):
+    """Where the final unvoiced sound (s, k, t, p...) stops, searching back from `stop`: the renderer
+    can add a voiced schwa after it - "mix" came back as "mixer" in most takes, with ~90 ms of
+    low, voiced sound after the s."""
+    win = int(FRAME_S * sr)
+    peak = float(np.abs(x).max()) or 1e-9
+    for k in range(stop - 2 * win, max(0, stop - int(0.3 * sr)), -win):
+        seg = x[k:k + 2 * win]
+        if 20 * np.log10(max(np.sqrt(np.mean(seg ** 2)), 1e-12) / peak) <= floor_db:
+            continue
+        mag = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+        centroid = (mag * np.fft.rfftfreq(len(seg), 1 / sr)).sum() / max(mag.sum(), 1e-9)
+        if centroid > hiss_hz:
+            return min(stop, k + 2 * win)
+    return stop
+
+
+def tighten(x, sr, a, b, nxt=None, floor_db=-40.0, lookback_s=0.15, unvoiced_end=False):
     """The samples of the words whose notes span [a, b) seconds.
 
     Start where the first word starts sounding (its leading consonant included). End where the last
@@ -180,7 +208,10 @@ def tighten(x, sr, a, b, nxt=None, floor_db=-40.0, lookback_s=0.15):
     if nxt is not None:
         stop = min(stop, int(_word_start(db, f(nxt[0]), f(nxt[1]), floor_db, look) * FRAME_S * sr))
     i = max(0, int(start * FRAME_S * sr) - int(0.004 * sr))
-    return i, min(stop, len(x))
+    stop = min(stop, len(x))
+    if unvoiced_end:
+        stop = _unvoiced_end(x, sr, stop, floor_db)
+    return i, stop
 
 
 def fade(y, sr, in_ms=2.0, out_ms=12.0):
@@ -212,7 +243,8 @@ def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missin
             idx = [k for k, s in enumerate(spans) if s[0] in words]
             a, b = spans[idx[0]][1], spans[idx[-1]][2]
             nxt = spans[idx[-1] + 1][1:] if idx[-1] + 1 < len(spans) else None
-        i, j = tighten(x, sr, a, b, nxt)
+        last = [n_ for n_ in CALLS[call][0] if n_.get("word") == (words[-1] if words else spans[-1][0])][-1]
+        i, j = tighten(x, sr, a, b, nxt, unvoiced_end=bool(last.get("phonemes")) and last["phonemes"][-1] in UNVOICED_END)
         seg = x[i:j]
         if note in ONSET_LIFT:
             seg = lift_onset(seg, sr, int(a * sr) - i, ONSET_LIFT[note])

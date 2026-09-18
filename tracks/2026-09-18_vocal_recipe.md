@@ -31,9 +31,33 @@ single take proves nothing. Tools: `local-sung-vocals/bench/sweep_hook.py`, `dia
 - **Dictionary entries carry a trailing stop closure** (`hop` is `hh ao p cl`). At the end of a
   phrase that closure sounds as a voiced "uh". Write stop-final words with explicit phonemes and no
   `cl`.
+- **Score a phrase the way it is said.** "bump to the mix" with "bump" on its own and "to the mix"
+  as a pickup: "to" heard as "you", "who's", "do" in 11 of 12 takes, at any length. Run together
+  as spoken: 6 of 6, and the first fully legible take. The t needs the word before it.
+- **An unvoiced ending can grow a vowel.** "mix" came back as "mixer" in most takes: ~90 ms of
+  low, voiced sound after the s. Making it short made it worse (0 of 6). Cut it off instead: end
+  the chop where the hiss ends. Trimmed, the transcriber heard "bump to the mix".
 - **Check the inferred pronunciations.** The bank's dictionary is an override set, so ordinary words
   come from CMUdict: "hop" arrives as `hh aa p`, an American vowel that is heard as "hope". Every
   render prints them and `Sound.extra["inferred_pronunciations"]` carries them.
+
+## Chopping onto pads
+
+- **Cut from where the word starts sounding, not from its note.** The renderer puts a leading
+  consonant *before* the note so the vowel lands on the beat; cutting at the note took the "n" off
+  "now" (heard as "ow") and the start off six chops. Walk back from the word's first sound to the
+  silence before it, or, where words run together, to the dip between them. End before the next
+  word's consonant for the same reason. (`scripts/jungle_vocal_chops.py`, `tighten`)
+- **A word sung as a swell loses its consonant on a pad.** "now" (expr 1.0, a scoop, the call's
+  high note) starts 27 dB under its own peak and takes 270 ms to come within 6 dB; the other
+  consonant-led chops start 6-17 dB under and get there in 10-90 ms. Inside its phrase it reads;
+  hit on its own over drums, only the swell is heard. Lift the onset (12 dB, ramped away over
+  200 ms) to put it beside the others.
+- **The 2x squeeze costs short words.** As sung, "to the mix" and "bump to the mix" were heard
+  exactly; squeezed to 170 with WSOLA, "to the next" and "come on to the next" - as "bump, ooh"
+  was before. That's what the two kits (MOUTH-OFF squeezed, BIG-MOUTH as sung) are for.
+- **The transcriber can't judge a chop.** It heard "No, no, no" from three "now"s with and without
+  the n. The user's ear is the measure for anything under a phrase.
 
 ## Shape, from the reference track
 

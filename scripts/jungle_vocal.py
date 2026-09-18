@@ -18,6 +18,7 @@ Takes are kept: there is no seed, so a take you like cannot be rendered again.
 
     python scripts/jungle_vocal.py              # render both, keep them in tracks/vocals/
     python scripts/jungle_vocal.py one-note     # just one
+    python scripts/jungle_vocal.py --call bump-to-the-mix   # roll a call's takes (CPU), keep the best
 """
 from __future__ import annotations
 
@@ -144,6 +145,17 @@ CALLS = {
                     sung(["b", "ah"], A3, 0.35, 0.5, "bubble2"),
                     sung(["b", "ax", "l"], FS3, 0.6, 0.6, "bubble2", fall=-1.0, fall_beats=0.3),
                     rest(1.25)], "bubble now bubble"),
+    # the user, playing the kit: "bump to the mix". Run together, as it's said - with "bump" alone
+    # and "to the mix" as a pickup to beat 3, "to" was heard as "you"/"who's"/"do" in 11 of 12 takes
+    # whatever its length; connected, 6 of 6. "mix" is the stressed word, so it gets the velocity.
+    # Every word spelled out so none picks up the dictionary's trailing closure (the "uh").
+    # "mix" is still heard as "mixer" in most takes, short or long (a short "mix": 0 of 6).
+    "bump-to-the-mix": ([sung(NO_CLOSURE["bump"], CS4, 0.5, 0.2, "bump", velocity=0.9),
+                         sung(["t", "uw"], B3, 0.25, 0.4, "to"),
+                         sung(["dh", "ax"], A3, 0.25, 0.4, "the"),
+                         sung(["m", "ih", "k", "s"], FS3, 0.75, 0.6, "mix", velocity=0.9,
+                              fall=-1.0, fall_beats=0.3),
+                         rest(2.25)], "bump to the mix"),
 }
 for _name, (_notes, _truth) in CALLS.items():
     assert abs(sum(n["beats"] for n in _notes) - 4.0) < 1e-6, (_name, sum(n["beats"] for n in _notes))
@@ -159,9 +171,32 @@ def session_bpm() -> float:
         ch.stop()
 
 
+def render_calls(names, takes=6, render_bpm=85.0):
+    """Roll each call `takes` times on the CPU and keep the one the transcriber hears best.
+
+    There's no seed, so the kept file is the only copy of that take: never overwrite it.
+    """
+    from thelmic.sources import vocal
+    stamp = datetime.now().strftime("%H%M%S")
+    for name in names:
+        notes, truth = CALLS[name]
+        t0 = time.monotonic()
+        sound = vocal.render(vocal.VocalSpec(notes=notes, bpm=render_bpm, speaker=SPEAKER, takes=takes,
+                                             truth=truth))
+        kept = KEPT / f"call-{name}-{render_bpm:.0f}bpm-{stamp}.wav"
+        shutil.copy2(Path(sound.extra["path"]), kept)
+        print(f"== {name} -> {truth!r}  {takes} takes in {time.monotonic() - t0:.0f}s")
+        for line in sound.extra["stdout"].splitlines():
+            if "roll" in line and "WER" in line or "legible" in line:
+                print("   " + line.strip())
+        print(f"   kept {kept.relative_to(REPO)}  (best of {takes}: {Path(sound.extra['path']).name})")
+
+
 def main(argv=None):
     from thelmic.sources import vocal
     names = argv or sys.argv[1:] or list(HOOKS)
+    if names[0] == "--call":
+        return render_calls(names[1:] or list(CALLS))
     bpm = session_bpm()
     KEPT.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%H%M%S")
