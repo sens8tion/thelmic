@@ -60,6 +60,57 @@ The raw output, with per-word timings and confidences, is in `2026-09-18_rap_aud
 | | | 23.4 | the same line again | |
 | 12 | famoso | 0 | **unclear** (heard "Querem do da pásfamos ou o doutor que menos?", which isn't a sentence) | |
 
+## Dry replacements
+
+Rows added under the originals, and a new track, JUNGALIST, for the dry jump-up MC set.
+
+| Track, row | Clip | Beat | Heard as |
+|---|---|---|---|
+| BARS-OF-SOAP 17 | too easy (dry lead) | 0 | "Too easy, I come and they come and they leave me" |
+| | | 6.2 | "I'm the boy that they sit on the TV" |
+| | | 10.1 | "If it's me on the cake, they would eat me" |
+| | | 14.1 | "Now they want a slice for the appetite" |
+| | | 26.3 | "My precious, they want to believe me" |
+| SHOUT-OUT 15, 16 | whoop, whoh (dry) | 0 | adlibs |
+| SHOUT-OUT 17-20 | pull it, get em, head top, braple | 0 | the dry grime shouts their names say |
+| JUNGALIST 6 | oldskool jungalist | 0 | "Oldskool jungalist!" |
+| JUNGALIST 7 | hold tight | 0 | "Hold it, hold it, you may get right. Show me the light, show me the light" |
+| JUNGALIST 8-13 | lotta mercy, all a mercy, riddim, together, skuh!, bossa | 0 | as named |
+
+Not placed: two more Brazilian funk loops from kelake's pack (explosão, no baile) measured as wet as
+kelake. Only rabeta in that pack is dry.
+
+## SPIT-TAKE: the first pass of phrases, on pads
+
+Cut from the dry clips, already on the 170 grid, each checked by transcribing the cut.
+
+| Pad | Phrase | From |
+|---|---|---|
+| 36 | "oldskool jungalist" | JUNGALIST |
+| 37 | "hold it, hold it… show me the light" | JUNGALIST |
+| 38 | "lotta mercy" | JUNGALIST |
+| 39 | "riddim" | JUNGALIST |
+| 40 | "turn up, turn up" | turn up |
+| 41 | "get spun up, spun up" | turn up |
+| 42 | "man, the crowd say boo" | rave explode |
+| 43 | "I'ma shock the rave, till the rave explode" | rave explode |
+| 44 | "what's your excuse?" | excuse |
+| 45 | "want it down low" | music gal |
+| 46 | "just leave me alone" | unknown |
+| 47 | "(and) just show my face" | unknown |
+| 48 | "the loudest sound they've heard on land" | strikes |
+| 49 | "me a di soldier" | dancehall soldier |
+| 50 | "vai de novo" ("go again"). **Check this one**: the transcriber heard something else in the cut every time | no rave |
+| 51 | "te deixar no chão" ("put you on the floor") | arsenal |
+| 52 | "joga a rabeta no chão" ("drop that booty to the floor") | rabeta |
+| 53 | "I give them money and I'm gone" (half-time) | gone |
+| 54 | "fire blazing" | fire blazing |
+| 55 | "pull it" | dry shout |
+| 56 | "get em" | dry shout |
+| 57 | "sabe que é sem sentimento, sem sentimento" ("you know it's without feelings") | casamento |
+| 58 | "we won't leave our bros, won't leave our gang" | strikes |
+| 59 | "all a mercy" | JUNGALIST |
+
 ## Greyed out: too wet to use
 
 Marked "WET · …" in the grid. What the transcriber made of them shows why:

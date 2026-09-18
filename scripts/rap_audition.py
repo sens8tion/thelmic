@@ -38,7 +38,7 @@ TEMPO = 170.0
 FIRST_ROW = 6
 LEVEL_DB = -8.0          # unmatched on the meter, and the user may be playing: start low
 
-# track -> files, in audition order. Names: bars (rap) you'd wash your mouth out for; shouts; and
+# track -> files, in audition order. Only ever APPEND to a list: a file's row is its position. Names: bars (rap) you'd wash your mouth out for; shouts; and
 # "fala serio" (Portuguese: "you're kidding").
 LANES = {
     "BARS-OF-SOAP": [   # UK rap, grime, drill, DnB MC
@@ -53,6 +53,7 @@ LANES = {
         "004_Vocal_Loop_140bpm_C_-_CONCUSSION_Zenhiser.wav",
         "tp_udnb_174_vocal_phrase_mysterious_Amin.wav",
         "TRKTRN_PASHAGUD_110_VOCAL_GONE.wav",
+        "VOX_URG_145_vocal_rap_too_easy_dry.wav",           # the dry lead of "too easy" (was the backing)
     ],
     "SHOUT-OUT": [      # ragga, dancehall, jungle / DnB shouts and adlibs
         "91V_VHH_140_Vocal_Dancehall_Soldier_Clean.wav",
@@ -64,6 +65,14 @@ LANES = {
         "BOS_LevIV_Vocal_Phrase_One_Shot_FireBlazing.wav",
         "DS_UKDNB_vocal_adlib_male_whoop_wet.wav",
         "DS_UKDNB_vocal_adlib_male_whoh_wet.wav",
+        # dry: the whoop / whoh siblings, and dry grime shouts in place of the wet JUNGLE! / skanka /
+        # soundboi killa (no dry takes of those exist on Splice)
+        "DS_UKDNB_vocal_adlib_male_whoop_dry.wav",
+        "DS_UKDNB_vocal_adlib_male_whoh_dry.wav",
+        "tp_bmve_vocal_pull_it_dry.wav",
+        "tp_bmve_vocal_get_em_dry.wav",
+        "tp_bmve_vocal_head_top_dry.wav",
+        "tp_bmve_vocal_braple_dry.wav",
     ],
     "FALA-SERIO": [     # Brazilian funk MCs, in Portuguese
         "VOX_LBP_150_vocal_hook_arsenal_low_Cmin.wav",
@@ -73,6 +82,19 @@ LANES = {
         "SO_BFV_130_vocal_loop_rabeta_Fmin.wav",
         "VOX_LBP_130_vocal_phrase_chao_Emin.wav",
         "VOX_LBP_130_vocal_phrase_famoso_Emin.wav",
+    ],
+    # A dry jump-up MC in place of the wet 2.5-minute DnB take (Zenhiser has no dry version).
+    # (Two more Brazilian funk loops, explosao and nobaile, were downloaded as kelake's stand-ins
+    # and measured just as wet: they stay on disk, out of the audition.)
+    "JUNGALIST": [
+        "TSP_HTM_175_vocal_dry_mc_multiplex_oldskool_jungalist_Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_hold_tight_Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_lotta_mercy_Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_all_A_mercy_Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_riddim_Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_together_Bmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_skuh__Gmin.wav",
+        "TSP_HTM_175_vocal_dry_mc_multiplex_bossa_Gmin.wav",
     ],
 }
 
@@ -106,6 +128,21 @@ LABELS = {
     "SO_BFV_130_vocal_loop_rabeta_Fmin.wav": "rabeta",
     "VOX_LBP_130_vocal_phrase_chao_Emin.wav": "chão",
     "VOX_LBP_130_vocal_phrase_famoso_Emin.wav": "famoso",
+    "VOX_URG_145_vocal_rap_too_easy_dry.wav": "too easy (dry lead)",
+    "DS_UKDNB_vocal_adlib_male_whoop_dry.wav": "whoop (dry)",
+    "DS_UKDNB_vocal_adlib_male_whoh_dry.wav": "whoh (dry)",
+    "tp_bmve_vocal_pull_it_dry.wav": "pull it",
+    "tp_bmve_vocal_get_em_dry.wav": "get em",
+    "tp_bmve_vocal_head_top_dry.wav": "head top",
+    "tp_bmve_vocal_braple_dry.wav": "braple",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_oldskool_jungalist_Gmin.wav": "oldskool jungalist",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_hold_tight_Gmin.wav": "hold tight",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_lotta_mercy_Gmin.wav": "lotta mercy",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_all_A_mercy_Gmin.wav": "all a mercy",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_riddim_Gmin.wav": "riddim",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_together_Bmin.wav": "together",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_skuh__Gmin.wav": "skuh!",
+    "TSP_HTM_175_vocal_dry_mc_multiplex_bossa_Gmin.wav": "bossa",
 }
 
 

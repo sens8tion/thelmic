@@ -46,6 +46,7 @@ def main(model_name: str = "base") -> None:
             lines = []
             for s in segs:
                 words = [{"w": w.word.strip(), "beat": round(w.start * scale * beats_per_s, 2),
+                          "end": round(w.end * scale * beats_per_s, 2),
                           "p": round(w.probability, 2)} for w in (s.words or [])]
                 lines.append({"beat": round(s.start * scale * beats_per_s, 2),
                               "end": round(s.end * scale * beats_per_s, 2),
