@@ -38,6 +38,11 @@ TRACK, AFTER = "SAUDADE", "MOUTHFUL"
 LEVEL_DB = -8.0
 COMPLEX_PRO = 6
 HALF_TIME_BEATS = 64.0     # a 16-bar loop at half-time: 16 bars x 4 beats at 170
+COMPLEX = 4
+# The vocalise's chipmunk is baked into the sample (pitched up, formants and all). Complex Pro keeps
+# formants, so an octave down in it was "a low chipmunk" that "sounds resampled" (the user); Complex
+# moves the formants down with the pitch, which undoes it.
+WARP_MODE = {"vocalise - lab": COMPLEX}
 
 # (clip name, file, semitones into F# minor / A major, cents her tuning is off) - measured
 LINES = [
@@ -45,7 +50,8 @@ LINES = [
     ("te encontrar de novo", "RP_JV_85_vocal_jolt_A.wav", +2, -2),      # "I want to find you again" - G major -> A
     ("derretendo meu coracao", "RP_JV_85_vocal_vibe_Gb.wav", -4, -12),   # "melting my heart, like ice in the sun" - C# major -> A
     ("vocalise - lab", "RP_JV_76_vocal_lab_A.wav", -12, -12),            # wordless; the most sustained (51% held); F# minor.
-                                                                          # An octave down: at pitch it's chipmunk (the user)
+                                                                          # An octave down: at pitch it's chipmunk (the user) -
+                                                                          # and in Complex, not Pro: see WARP_MODE
     ("hum - strike", "RP_JV_85_vocal_strike_A.wav", -3, -3),             # wordless hum; A minor -> F# minor
     ("ai ooh - mic", "RP_JV_96_vocal_mic_Gb.wav", -2, -13),              # wordless; G# minor -> F# minor
 ]
@@ -97,7 +103,7 @@ def place() -> None:
                 ch.load_audio_to_slot(t, row, BROWSER, f).result(timeout=30)
             for _ in range(40):
                 try:
-                    ch.set_clip_warp(t, row, warping=True, warp_mode=COMPLEX_PRO).result(timeout=5)
+                    ch.set_clip_warp(t, row, warping=True, warp_mode=WARP_MODE.get(name, COMPLEX_PRO)).result(timeout=5)
                     break
                 except Exception:
                     time.sleep(0.25)
