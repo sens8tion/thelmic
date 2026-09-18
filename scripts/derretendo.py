@@ -12,24 +12,26 @@ Three lanes after MOUTHFUL, one row at the bottom of the grid, so launching that
 - DERRETIDA ("melted", the second her): the same clip through Live's Auto Shift, which retunes it to
   the MIDI it is sent and gates it to those notes, 6 dB under the lead. Then a Delay, whose time the
   clip draws per syllable, so she sings behind the lead the way a second singer does.
-- HARMONIA: the MIDI clip with her line, feeding that Auto Shift through its sidechain "MIDI From" -
-  the one setting the LOM can't reach, so the user picks it once.
+- HARMONIA: the MIDI clip with her line, feeding that Auto Shift through its MIDI Input panel
+  (MIDI On, External Source: HARMONIA) - which the LOM can't reach, so the user sets it once.
 
 The lead, pitch-tracked as it plays (after the -4) and aligned with the words: every stressed
 syllable - derreTENdo, MEU, coraCAO, COmo, GElo, SOL - lands on or just before a bar line at 170.
 
-Her line sits 2-7 semitones UNDER the lead, and changes on the lead's note onsets. Where the first
-version was thirds above, this one walks down: C#-B-A#-A-G#-F# across the first four bars, 5 to 1 of
-F# minor, while the lead falls more slowly, so the interval between them opens and closes - a minor
-third, the fourths of an F#m11, a passing tritone, the fifth that spells F#m7. The colours:
-- derreTENdo: E over B, a fourth - F#m11, open, on the stress
-- MEU: E over A#, the tritone of F#7, one weak syllable - the A# the lead sings herself at COmo
-- coraCAO: C# over G#, the 9 of F#m9, on the stress
-- COmo: A# over F# - F# major for a beat, the V of the B minor it moves to
-- GE-lo: B held under D (B minor, on the stress), then under C# - the 9, a rub on the weak "lo"...
-- ...SOL: which resolves down a step, B to A, under the held C# - 11 to 3, on the stress
-- the last "ao SOL": A over F#, B over G# - the 9 and 11 of F#m9 - then E under her final A: the
-  close is F#m7, the jazz ending, not the triad
+Her line sits 5-9 semitones UNDER the lead (the user: "a little lower"), and changes on the lead's
+note onsets. The first version was thirds above; the second, 2-7 st under, walked C#-B-A#-A-G#-F#.
+This one sits about a third below that, in sixths, fifths and tritones - the shell voicings of the
+chords the lead implies. The colours:
+- DER: E over A, a fifth - the b3 and b7 of F#m7
+- re: D over G#, the tritone of E7, on a weak syllable
+- derreTENdo MEU: E over G#, a minor sixth - the 9 under the b7, F#m9, one held note on the stress
+- co-ra: back to A under E and D - F#m7's guide tones again
+- coraCAO: C# over E, a major sixth - the 5 over the b7, F#m7, on the stress
+- COmo: A# over E - the tritone that is F#7's 3 and b7, the V of B minor - opening to a fifth on "mo"
+- GE-lo: F# under D (B minor, a sixth, on the stress), then a bare fifth under C#
+- SOL: she falls a step to E under the held C# - F#m to F#m7, i to i7, on the stress
+- the last "ao SOL": D held under A then B - D major (VI) turning to B minor (iv) - then E under her
+  final A: the close is F#m7, the jazz ending, not the triad
 
 Her timing: the Delay's time, drawn in the clip as a step per phrase segment (changing only in the
 gaps, in Fade mode): 4-8 ms on stressed syllables, where two singers lock, 25-35 ms on weak ones,
@@ -37,11 +39,12 @@ where she lays back, and 30-35 ms on the long SOLs, where a second voice arrives
 no feedback, nothing past 35 ms - longer, and she stops being a second singer and becomes an echo. She can only
 be behind: the bridge can't move a clip's start marker, so nothing puts her ahead of the lead.
 
-Her voice: Formant Follow 25 %, so the further she's pitched down the darker she gets - a lower
-singer, not the same one tuned down - and a light vibrato (12 ct, 5 Hz, "Natural") that fades in over
+Her voice: Formant Follow 50 %, so the further she's pitched down the darker she gets - a lower
+singer, not the same one tuned down (at the deepest, -9 st, her formants drop 4.5) - and a light vibrato (12 ct, 5 Hz, "Natural") that fades in over
 450 ms, so it only blooms on the held notes.
 
-    python scripts/derretendo.py
+    python scripts/derretendo.py              # everything
+    python scripts/derretendo.py --harmony    # her notes and Auto Shift only: leaves the Delay's timing alone
 """
 from __future__ import annotations
 
@@ -67,29 +70,26 @@ LEVEL_DB, VOICE_UNDER_DB = -8.0, 6.0
 EARLY, TAIL = 0.10, 0.12
 
 # (start beat, length) of her notes, as measured - and the harmony note under each group of them.
-E4, D4, C4s, B3, As3, A3, Gs3, Fs3, E3 = 64, 62, 61, 59, 58, 57, 56, 54, 52
+E4, D4, C4s, B3, As3, A3, Gs3, Fs3, E3, D3 = 64, 62, 61, 59, 58, 57, 56, 54, 52, 50
 HARMONY = [
     # phrase 1: "derretendo meu coracao, como gelo, ao sol"
-    ([(0.00, 1.08)], C4s),                                        # DER        E4 over C#: F#m7, a minor third
-    ([(2.12, 1.22)], B3),                                         # re         D4 over B: B minor
-    ([(4.22, 0.31), (4.56, 0.82)], B3),                           # TEN-do     E4 over B: a fourth, F#m11
-    ([(5.44, 0.68)], As3),                                        # MEU        E4 over A#: the tritone of F#7
+    ([(0.00, 1.08)], A3),                                         # DER        E4 over A: F#m7's b3 and b7
+    ([(2.12, 1.22)], Gs3),                                        # re         D4 over G#: the tritone of E7
+    ([(4.22, 0.31), (4.56, 0.82), (5.44, 0.68)], Gs3),            # TEN-do MEU E4 over G#: F#m9, the 9 under the b7
     ([(6.52, 0.65), (7.28, 0.71)], A3),                           # co-ra      E4, D4 over A: F#m7's guide tones
-    ([(8.67, 1.27)], Gs3),                                        # CAO        C#4 over G#: the 9
-    ([(13.63, 0.79), (14.45, 0.51)], Fs3),                        # CO-mo      A#3, B3 over F#: F# major, V of Bm
-    ([(15.89, 0.85), (19.10, 0.91)], B3),                         # GE-lo      D4 then C#4 over B: Bm, then the 9
-    ([(23.71, 2.10)], A3),                                        # SOL        C#4 over A: the rub resolves, 11 to 3
+    ([(8.67, 1.27)], E3),                                         # CAO        C#4 over E: a sixth, F#m7
+    ([(13.63, 0.79), (14.45, 0.51)], E3),                         # CO-mo      A#3 over E: F#7, V of Bm; then B3
+    ([(15.89, 0.85), (19.10, 0.91)], Fs3),                        # GE-lo      D4 over F#: Bm; then C#4, a bare fifth
+    ([(23.71, 2.10)], E3),                                        # SOL        C#4 over E: i to i7, on the stress
     # phrase 2
-    ([(31.93, 1.27)], C4s),                                       # DER        E4
-    ([(33.21, 0.34), (33.97, 1.47)], B3),                         # re         D4 D4
-    ([(36.04, 0.37), (36.47, 0.88)], B3),                         # TEN-do     E4
-    ([(37.40, 0.65)], As3),                                       # MEU        E4
+    ([(31.93, 1.27)], A3),                                        # DER        E4
+    ([(33.21, 0.34), (33.97, 1.47)], Gs3),                        # re         D4 D4
+    ([(36.04, 0.37), (36.47, 0.88), (37.40, 0.65)], Gs3),         # TEN-do MEU E4
     ([(38.48, 0.82), (39.44, 0.45)], A3),                         # co-ra      E4, D4
-    ([(40.55, 1.33)], Gs3),                                       # CAO        C#4
-    ([(45.48, 0.20), (45.73, 0.59), (46.33, 0.45)], Fs3),         # CO-mo      B3 A#3 B3
-    ([(47.60, 1.45), (49.07, 0.28)], B3),                         # GE-lo      D4 D4
-    ([(54.46, 0.34)], Fs3),                                       # ao         A3 over F#: F# minor
-    ([(55.51, 2.32)], Gs3),                                       # SOL        B3 over G#: the 9 and 11 of F#m9
+    ([(40.55, 1.33)], E3),                                        # CAO        C#4
+    ([(45.48, 0.20), (45.73, 0.59), (46.33, 0.45)], E3),          # CO-mo      B3 A#3 B3: fifth, tritone, fifth
+    ([(47.60, 1.45), (49.07, 0.28)], Fs3),                        # GE-lo      D4 D4
+    ([(54.46, 0.34), (55.51, 2.32)], D3),                         # ao SOL     A3 then B3 over D: VI turning to iv
     ([(57.97, 1.19)], E3),                                        # (tail)     A3 over E: the close is F#m7
 ]
 
@@ -119,7 +119,8 @@ LAG_MS = {
 
 AUTO_SHIFT = "query:AudioFx#Auto%20Shift"
 DELAY = "query:AudioFx#Delay"
-FORMANT_FOLLOW = 0.25
+FORMANT_FOLLOW = 0.5
+HARMONY_ONLY = "--harmony" in sys.argv
 VIBRATO = (("Vibrato Amt", 12.0), ("Vibrato Rate", 5.0), ("Vibrato Fade-In", 450.0))
 
 
@@ -225,24 +226,25 @@ def main() -> None:
                 print(f"    [note] Auto Shift {pname}: {e}")
         for pname, value in VIBRATO:
             set_number(ch, v, shift, pname, value)
-        # her timing: a Delay, all wet, one tap, no filter, its time crossfading when it changes
-        dl = device(v, "Delay", DELAY)
-        idx = {n: p["index"] for n, p in params(v, dl).items()}
-        for pname, value in (("Smoothing", 1.0), ("Link", 1.0), ("Ping Pong", 0.0), ("L Sync", 0.0), ("R Sync", 0.0),
-                             ("Feedback", 0.0), ("Freeze", 0.0), ("Filter On", 0.0), ("LFO > Delay", 0.0),
-                             ("Dry/Wet", 1.0)):
-            ch.set_device_param(v, dl, idx[pname], value).result(timeout=5)
-        steps = lag_steps()
-        raw = {}
-        # finding each time's raw value swings the knob from 1 ms to 5 s: bypass the Delay meanwhile,
-        # or a playing voice gets thrown seconds late
-        ch.set_device_param(v, dl, idx["Device On"], 0.0).result(timeout=5)
-        for ms in sorted({ms for _, ms in steps}):
-            set_number(ch, v, dl, "L Time", float(ms))
-            raw[ms] = params(v, dl)["L Time"]["value"]
-        set_number(ch, v, dl, "L Time", float(steps[0][1]))
-        ch.set_device_param(v, dl, idx["Device On"], 1.0).result(timeout=5)
-        ch.set_clip_envelope(v, row, v, dl, "L Time", [[b, raw[ms]] for b, ms in steps] + [[LOOP_BEATS - 0.01, raw[steps[0][1]]]]).result(timeout=10)
+        if not HARMONY_ONLY:
+            # her timing: a Delay, all wet, one tap, no filter, its time crossfading when it changes
+            dl = device(v, "Delay", DELAY)
+            idx = {n: p["index"] for n, p in params(v, dl).items()}
+            for pname, value in (("Smoothing", 1.0), ("Link", 1.0), ("Ping Pong", 0.0), ("L Sync", 0.0), ("R Sync", 0.0),
+                                 ("Feedback", 0.0), ("Freeze", 0.0), ("Filter On", 0.0), ("LFO > Delay", 0.0),
+                                 ("Dry/Wet", 1.0)):
+                ch.set_device_param(v, dl, idx[pname], value).result(timeout=5)
+            steps = lag_steps()
+            raw = {}
+            # finding each time's raw value swings the knob from 1 ms to 5 s: bypass the Delay meanwhile,
+            # or a playing voice gets thrown seconds late
+            ch.set_device_param(v, dl, idx["Device On"], 0.0).result(timeout=5)
+            for ms in sorted({ms for _, ms in steps}):
+                set_number(ch, v, dl, "L Time", float(ms))
+                raw[ms] = params(v, dl)["L Time"]["value"]
+            set_number(ch, v, dl, "L Time", float(steps[0][1]))
+            ch.set_device_param(v, dl, idx["Device On"], 1.0).result(timeout=5)
+            ch.set_clip_envelope(v, row, v, dl, "L Time", [[b, raw[ms]] for b, ms in steps] + [[LOOP_BEATS - 0.01, raw[steps[0][1]]]]).result(timeout=10)
         # her line, into that Auto Shift - written only if it changed
         m = index_of(ch, MIDI)
         if row not in {c.get("slot", c.get("index")) for c in clips_of(m)}:
@@ -254,10 +256,10 @@ def main() -> None:
         if sorted(map(key, have)) != sorted(map(key, want)):
             ch.add_notes_to_clip(m, row, want, replace=True).result(timeout=10)
             print(f"  {MIDI}: wrote {len(want)} notes")
-        ch.set_clip_name(m, row, "harmonia - down under her: F#m7, a 9, an 11 that falls to 3").result(timeout=5)
-        # Auto Shift takes its MIDI through its own sidechain input ("MIDI From"), which the LOM doesn't
-        # expose on the device, and a MIDI track can't route its output to an audio track's effect.
-        # One dropdown for the user: DERRETIDA > Auto Shift > sidechain > MIDI From: HARMONIA.
+        ch.set_clip_name(m, row, "harmonia - low under her: shells of F#m7, a tritone, VI to iv").result(timeout=5)
+        # Auto Shift takes its MIDI through its own MIDI Input panel, which the LOM doesn't expose, and a
+        # MIDI track can't route its output to an audio track's effect. The user does it once: DERRETIDA >
+        # Auto Shift > MIDI In > MIDI On, External Source: HARMONIA, voice mode Mono.
         for name, db in ((LEAD, LEVEL_DB), (VOICE, LEVEL_DB - VOICE_UNDER_DB)):
             tt = index_of(ch, name)
             set_number(ch, tt, ensure_level(ch, tt, name), "Output", db)
@@ -268,13 +270,14 @@ def main() -> None:
             print(f"  {name:<13} (track {tt + 1}) row {row + 1}: mode {pr.get('warp_mode')} transpose {int(pr['pitch_coarse']):+d} "
                   f"detune {int(pr['pitch_fine']):+d} loop {pr.get('looping')} {pr.get('length')} beats | "
                   + " > ".join(d["name"] for d in devices(tt)))
-        print(f"  {MIDI:<13} (track {m + 1}) row {row + 1}: {len(want)} notes - set Auto Shift's MIDI From to it")
+        print(f"  {MIDI:<13} (track {m + 1}) row {row + 1}: {len(want)} notes - Auto Shift's External Source")
         ps = params(v, shift)
         print("  Auto Shift:", {n: ps[n]["display"] for n in ("Quantizer On", "Strength", "Formant Follow", "Smooth Time",
                                                               "Vibrato Amt", "Vibrato Rate", "Vibrato Fade-In", "Vibrato Natural", "Latch")})
-        ps = params(v, dl)
-        print("  Delay:", {n: ps[n]["display"] for n in ("Smoothing", "L Sync", "L Time", "Feedback", "Filter On", "Dry/Wet")})
-        print("  lag (ms) by beat:", " ".join(f"{b:g}:{ms}" for b, ms in steps))
+        if not HARMONY_ONLY:
+            ps = params(v, dl)
+            print("  Delay:", {n: ps[n]["display"] for n in ("Smoothing", "L Sync", "L Time", "Feedback", "Filter On", "Dry/Wet")})
+            print("  lag (ms) by beat:", " ".join(f"{b:g}:{ms}" for b, ms in steps))
     finally:
         ch.stop()
 
