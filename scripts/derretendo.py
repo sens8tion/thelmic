@@ -18,20 +18,26 @@ Three lanes after MOUTHFUL, one row at the bottom of the grid, so launching that
 The lead, pitch-tracked as it plays (after the -4) and aligned with the words: every stressed
 syllable - derreTENdo, MEU, coraCAO, COmo, GElo, SOL - lands on or just before a bar line at 170.
 
-Her line sits 5-9 semitones UNDER the lead (the user: "a little lower"), and changes on the lead's
-note onsets. The first version was thirds above; the second, 2-7 st under, walked C#-B-A#-A-G#-F#.
-This one sits about a third below that, in sixths, fifths and tritones - the shell voicings of the
-chords the lead implies. The colours:
-- DER: E over A, a fifth - the b3 and b7 of F#m7
-- re: D over G#, the tritone of E7, on a weak syllable
-- derreTENdo MEU: E over G#, a minor sixth - the 9 under the b7, F#m9, one held note on the stress
-- co-ra: back to A under E and D - F#m7's guide tones again
-- coraCAO: C# over E, a major sixth - the 5 over the b7, F#m7, on the stress
-- COmo: A# over E - the tritone that is F#7's 3 and b7, the V of B minor - opening to a fifth on "mo"
-- GE-lo: F# under D (B minor, a sixth, on the stress), then a bare fifth under C#
-- SOL: she falls a step to E under the held C# - F#m to F#m7, i to i7, on the stress
-- the last "ao SOL": D held under A then B - D major (VI) turning to B minor (iv) - then E under her
-  final A: the close is F#m7, the jazz ending, not the triad
+Her line comes in five versions, one per row, so the user can launch each and compare (the user: "let
+her be more openly jazzy in the notes she shifts to and from. Maybe make several harmonia midi clips
+which I can select for comparison"). Every row holds the lead, her, and one HARMONIA clip, so a row
+plays in sync from the top. Launching only a HARMONIA clip would restart it against audio already
+playing, unless its launch mode is Legato - which the bridge can't set. Where a version moves inside
+one syllable, the notes overlap and Auto Shift GLIDES (Glide Time only acts on overlapping notes):
+- CASCA ("shell"), as she was: shell voicings 5-9 st under - sixths, fifths and tritones, one note per
+  syllable. F#m7 on DER, E7's tritone on re, F#m9 under TEN-do MEU, a sixth on coraCAO, F#7 on COmo,
+  i to i7 on SOL; phrase 2 ends VI turning to iv, then an F#m7 close.
+- RASTEJA ("creeps"): the same targets, every one approached by a half step - a scoop from below or
+  a fall from above - and chromatic line cliches under the held notes: F#m7 to F#m6 under coraCAO,
+  a G-over-C# tritone substitute on "lo" sliding into SOL, D to D# to E into the last note.
+- DIABINHO ("little devil", the tritone): dominant tension on the weak syllables - tritones planing in
+  parallel (E-over-A# to D-over-G#) - resolved by half steps onto the stresses; coraCAO approached from
+  G above; phrase 2 ends on B-over-F, G7 - the tritone substitute for C#7 - falling to F#m7.
+- QUARTAS ("fourths"): modal, "So What" - she planes a fourth under the lead, chromatically too
+  (A#-over-F under COmo), with the dorian D# as the colour: F#m6 under coraCAO and SOL, B major (the
+  dorian IV) under the last SOL, and an F#m6 ending. Higher than the others: fourths sit 5 st under.
+- AZULADA ("bluish"): blues inflections - a minor-to-major smear (A to A# and back) under DER, whole-step
+  scoops, pentatonic falls under the held notes, the E-to-E# smear on coraCAO, and a fall to C# at the end.
 
 Her timing: the Delay's time, drawn in the clip as a step per phrase segment (changing only in the
 gaps, in Fade mode): 4-8 ms on stressed syllables, where two singers lock, 25-35 ms on weak ones,
@@ -44,7 +50,7 @@ singer, not the same one tuned down (at the deepest, -9 st, her formants drop 4.
 450 ms, so it only blooms on the held notes.
 
     python scripts/derretendo.py              # everything
-    python scripts/derretendo.py --harmony    # her notes and Auto Shift only: leaves the Delay's timing alone
+    python scripts/derretendo.py --harmony    # her lines and Auto Shift only: leaves the Delay's timing alone
 """
 from __future__ import annotations
 
@@ -68,29 +74,120 @@ LEVEL_DB, VOICE_UNDER_DB = -8.0, 6.0
 # beats: Auto Shift GATES the voice to its MIDI notes (20 ms attack), so a note opens before the
 # syllable's consonant and closes after its tail - never past the middle of the gap to the next one
 EARLY, TAIL = 0.10, 0.12
+LEGATO = 0.03                  # beats a move inside a syllable overlaps the note before it
 
-# (start beat, length) of her notes, as measured - and the harmony note under each group of them.
-E4, D4, C4s, B3, As3, A3, Gs3, Fs3, E3, D3 = 64, 62, 61, 59, 58, 57, 56, 54, 52, 50
-HARMONY = [
+# Her notes, as measured: (start beat, length, pitch as heard, syllable).
+E4, D4, Cs4, B3, As3, A3, Gs3, G3, Fs3, F3, E3, Ds3, D3, Cs3 = 64, 62, 61, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49
+LEAD_NOTES = [
     # phrase 1: "derretendo meu coracao, como gelo, ao sol"
-    ([(0.00, 1.08)], A3),                                         # DER        E4 over A: F#m7's b3 and b7
-    ([(2.12, 1.22)], Gs3),                                        # re         D4 over G#: the tritone of E7
-    ([(4.22, 0.31), (4.56, 0.82), (5.44, 0.68)], Gs3),            # TEN-do MEU E4 over G#: F#m9, the 9 under the b7
-    ([(6.52, 0.65), (7.28, 0.71)], A3),                           # co-ra      E4, D4 over A: F#m7's guide tones
-    ([(8.67, 1.27)], E3),                                         # CAO        C#4 over E: a sixth, F#m7
-    ([(13.63, 0.79), (14.45, 0.51)], E3),                         # CO-mo      A#3 over E: F#7, V of Bm; then B3
-    ([(15.89, 0.85), (19.10, 0.91)], Fs3),                        # GE-lo      D4 over F#: Bm; then C#4, a bare fifth
-    ([(23.71, 2.10)], E3),                                        # SOL        C#4 over E: i to i7, on the stress
+    (0.00, 1.08, E4, "DER"), (2.12, 1.22, D4, "re"), (4.22, 0.31, E4, "TEN"), (4.56, 0.82, E4, "do"),
+    (5.44, 0.68, E4, "MEU"), (6.52, 0.65, E4, "co"), (7.28, 0.71, D4, "ra"), (8.67, 1.27, Cs4, "CAO"),
+    (13.63, 0.79, As3, "CO"), (14.45, 0.51, B3, "mo"), (15.89, 0.85, D4, "GE"), (19.10, 0.91, Cs4, "lo"),
+    (23.71, 2.10, Cs4, "SOL"),
     # phrase 2
-    ([(31.93, 1.27)], A3),                                        # DER        E4
-    ([(33.21, 0.34), (33.97, 1.47)], Gs3),                        # re         D4 D4
-    ([(36.04, 0.37), (36.47, 0.88), (37.40, 0.65)], Gs3),         # TEN-do MEU E4
-    ([(38.48, 0.82), (39.44, 0.45)], A3),                         # co-ra      E4, D4
-    ([(40.55, 1.33)], E3),                                        # CAO        C#4
-    ([(45.48, 0.20), (45.73, 0.59), (46.33, 0.45)], E3),          # CO-mo      B3 A#3 B3: fifth, tritone, fifth
-    ([(47.60, 1.45), (49.07, 0.28)], Fs3),                        # GE-lo      D4 D4
-    ([(54.46, 0.34), (55.51, 2.32)], D3),                         # ao SOL     A3 then B3 over D: VI turning to iv
-    ([(57.97, 1.19)], E3),                                        # (tail)     A3 over E: the close is F#m7
+    (31.93, 1.27, E4, "DER"), (33.21, 0.34, D4, "re"), (33.97, 1.47, D4, "re"), (36.04, 0.37, E4, "TEN"),
+    (36.47, 0.88, E4, "do"), (37.40, 0.65, E4, "MEU"), (38.48, 0.82, E4, "co"), (39.44, 0.45, D4, "ra"),
+    (40.55, 1.33, Cs4, "CAO"), (45.48, 0.20, B3, "CO"), (45.73, 0.59, As3, "mo"), (46.33, 0.45, B3, "mo"),
+    (47.60, 1.45, D4, "GE"), (49.07, 0.28, D4, "lo"), (54.46, 0.34, A3, "ao"), (55.51, 2.32, B3, "SOL"),
+    (57.97, 1.19, A3, "(tail)"),
+]
+
+# Her lines. One entry per lead note: a pitch she holds for the syllable, or [(beats in, pitch), ...]
+# for moves inside it. The same pitch on the next syllable of a phrase is held, not re-struck.
+SCOOP = 0.12                    # beats spent on the approach note before she glides onto the target
+
+
+def up(p, by=1):
+    """scoop into p from `by` semitones under"""
+    return [(0, p - by), (SCOOP, p)]
+
+
+def down(p):
+    """fall into p from a half step above"""
+    return [(0, p + 1), (SCOOP, p)]
+
+
+VARIANTS = [  # (name, what it does, [one entry per LEAD_NOTES])
+    ("casca", "shells, as she was", [
+        A3, Gs3, Gs3, Gs3, Gs3, A3, A3, E3, E3, E3, Fs3, Fs3, E3,
+        A3, Gs3, Gs3, Gs3, Gs3, Gs3, A3, A3, E3, E3, E3, E3, Fs3, Fs3, D3, D3, E3]),
+    ("rasteja", "half-step approaches, line cliches", [
+        up(A3),                                  # DER   scooped onto F#m7's guide tones
+        down(Gs3),                               # re    falls onto E7's tritone
+        Gs3, [(0, Gs3), (0.4, A3)], As3,         # TEN-do MEU  G#, A, A#: creeping up under the held E
+        A3, A3,                                  # co-ra
+        [(0, F3), (SCOOP, E3), (0.7, Ds3)],      # CAO   falls onto E, then E to D#: F#m7 to F#m6
+        E3, D3,                                  # CO-mo F#7 resolving to Bm: E to D under A# to B
+        up(Fs3),                                 # GE
+        G3,                                      # lo    C# over G: a tritone substitute...
+        [(0, Fs3), (1.0, E3)],                   # SOL   ...sliding a half step to F#, then i to i7
+        [(0, Gs3), (SCOOP, A3), (0.75, Gs3)],    # DER
+        Gs3, [(0, Gs3), (0.8, G3)],              # re re G#, G...
+        Fs3, [(0, Fs3), (0.45, G3)], up(Gs3),    # TEN-do MEU  ...F# on the stress, then back up G, G#
+        A3, A3,                                  # co-ra
+        [(0, F3), (SCOOP, E3), (0.75, Ds3)],     # CAO
+        E3, E3, D3,                              # CO-mo
+        [(0, F3), (SCOOP, Fs3), (0.8, G3)],      # GE
+        G3,                                      # lo
+        E3,                                      # ao
+        [(0, D3), (1.3, Ds3)],                   # SOL   Bm to B major, the dorian IV...
+        E3]),                                    # tail  ...D, D#, E: creeping into F#m7
+    ("diabinho", "tritones planing, resolved by half steps", [
+        As3, Gs3,                                # DER re    E over A#, D over G#: two dominants, planing
+        A3,                                      # TEN   G# up to A: resolved on the stress
+        [(0, A3), (0.45, As3)], down(A3),        # do MEU  A, A#, A
+        As3, Gs3,                                # co-ra planing again
+        [(0, G3), (SCOOP, Fs3)],                 # CAO   G# to G to F#: slid down onto the stress
+        E3, D3,                                  # CO-mo F#7's 3 and 7, resolving to Bm
+        Fs3, G3,                                 # GE lo C# over G, the tritone...
+        [(0, Fs3), (1.1, E3)],                   # SOL   ...resolved a half step down
+        As3, Gs3, [(0, Gs3), (0.8, G3)],         # DER re re
+        up(Gs3), A3, As3, A3, Gs3,               # TEN do MEU co ra
+        [(0, G3), (SCOOP, Fs3)],                 # CAO
+        F3, E3, D3,                              # CO-mo B over F, A# over E: tritones sliding a half step
+        Fs3, Gs3,                                # GE lo
+        Ds3,                                     # ao    A over D#: B7's tritone
+        [(0, D3), (1.4, F3)],                    # SOL   Bm, then B over F: G7, the substitute for C#7...
+        E3]),                                    # tail  ...falling a half step into F#m7
+    ("quartas", "dorian fourths, planing", [
+        Gs3, Fs3,                                # DER re
+        B3, [(0, B3), (0.45, Gs3)], Gs3,         # TEN do MEU  E over B: a fourth, "So What"; then the 9
+        B3, A3,                                  # co-ra fourths
+        [(0, Gs3), (0.65, Ds3)],                 # CAO   a fourth, then the dorian 13: F#m6
+        E3, Fs3,                                 # CO-mo
+        A3, Gs3,                                 # GE lo fourths
+        [(0, Gs3), (0.9, E3), (1.5, Ds3)],       # SOL   fourth, sixth, the 13
+        [(0, B3), (0.7, Gs3)],                   # DER
+        A3, [(0, A3), (0.8, Fs3)],               # re re
+        B3, [(0, B3), (0.45, Gs3)], Gs3,         # TEN do MEU
+        B3, A3,                                  # co-ra
+        [(0, Gs3), (0.7, Ds3)],                  # CAO
+        Fs3, F3, Fs3,                            # CO-mo fourths planing chromatically: B/F#, A#/F, B/F#
+        A3, A3,                                  # GE lo
+        E3,                                      # ao
+        [(0, Fs3), (1.2, Ds3)],                  # SOL   a fourth, then B major: the dorian IV
+        [(0, E3), (0.5, Ds3)]]),                 # tail  ends on F#m6
+    ("azulada", "blue smears, scoops and falls", [
+        [(0, A3), (0.4, As3), (0.8, A3)],        # DER   the minor third smeared up to major and back
+        up(Fs3, 2),                              # re    a whole-step scoop
+        up(A3), A3, [(0, A3), (0.4, Fs3)],       # TEN do MEU  a pentatonic fall under the held E
+        [(0, Fs3), (0.3, A3)],                   # co
+        [(0, A3), (0.45, Fs3)],                  # ra
+        [(0, E3), (0.5, F3), (0.9, E3)],         # CAO   E smeared to E# and back
+        E3, [(0, E3), (0.2, Fs3)],               # CO-mo
+        [(0, F3), (SCOOP, Fs3), (0.55, A3)],     # GE
+        [(0, A3), (0.3, Fs3)],                   # lo
+        [(0, Ds3), (SCOOP, E3), (1.2, Fs3), (1.7, E3)],  # SOL  scooped, lifted, back
+        [(0, A3), (0.45, As3), (0.9, A3)],       # DER
+        Fs3, [(0, Fs3), (0.8, A3)],              # re re
+        up(A3), A3, [(0, A3), (0.35, Fs3)],      # TEN do MEU
+        [(0, Fs3), (0.4, A3)], A3,               # co-ra
+        [(0, E3), (0.5, F3), (0.95, E3)],        # CAO
+        E3, E3, Fs3,                             # CO-mo
+        [(0, F3), (SCOOP, Fs3), (0.8, A3)], A3,  # GE lo
+        E3,                                      # ao
+        [(0, E3), (0.15, Fs3), (1.4, E3)],       # SOL
+        [(0, E3), (0.7, Cs3)]]),                 # tail  falls to C# as it dies
 ]
 
 # How far behind the lead she sings, per phrase segment (a run of her notes with no gap of GAP_BEATS
@@ -121,24 +218,44 @@ AUTO_SHIFT = "query:AudioFx#Auto%20Shift"
 DELAY = "query:AudioFx#Delay"
 FORMANT_FOLLOW = 0.5
 HARMONY_ONLY = "--harmony" in sys.argv
+GLIDE_MS = 60.0                # how long a move inside a syllable slides
 VIBRATO = (("Vibrato Amt", 12.0), ("Vibrato Rate", 5.0), ("Vibrato Fade-In", 450.0))
 
 
-def midi_notes() -> list[dict]:
-    spans = [(lead[0][0], lead[-1][0] + lead[-1][1], pitch) for lead, pitch in HARMONY]
-    notes = []
-    for i, (on, off, pitch) in enumerate(spans):
-        start = on - EARLY if i == 0 else max(on - EARLY, (spans[i - 1][1] + on) / 2)
-        end = off + TAIL if i + 1 == len(spans) else min(off + TAIL, (off + spans[i + 1][0]) / 2)
-        start, end = max(0.0, start), min(LOOP_BEATS, end)
-        notes.append({"pitch": pitch, "start_time": round(start, 3), "duration": round(end - start, 3), "velocity": 100})
-    return notes
+def midi_notes(entries) -> list[dict]:
+    """Her line as MIDI. A change on a new syllable is a clean step: the notes meet in the middle of the
+    gap, never more than EARLY before the syllable or TAIL after the last one. A change inside a
+    syllable is legato - the new note overlaps the old by LEGATO - so Auto Shift glides between them."""
+    if len(entries) != len(LEAD_NOTES):
+        raise SystemExit(f"{len(entries)} entries for {len(LEAD_NOTES)} lead notes")
+    notes, prev_end = [], None
+    for (on, length, _, syl), entry in zip(LEAD_NOTES, entries):
+        moves = [(0.0, entry)] if isinstance(entry, int) else entry
+        for off, _ in moves[1:]:
+            if not 0 < off < length - 0.05:
+                raise SystemExit(f"{syl} at beat {on}: a move {off} beats in is outside the syllable")
+        if not (notes and moves[0][1] == notes[-1][2] and on - prev_end < GAP_BEATS):
+            if notes:
+                mid = (prev_end + on) / 2
+                notes[-1][1] = min(prev_end + TAIL, mid)
+                start = max(on - EARLY, mid)
+            else:
+                start = on - EARLY
+            notes.append([start, None, moves[0][1]])
+        for off, pitch in moves[1:]:
+            if pitch != notes[-1][2]:
+                notes[-1][1] = on + off + LEGATO
+                notes.append([on + off, None, pitch])
+        prev_end = on + length
+    notes[-1][1] = prev_end + TAIL
+    return [{"pitch": pitch, "start_time": round(max(0.0, a), 3), "duration": round(min(LOOP_BEATS, b) - max(0.0, a), 3),
+             "velocity": 100} for a, b, pitch in notes]
 
 
 def segments() -> list[tuple[float, float]]:
     """(first onset, last end) of each run of her notes with no gap of GAP_BEATS or more."""
     runs = []
-    for s, l in sorted(n for lead, _ in HARMONY for n in lead):
+    for s, l, _, _ in LEAD_NOTES:
         if runs and s - runs[-1][1] < GAP_BEATS:
             runs[-1][1] = max(runs[-1][1], s + l)
         else:
@@ -224,6 +341,7 @@ def main() -> None:
                 ch.set_device_param(v, shift, idx[pname], value).result(timeout=5)
             except Exception as e:
                 print(f"    [note] Auto Shift {pname}: {e}")
+        set_number(ch, v, shift, "Glide Time", GLIDE_MS)
         for pname, value in VIBRATO:
             set_number(ch, v, shift, pname, value)
         if not HARMONY_ONLY:
@@ -245,18 +363,35 @@ def main() -> None:
             set_number(ch, v, dl, "L Time", float(steps[0][1]))
             ch.set_device_param(v, dl, idx["Device On"], 1.0).result(timeout=5)
             ch.set_clip_envelope(v, row, v, dl, "L Time", [[b, raw[ms]] for b, ms in steps] + [[LOOP_BEATS - 0.01, raw[steps[0][1]]]]).result(timeout=10)
-        # her line, into that Auto Shift - written only if it changed
+        # her lines, one row each, beside a copy of the lead and of her - each written only if it changed
+        rows = [row + k for k in range(len(VARIANTS))]
+        have = ch.get_scene_count().result(timeout=5)["count"]
+        ours = {index_of(ch, n) for n in (LEAD, VOICE, MIDI)}
+        for t in range(len(track_names(ch))):
+            if t not in ours and any(c.get("slot", c.get("index")) in rows[1:] for c in clips_of(t)):
+                raise SystemExit(f"track {t + 1} has clips in rows {rows[1] + 1}-{rows[-1] + 1}: they'd fire with a version")
+        for _ in range(rows[-1] + 1 - have):
+            ch.create_scene(-1).result(timeout=10)
+        for name in (LEAD, VOICE):
+            t = index_of(ch, name)
+            filled = {c.get("slot", c.get("index")) for c in clips_of(t)}
+            for r in rows[1:]:
+                if r not in filled:
+                    ch.duplicate_clip(t, row, r).result(timeout=10)
         m = index_of(ch, MIDI)
-        if row not in {c.get("slot", c.get("index")) for c in clips_of(m)}:
-            ch.create_clip(m, row, LOOP_BEATS).result(timeout=10)
-        want = midi_notes()
-        have = ch.get_clip_notes(m, row).result(timeout=10)
-        have = have.get("notes", have) if isinstance(have, dict) else have
+        filled = {c.get("slot", c.get("index")) for c in clips_of(m)}
         key = lambda n: (round(float(n["start_time"]), 3), int(n["pitch"]), round(float(n["duration"]), 3))
-        if sorted(map(key, have)) != sorted(map(key, want)):
-            ch.add_notes_to_clip(m, row, want, replace=True).result(timeout=10)
-            print(f"  {MIDI}: wrote {len(want)} notes")
-        ch.set_clip_name(m, row, "harmonia - low under her: shells of F#m7, a tritone, VI to iv").result(timeout=5)
+        for r, (vname, what, entries) in zip(rows, VARIANTS):
+            if r not in filled:
+                ch.create_clip(m, r, LOOP_BEATS).result(timeout=10)
+            want = midi_notes(entries)
+            got = ch.get_clip_notes(m, r).result(timeout=10)
+            got = got.get("notes", got) if isinstance(got, dict) else got
+            if sorted(map(key, got)) != sorted(map(key, want)):
+                ch.add_notes_to_clip(m, r, want, replace=True).result(timeout=10)
+                print(f"  {MIDI} row {r + 1}: wrote {vname}, {len(want)} notes")
+            ch.set_clip_name(m, r, f"{vname} - {what}").result(timeout=5)
+            ch.set_scene_name(r, f"DERRETIDA {vname}").result(timeout=5)
         # Auto Shift takes its MIDI through its own MIDI Input panel, which the LOM doesn't expose, and a
         # MIDI track can't route its output to an audio track's effect. The user does it once: DERRETIDA >
         # Auto Shift > MIDI In > MIDI On, External Source: HARMONIA, voice mode Mono.
@@ -270,10 +405,10 @@ def main() -> None:
             print(f"  {name:<13} (track {tt + 1}) row {row + 1}: mode {pr.get('warp_mode')} transpose {int(pr['pitch_coarse']):+d} "
                   f"detune {int(pr['pitch_fine']):+d} loop {pr.get('looping')} {pr.get('length')} beats | "
                   + " > ".join(d["name"] for d in devices(tt)))
-        print(f"  {MIDI:<13} (track {m + 1}) row {row + 1}: {len(want)} notes - Auto Shift's External Source")
+        print(f"  {MIDI:<13} (track {m + 1}) rows {rows[0] + 1}-{rows[-1] + 1}: " + ", ".join(v[0] for v in VARIANTS))
         ps = params(v, shift)
         print("  Auto Shift:", {n: ps[n]["display"] for n in ("Quantizer On", "Strength", "Formant Follow", "Smooth Time",
-                                                              "Vibrato Amt", "Vibrato Rate", "Vibrato Fade-In", "Vibrato Natural", "Latch")})
+                                                              "Glide Time", "Vibrato Amt", "Vibrato Rate", "Vibrato Fade-In", "Vibrato Natural", "Latch")})
         if not HARMONY_ONLY:
             ps = params(v, dl)
             print("  Delay:", {n: ps[n]["display"] for n in ("Smoothing", "L Sync", "L Time", "Feedback", "Filter On", "Dry/Wet")})
