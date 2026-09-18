@@ -64,6 +64,9 @@ PICKS = {
 }
 
 SILENT_DB = -45.0      # under the clip's peak
+# v2: no gap at the front (the user: "36 has a big ole gap" - the Test Press phrases each sit
+# inside a bar of silence, and were loaded whole). New names: Live holds the v1 files open.
+VERSION = "-v2"
 FRAME_S = 0.005
 
 
@@ -102,6 +105,26 @@ def settle(x: np.ndarray, sr: int, i: int, j: int, beat_s: float) -> tuple[int, 
     return max(0, i - int(0.005 * sr)), min(len(mono), j + int(0.015 * sr))
 
 
+ONSET_DB = -40.0       # under the phrase's own peak: where it starts sounding
+TAIL_DB = -48.0        # and where it has stopped
+
+
+def tight(y: np.ndarray, sr: int) -> np.ndarray:
+    """Trim to where the phrase sounds: no gap at the front (the user: pad 36 "has a big ole gap" -
+    the Test Press phrases each sit inside a bar of silence), and none trailing."""
+    mono = np.abs(y).mean(axis=1)
+    win = int(0.002 * sr)
+    env = np.array([np.sqrt(np.mean(mono[k:k + win] ** 2)) for k in range(0, len(mono) - win, win)])
+    db = 20 * np.log10(np.maximum(env, 1e-12) / max(env.max(), 1e-12))
+    on = np.nonzero(db > ONSET_DB)[0]
+    loud = np.nonzero(db > TAIL_DB)[0]
+    if not len(on):
+        return y
+    i = max(0, on[0] * win - int(0.002 * sr))
+    j = min(len(y), (loud[-1] + 1) * win + int(0.02 * sr))
+    return y[i:j]
+
+
 def fade(y: np.ndarray, sr: int, in_ms: float = 3.0, out_ms: float = 15.0) -> np.ndarray:
     y = y.copy()
     a, b = int(in_ms / 1000 * sr), int(out_ms / 1000 * sr)
@@ -114,7 +137,7 @@ def cut_all() -> dict[int, Path]:
     DIR.mkdir(parents=True, exist_ok=True)
     made = {}
     for pad, (name, src, span) in PICKS.items():
-        dst = DIR / f"{pad:02d}-{name.replace(' ', '-')}.wav"
+        dst = DIR / f"{pad:02d}-{name.replace(' ', '-')}{VERSION}.wav"
         made[pad] = dst
         if dst.exists():
             continue                                  # Live holds a loaded one open
@@ -125,7 +148,7 @@ def cut_all() -> dict[int, Path]:
             i, j = settle(x, sr, int(span[0] * beat_s * sr), int(span[1] * beat_s * sr), beat_s)
         else:
             i, j = 0, len(x)
-        y = fade(x[i:j], sr)
+        y = fade(tight(x[i:j], sr), sr, in_ms=1.0)
         y *= 0.89 / max(1e-9, float(np.abs(y).max()))
         write_wav(dst, y, sr)
         where = f"beats {i / sr / beat_s:5.2f}-{j / sr / beat_s:5.2f}" if span else "whole clip"
@@ -155,9 +178,14 @@ def kit(made: dict[int, Path]) -> None:
                     break
                 time.sleep(0.25)
         t = index_of(ch, TRACK)
+        from jungle_vocal_chops import swap_sample
         for pad, path in made.items():
-            if _pad_device(ch, t, pad):
-                continue                              # never replace what's on a pad
+            have = _pad_device(ch, t, pad)
+            if have:
+                loaded = str(have["properties"].get("sample.file_path", "")).replace("\\", "/").split("/")[-1]
+                if loaded != path.name and loaded.startswith(f"{pad:02d}-"):
+                    swap_sample(ch, t, pad, FOLDER, path.name, have)      # an older cut: settings kept
+                continue
             _load_pad(ch, t, pad, BROWSER, path.name)
             ch.set_drum_pad_chain_device_property(t, 0, pad, "playback_mode", 1, 0).result(timeout=10)   # one-shot
             try:
