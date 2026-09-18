@@ -67,6 +67,13 @@ PADS = {
     49: ("bump-ooh", None, "bump-ooh-a-like-that"),
     50: ("bubble-now", None, "bubble-now-bubble"),
 }
+# v2: these chops lost the start of their word ("now" was heard as "ow") and are cut again, leading
+# consonant included. New names, because Live holds the v1 files open on the pads.
+REVISED = {37, 38, 39, 42, 43, 46}
+
+
+def chop_file(note, name):
+    return f"{note:02d}-{name}{'-v2' if note in REVISED else ''}.wav"
 
 
 def wsola(x, ratio, sr, frame_ms=25.0, tolerance_ms=6.0):
@@ -103,21 +110,59 @@ def wsola(x, ratio, sr, frame_ms=25.0, tolerance_ms=6.0):
     return y[:int(len(x) * ratio)]
 
 
-def tighten(x, sr, a, b, floor_db=-40.0):
-    """The part of [a, b) that actually sounds, with a little air before the attack."""
-    i, j = int(a * sr), int(b * sr)
-    seg = x[i:j]
-    if not len(seg):
-        return i, j
-    win = int(0.005 * sr)
-    rms = np.array([np.sqrt(np.mean(seg[k:k + win] ** 2)) for k in range(0, max(1, len(seg) - win), win)])
+FRAME_S = 0.005
+
+
+def _db_frames(x, sr):
+    """Level per 5 ms frame, dB below the take's peak."""
+    win = int(FRAME_S * sr)
     peak = float(np.abs(x).max()) or 1e-9
-    on = np.nonzero(20 * np.log10(np.maximum(rms, 1e-12) / peak) > floor_db)[0]
-    if not len(on):
-        return i, j
-    start = max(0, i + on[0] * win - int(0.004 * sr))
-    end = min(len(x), i + (on[-1] + 1) * win + int(0.02 * sr))
-    return start, end
+    r = np.array([np.sqrt(np.mean(x[k:k + win] ** 2)) for k in range(0, len(x) - win + 1, win)])
+    return 20 * np.log10(np.maximum(r, 1e-12) / peak)
+
+
+def _word_start(db, fa, fb, floor_db, lookback):
+    """First frame of the word whose note spans frames [fa, fb).
+
+    Walk back from the word's first sound in its window, because the renderer puts a leading
+    consonant BEFORE the note (so the vowel lands on the beat): cutting at the note took the "n" off
+    "now", and the user heard "ow". Back to the silence before it; or, where words run together, to
+    the deepest dip between them. Only a real dip counts: the quiet edge of the look-back is the
+    previous word still rising, and taking it put the "a" on "like".
+    """
+    loud = np.nonzero(db[fa:fb] > floor_db)[0]
+    first = fa + int(loud[0]) if len(loud) else fa
+    lo = max(0, first - lookback)
+    silent = np.nonzero(db[lo:first] <= floor_db)[0]
+    if len(silent):
+        return lo + int(silent[-1]) + 1
+    # the note's own first frame is a candidate too: still falling into it ("now" into the closure
+    # of "bubble") means the boundary is the note, not a ripple inside the vowel before it
+    seq = db[lo:first + 1]
+    dips = [k for k in range(1, len(seq)) if seq[k] <= seq[k - 1] and (k == len(seq) - 1 or seq[k] <= seq[k + 1])]
+    if not dips:
+        return first
+    return lo + min(dips, key=lambda k: (seq[k], -k))      # deepest; on a tie, nearest the note
+
+
+def tighten(x, sr, a, b, nxt=None, floor_db=-40.0, lookback_s=0.15):
+    """The samples of the words whose notes span [a, b) seconds.
+
+    Start where the first word starts sounding (its leading consonant included). End where the last
+    stops sounding inside its window - the rests hold breaths at the floor, so not past it - and
+    never after the next word (`nxt`, its note's (start, end)) starts, whose leading consonant sits
+    before its note too.
+    """
+    db = _db_frames(x, sr)
+    f = lambda t: min(len(db), int(round(t / FRAME_S)))
+    look = int(lookback_s / FRAME_S)
+    start = _word_start(db, f(a), f(b), floor_db, look)
+    loud = np.nonzero(db[start:f(b)] > floor_db)[0]
+    stop = int((start + int(loud[-1]) + 1) * FRAME_S * sr + 0.02 * sr) if len(loud) else int(b * sr)
+    if nxt is not None:
+        stop = min(stop, int(_word_start(db, f(nxt[0]), f(nxt[1]), floor_db, look) * FRAME_S * sr))
+    i = max(0, int(start * FRAME_S * sr) - int(0.004 * sr))
+    return i, min(stop, len(x))
 
 
 def fade(y, sr, in_ms=2.0, out_ms=12.0):
@@ -144,14 +189,15 @@ def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missin
         x, sr = read_wav(KEPT / TAKES[call])
         spans = windows(CALLS[call][0], RENDER_BPM)
         if words is None:
-            a, b = spans[0][1], spans[-1][2]
+            a, b, nxt = spans[0][1], spans[-1][2], None
         else:
-            chosen = [s for s in spans if s[0] in words]
-            a, b = chosen[0][1], chosen[-1][2]
-        i, j = tighten(x, sr, a, b)
+            idx = [k for k, s in enumerate(spans) if s[0] in words]
+            a, b = spans[idx[0]][1], spans[idx[-1]][2]
+            nxt = spans[idx[-1] + 1][1:] if idx[-1] + 1 < len(spans) else None
+        i, j = tighten(x, sr, a, b, nxt)
         y = fade(wsola(x[i:j], ratio, sr) if ratio != 1.0 else x[i:j].copy(), sr)
         y *= 0.89 / max(1e-9, float(np.abs(y).max()))
-        path = out_dir / f"{note:02d}-{name}.wav"
+        path = out_dir / chop_file(note, name)
         if path.exists() and only_missing:
             made[note] = path             # loaded on a pad, and Live holds it open: never rewrite
             continue
@@ -170,7 +216,7 @@ def check_legibility():
         if words is not None:
             continue
         truth = CALLS[call][1]
-        for label, path in (("at 85", KEPT / TAKES[call]), ("at 170", CHOP_DIR / f"{note:02d}-{name}.wav")):
+        for label, path in (("at 85", KEPT / TAKES[call]), ("at 170", CHOP_DIR / chop_file(note, name))):
             r = subprocess.run([str(py), str(vocal.root() / "bench" / "intelligibility.py"), "--truth", truth,
                                 "--model", "base.en", "--download-root", str(vocal.root() / "tools" / "_whisper"),
                                 str(path)], capture_output=True, text=True)
@@ -182,9 +228,61 @@ def check_legibility():
 LEVEL_DB = -8.0          # unmatched on the meter (the user is playing): start low
 
 
+def swap_sample(ch, t, note, folder, item, before):
+    """A new sample on a pad that is already set up, keeping the pad exactly as it was.
+
+    Loading a sample onto a pad gives it a fresh Simpler, which would throw away whatever the user
+    has done to it. So every parameter and playback property is read first and written back after.
+    Sample markers count samples of the OLD file, so a pad whose markers were moved is left alone.
+    """
+    import time
+    from jungle_drumkits import _load_pad, _pad_device
+    props = before["properties"]
+    if props.get("sample.start_marker", 0) != 0 or props.get("sample.end_marker") != props.get("sample.length", 0) - 1:
+        print(f"  pad {note}: its sample markers were moved - left alone, load {item} by hand")
+        return False
+    chain = ch.get_drum_pad_chain_info(t, 0, note).result(timeout=10)
+    _load_pad(ch, t, note, f"user_library/Samples/Imported/{folder}", item)
+    after = None
+    for _ in range(40):
+        after = _pad_device(ch, t, note)
+        if after and str(after["properties"].get("sample.file_path", "")).endswith(item):
+            break
+        time.sleep(0.25)
+    else:
+        raise RuntimeError(f"pad {note}: {item} did not load")
+    now_props = after["properties"]
+    for key in ("playback_mode", "sample.warping"):
+        if key in props and now_props.get(key) != props[key]:
+            ch.set_drum_pad_chain_device_property(t, 0, note, key, props[key], 0).result(timeout=10)
+    now = {p["name"]: p["value"] for p in after["parameters"]}
+    restored = []
+    for p_ in before["parameters"]:
+        if p_["name"] in now and abs(now[p_["name"]] - p_["value"]) > 1e-6:
+            ch.set_drum_pad_chain_device_param(t, 0, note, float(p_["value"]), param_name=p_["name"],
+                                               chain_device_index=0).result(timeout=10)
+            restored.append(p_["name"])
+    chain_now = ch.get_drum_pad_chain_info(t, 0, note).result(timeout=10)
+    if abs(chain_now["volume"] - chain["volume"]) > 1e-6:
+        ch.set_drum_pad_chain_volume(t, 0, note, chain["volume"]).result(timeout=10)
+        restored.append("chain volume")
+    for key in ("panning", "mute", "sends"):
+        if chain_now.get(key) != chain.get(key):
+            print(f"    [warn] pad {note}: chain {key} was {chain.get(key)!r}, now {chain_now.get(key)!r} - no setter")
+    # read it all back
+    check = _pad_device(ch, t, note)
+    got = {p["name"]: p["value"] for p in check["parameters"]}
+    off = [p_["name"] for p_ in before["parameters"] if p_["name"] in got and abs(got[p_["name"]] - p_["value"]) > 1e-4]
+    off += [k for k in ("playback_mode", "sample.warping") if k in props and check["properties"].get(k) != props[k]]
+    print(f"  pad {note}: {item}, settings carried over ({len(restored)} rewritten)"
+          + (f" - STILL DIFFERENT: {off}" if off else ""))
+    return not off
+
+
 def kit(TRACK="MOUTH-OFF", folder="jungle_vocal_chops"):
-    """Put the chops on a Drum Rack on a new track. Additive only: an existing track or pad is left
-    exactly as the user has it; playback is never stopped."""
+    """Put the chops on a Drum Rack on a new track. An existing track keeps everything the user has
+    done: an empty pad is filled, a pad holding an older cut of its chop gets the new cut with its
+    settings carried over, anything else is left alone. Playback is never stopped."""
     os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
     import time
     from thelmic.live_channel import LiveChannel
@@ -207,10 +305,18 @@ def kit(TRACK="MOUTH-OFF", folder="jungle_vocal_chops"):
                 time.sleep(0.25)
         t = index_of(ch, TRACK)
         for note, (_, _, name) in PADS.items():
-            if _pad_device(ch, t, note):
-                print(f"  pad {note} {name}: already loaded, left alone")
+            want = chop_file(note, name)
+            have = _pad_device(ch, t, note)
+            loaded = str((have or {}).get("properties", {}).get("sample.file_path", "")).replace("\\", "/").split("/")[-1]
+            if have and loaded == want:
                 continue
-            _load_pad(ch, t, note, f"user_library/Samples/Imported/{folder}", f"{note:02d}-{name}.wav")
+            if have and not loaded.startswith(f"{note:02d}-{name}"):
+                print(f"  pad {note} {name}: holds {loaded!r}, not one of these chops - left alone")
+                continue
+            if have:
+                swap_sample(ch, t, note, folder, want, have)
+                continue
+            _load_pad(ch, t, note, f"user_library/Samples/Imported/{folder}", want)
 
             def prop(key, value):
                 return ch.set_drum_pad_chain_device_property(t, 0, note, key, value, 0).result(timeout=10)
@@ -254,6 +360,6 @@ if __name__ == "__main__":
             build(ratio, folder, only_missing=True)
             kit(track, folder)
     else:
-        build()
+        build(only_missing=True)          # a chop already on a pad is held open by Live
         print()
         check_legibility()
