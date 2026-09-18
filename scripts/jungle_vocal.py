@@ -112,6 +112,43 @@ HOOKS = {
 }
 
 
+def sung(ph, midi, beats, expr, word, **orn):
+    """One note of a call: `expr` is how much the pitch model sings it (0 spoken, 1 sung)."""
+    return {"phonemes": list(ph), "midi": midi, "beats": beats, "expr": expr, "word": word, **orn}
+
+
+# The user's instructive calls, 2026-09-18: "hop, ah - a-like-this" / "bump, ooh - a-like-that" /
+# "bubble, now bubble". The call word is spoken and percussive; the exclamation is where the singing
+# goes. One bar each at the render tempo, warped onto the grid.
+GS3, B3, E3 = 56, 59, 52
+LIKE, THIS = ["l", "ay", "k"], ["dh", "ih", "s"]
+CALLS = {
+    "hop-ah": ([sung(NO_CLOSURE["hop"], CS4, 0.4, 0.2, "hop", velocity=0.9),
+                rest(0.2),                      # the comma
+                sung(["aa"], A3, 0.6, 1.0, "ah", scoop=-1.2, scoop_beats=0.12, fall=-2.0, fall_beats=0.3),
+                rest(0.3),
+                sung(["ax"], GS3, 0.25, 0.4, "a"), sung(LIKE, A3, 0.5, 0.4, "like"),
+                sung(THIS, FS3, 0.75, 0.6, "this", fall=-1.0, fall_beats=0.3),
+                rest(1.0)], "hop ah a like this"),
+    "bump-ooh": ([sung(NO_CLOSURE["bump"], CS4, 0.4, 0.2, "bump", velocity=0.9),
+                rest(0.2),                      # the comma
+                  sung(["uw"], B3, 0.6, 1.0, "ooh", scoop=-1.2, scoop_beats=0.12, fall=-2.0, fall_beats=0.3),
+                  rest(0.3),
+                  sung(["ax"], GS3, 0.25, 0.4, "a"), sung(LIKE, A3, 0.5, 0.4, "like"),
+                  sung(NO_CLOSURE["that"], E3, 0.75, 0.6, "that", fall=-1.0, fall_beats=0.3),
+                  rest(1.0)], "bump ooh a like that"),
+    "bubble-now": ([sung(["b", "ah"], CS4, 0.35, 0.3, "bubble", velocity=0.9),
+                    sung(["b", "ax", "l"], CS4, 0.3, 0.3, "bubble"),
+                    rest(0.35),
+                    sung(["n", "aw"], E4, 0.8, 1.0, "now", scoop=-1.5, scoop_beats=0.15),
+                    sung(["b", "ah"], A3, 0.35, 0.5, "bubble2"),
+                    sung(["b", "ax", "l"], FS3, 0.6, 0.6, "bubble2", fall=-1.0, fall_beats=0.3),
+                    rest(1.25)], "bubble now bubble"),
+}
+for _name, (_notes, _truth) in CALLS.items():
+    assert abs(sum(n["beats"] for n in _notes) - 4.0) < 1e-6, (_name, sum(n["beats"] for n in _notes))
+
+
 def session_bpm() -> float:
     from thelmic.live_channel import LiveChannel
     ch = LiveChannel(lower_priority=False)
