@@ -37,22 +37,33 @@ single take proves nothing. Tools: `local-sung-vocals/bench/sweep_hook.py`, `dia
 - **An unvoiced ending can grow a vowel.** "mix" came back as "mixer" in most takes: ~90 ms of
   low, voiced sound after the s. Making it short made it worse (0 of 6). Cut it off instead: end
   the chop where the hiss ends. Trimmed, the transcriber heard "bump to the mix".
+- **A k swallows a following "th".** Straight after "like", the "th" of this/that rendered as
+  ~50 ms of near silence (46-61 dB under the take's peak): the k's closure runs on through it, and
+  the chop plays "is"/"at". A 0.15-beat breath before the word brings it up to 29-40 dB under,
+  rising into the vowel. "the" after a vowel was never a problem.
+- **On one pitch, words need their gaps.** Sung on the root (the user: "all sung on the fundamental,
+  all as instructions"), every word lands within 40 cents of F#3 - but with no pitch change to
+  separate them, "hop, ah" was heard as "hop out" in most takes. The melodic version had the fall
+  from C#4 to A3 doing that work.
 - **Check the inferred pronunciations.** The bank's dictionary is an override set, so ordinary words
   come from CMUdict: "hop" arrives as `hh aa p`, an American vowel that is heard as "hope". Every
   render prints them and `Sound.extra["inferred_pronunciations"]` carries them.
 
 ## Chopping onto pads
 
-- **Cut from where the word starts sounding, not from its note.** The renderer puts a leading
-  consonant *before* the note so the vowel lands on the beat; cutting at the note took the "n" off
-  "now" (heard as "ow") and the start off six chops. Walk back from the word's first sound to the
-  silence before it, or, where words run together, to the dip between them. End before the next
-  word's consonant for the same reason. (`scripts/jungle_vocal_chops.py`, `tighten`)
-- **A word sung as a swell loses its consonant on a pad.** "now" (expr 1.0, a scoop, the call's
-  high note) starts 27 dB under its own peak and takes 270 ms to come within 6 dB; the other
-  consonant-led chops start 6-17 dB under and get there in 10-90 ms. Inside its phrase it reads;
-  hit on its own over drums, only the swell is heard. Lift the onset (12 dB, ramped away over
-  200 ms) to put it beside the others.
+- **Cut on the renderer's note boundaries - they are its word boundaries.** `render.py` fits every
+  phoneme of a word inside its note, consonant first, and rounds each note to whole 11.6 ms frames.
+  Cutting where the sound crossed a level lost every quiet consonant (the "th" of "this", the "h"
+  of "hop", the "n" of "now"); a first fix that walked back from the beat-grid note was chasing
+  ~10 ms of frame-rounding drift, not consonants placed early. After a rest, walk back to true
+  silence (the model anticipates a little); where words run together, cut at the boundary.
+  (`scripts/jungle_vocal_chops.py`, `cut`; `jungle_vocal_takes.windows` is frame-exact)
+- **Lift a soft consonant to where speech has it.** A word opening on a continuant (n, h, th, l...)
+  can start far under its vowel: "now" sung as a swell was 27 dB under its peak and read as "ow"
+  on a pad; the h of "hop" and the th of "that" came out 40-46 dB under. Lift the onset to 18 dB
+  under the peak, and ease the lift out *before* the vowel arrives - eased out after it, the lift
+  raised the vowel too and the consonant stayed just as far under. Leave stops alone: their quiet
+  part is the closure.
 - **The 2x squeeze costs short words.** As sung, "to the mix" and "bump to the mix" were heard
   exactly; squeezed to 170 with WSOLA, "to the next" and "come on to the next" - as "bump, ooh"
   was before. That's what the two kits (MOUTH-OFF squeezed, BIG-MOUTH as sung) are for.

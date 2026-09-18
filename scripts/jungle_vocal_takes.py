@@ -124,6 +124,9 @@ def cents(hz, midi):
     return 1200 * math.log2(hz / (440.0 * 2 ** ((midi - 69) / 12)))
 
 
+RENDER_FRAME_S = 512 / 44100      # the bank's hop at its sample rate
+
+
 def windows(notes, bpm):
     """(label, start_s, end_s) per word, from the score's own timing.
 
@@ -133,7 +136,9 @@ def windows(notes, bpm):
     """
     beat, out, t = 60.0 / bpm, [], 0.0
     for i, n in enumerate(notes):
-        dur = float(n["beats"]) * beat
+        # the renderer's own timeline: each note rounded to whole frames (render.py load_score),
+        # which drifts ~10 ms from the beat grid within a bar
+        dur = max(1, round(float(n["beats"]) * beat / RENDER_FRAME_S)) * RENDER_FRAME_S
         if n.get("rest"):
             t += dur
             continue

@@ -13,7 +13,7 @@ refinements - keeping the first 35 ms uncompressed, and compressing word by word
 and cost "bubble" its legibility. At about a second long the transcriber may be the limit, not the
 audio: the user's ear decides.
 
-Cuts come from the score's own timing, tightened to where the word actually sounds.
+Cuts come from the renderer's own note boundaries, which are its word boundaries (see `cut`).
 
     python scripts/jungle_vocal_chops.py             # write the chops, check legibility survived
     python scripts/jungle_vocal_chops.py --kit       # both kits: MOUTH-OFF (at 170), BIG-MOUTH (as sung)
@@ -47,9 +47,12 @@ KITS = {
     "MOUTH-OFF": (RENDER_BPM / TRACK_BPM, "jungle_vocal_chops"),
     "BIG-MOUTH": (1.0, "jungle_vocal_chops_long"),
 }
-TAKES = {"hop-ah": "call-hop-ah-85bpm-104852.wav", "bump-ooh": "call-bump-ooh-85bpm-104852.wav",
-         "bubble-now": "call-bubble-now-85bpm-104406.wav",
-         "bump-to-the-mix": "call-bump-to-the-mix-85bpm-114829.wav"}   # heard "Bump to the mix."
+# The calls on the root, 6 takes each on the CPU. Picked on the transcriber AND per-word levels:
+# where it ranked a take with a word 14-19 dB under the rest, an even take heard the same won.
+TAKES = {"hop-ah": "call-hop-ah-85bpm-150339.wav",                # the strongest th, no faults (roll 2)
+         "bump-ooh": "call-bump-ooh-85bpm-150339.wav",            # "Bump who are like that?" - th strong, no faults (roll 4)
+         "bubble-now": "call-bubble-now-85bpm-145401.wav",        # "bubble now bubble" (5 of 6 exact)
+         "bump-to-the-mix": "call-bump-to-the-mix-85bpm-145401.wav"}  # "Bump to the mixer" (roll 1): the chop trims the er
 # pad note -> (call, words the chop spans, name). Push's 4x4 starts at 36: words low, whole calls up top.
 PADS = {
     36: ("hop-ah", ["hop"], "hop"),
@@ -72,30 +75,52 @@ PADS = {
     52: ("bump-to-the-mix", ["mix"], "mix"),
     53: ("bump-to-the-mix", None, "bump-to-the-mix"),
 }
-# pad -> version. New names, because Live holds the old files open on the pads.
-# v2: these chops lost the start of their word ("now" was heard as "ow") and are cut again, leading
-#     consonant included.
-# v3: "now" still read as "ow" on its own, while the same audio inside "bubble, now bubble" read
-#     right. The renderer sang it as a slow swell: its first 30 ms are 27 dB under the word's peak
-#     and it takes 270 ms to come within 6 dB of it - the other consonant-led chops start 6-17 dB
-#     under and get there in 10-90 ms. Hit on its own over drums, only the swell is heard.
-REVISED = {37: 2, 38: 2, 39: 2, 42: 2, 43: 2, 46: 3}
-# pad -> dB: lift the leading consonant to where the other chops' are, then ramp the lift away over
-# the swell, which stays a swell.
-ONSET_LIFT = {46: 12.0}
-LIFT_HOLD_S, LIFT_RAMP_S = 0.02, 0.2    # held to just past the note (the consonant sits before it)
+# Chop files are named for their set, and a pad holding an older cut of the same chop is swapped
+# with its settings kept. "root": the calls sung on F#3, cut on the renderer's own note boundaries.
+# Earlier sets (melodic takes; v2 kept the consonant, v3 lifted "now") are in git.
+SET = "root"
 
 
 def chop_file(note, name):
-    v = REVISED.get(note, 1)
-    return f"{note:02d}-{name}{f'-v{v}' if v > 1 else ''}.wav"
+    return f"{note:02d}-{name}-{SET}.wav"
 
 
-def lift_onset(y, sr, note_at, db):
-    """`db` of gain up to `note_at` samples (+ a hold), then down to none over LIFT_RAMP_S, in dB."""
+# A word opening on a continuant can start far under its own vowel: "now" was sung as a swell, 27 dB
+# under its peak, and read as "ow" on a pad; on the root takes the h of "hop" and the th of "that"
+# start 40-46 dB under. Such an onset is lifted to LIFT_TARGET_DB under the peak (at most
+# LIFT_MAX_DB) - about where a fricative sits beside its vowel in speech - and eased out over the
+# LIFT_RAMP_S before the vowel arrives. Eased out AFTER it, the lift raised the vowel too and the
+# consonant stayed exactly as far under it. Stops (b, p, t, k) are left alone: their quiet
+# part is the closure, and lifting that adds a hum.
+CONTINUANT = {"n", "m", "ng", "l", "r", "w", "y", "dh", "th", "s", "z", "sh", "zh", "f", "v", "hh"}
+LIFT_TARGET_DB, LIFT_MAX_DB = -18.0, 18.0
+VOWEL_WITHIN_DB, LIFT_RAMP_S = 12.0, 0.03
+
+
+def _frames_db(y, sr, frame_s):
+    win = int(frame_s * sr)
+    return np.array([20 * np.log10(max(float(np.sqrt(np.mean(y[k:k + win] ** 2))), 1e-12))
+                     for k in range(0, len(y) - win + 1, win)])
+
+
+def onset_under_peak(y, sr):
+    """dB of the first 30 ms of sound under the chop's loudest 10 ms."""
+    db = _frames_db(y, sr, 0.01)
+    peak = db.max()
+    on = int(np.nonzero(db > peak - 45)[0][0])
+    return float(db[on:on + 3].mean() - peak)
+
+
+def vowel_arrives(y, sr):
+    """Seconds until the first 10 ms within VOWEL_WITHIN_DB of the chop's loudest."""
+    db = _frames_db(y, sr, 0.01)
+    return float(np.nonzero(db > db.max() - VOWEL_WITHIN_DB)[0][0]) * 0.01
+
+
+def lift_onset(y, sr, db, until_s):
+    """`db` of gain, down to none over the LIFT_RAMP_S that ends at `until_s`, in dB."""
     t = np.arange(len(y))
-    hold = note_at + int(LIFT_HOLD_S * sr)
-    ramp = np.clip((t - hold) / (LIFT_RAMP_S * sr), 0.0, 1.0)
+    ramp = np.clip((t - int((until_s - LIFT_RAMP_S) * sr)) / (LIFT_RAMP_S * sr), 0.0, 1.0)
     return y * 10 ** (db * (1.0 - ramp) / 20)
 
 
@@ -134,43 +159,10 @@ def wsola(x, ratio, sr, frame_ms=25.0, tolerance_ms=6.0):
 
 
 FRAME_S = 0.005
-
-
-def _db_frames(x, sr):
-    """Level per 5 ms frame, dB below the take's peak."""
-    win = int(FRAME_S * sr)
-    peak = float(np.abs(x).max()) or 1e-9
-    r = np.array([np.sqrt(np.mean(x[k:k + win] ** 2)) for k in range(0, len(x) - win + 1, win)])
-    return 20 * np.log10(np.maximum(r, 1e-12) / peak)
-
-
-def _word_start(db, fa, fb, floor_db, lookback):
-    """First frame of the word whose note spans frames [fa, fb).
-
-    Walk back from the word's first sound in its window, because the renderer puts a leading
-    consonant BEFORE the note (so the vowel lands on the beat): cutting at the note took the "n" off
-    "now", and the user heard "ow". Back to the silence before it; or, where words run together, to
-    the deepest dip between them. Only a real dip counts: the quiet edge of the look-back is the
-    previous word still rising, and taking it put the "a" on "like".
-    """
-    loud = np.nonzero(db[fa:fb] > floor_db)[0]
-    first = fa + int(loud[0]) if len(loud) else fa
-    lo = max(0, first - lookback)
-    silent = np.nonzero(db[lo:first] <= floor_db)[0]
-    if len(silent):
-        # from the START of the last silent frame: a plosive bursts out of its closure, and the "t"
-        # of "to" began inside the frame the cut used to start at (cuts before 2026-09-18 11:50
-        # start one frame later: pads 37-46 v2/v3)
-        return lo + int(silent[-1])
-    # the note's own first frame is a candidate too: still falling into it ("now" into the closure
-    # of "bubble") means the boundary is the note, not a ripple inside the vowel before it
-    seq = db[lo:first + 1]
-    dips = [k for k in range(1, len(seq)) if seq[k] <= seq[k - 1] and (k == len(seq) - 1 or seq[k] <= seq[k + 1])]
-    if not dips:
-        return first
-    return lo + min(dips, key=lambda k: (seq[k], -k))      # deepest; on a tie, nearest the note
-
-
+QUIET_DB = -55.0    # silence, under the take's peak: the weakest consonant sits above it
+FLOOR_DB = -40.0    # where a word has stopped ringing (the rests hold breaths at about this)
+PRE_S = 0.06        # how far before its note a word may start sounding: the model anticipates
+TAIL_S = 0.08       # how far past its note a word may ring into a rest
 UNVOICED_END = {"s", "k", "t", "p", "f", "th", "sh", "ch", "hh"}
 
 
@@ -191,27 +183,39 @@ def _unvoiced_end(x, sr, stop, floor_db, hiss_hz=4000.0):
     return stop
 
 
-def tighten(x, sr, a, b, nxt=None, floor_db=-40.0, lookback_s=0.15, unvoiced_end=False):
-    """The samples of the words whose notes span [a, b) seconds.
+def cut(x, sr, spans, first, last, unvoiced_end=False):
+    """Samples [i, j) for the words spans[first..last] (from `windows`), on the renderer's timeline.
 
-    Start where the first word starts sounding (its leading consonant included). End where the last
-    stops sounding inside its window - the rests hold breaths at the floor, so not past it - and
-    never after the next word (`nxt`, its note's (start, end)) starts, whose leading consonant sits
-    before its note too.
+    The renderer fits every phoneme of a word inside its note (render.py, durations_and_f0), so a
+    note's boundaries are its word's: however quiet the consonant, it starts at the note. Cutting
+    where the sound crossed a level instead lost the quiet ones - the "th" of "this", the "n" of
+    "now". After a rest a word may begin sounding a little early, so walk back to silence (at most
+    PRE_S); where words run together, cut at the boundary. At the end, ring on into a rest until the
+    sound drops under the floor (at most TAIL_S), and trim a vowel grown after an unvoiced ending.
     """
-    db = _db_frames(x, sr)
-    f = lambda t: min(len(db), int(round(t / FRAME_S)))
-    look = int(lookback_s / FRAME_S)
-    start = _word_start(db, f(a), f(b), floor_db, look)
-    loud = np.nonzero(db[start:f(b)] > floor_db)[0]
-    stop = int((start + int(loud[-1]) + 1) * FRAME_S * sr + 0.02 * sr) if len(loud) else int(b * sr)
-    if nxt is not None:
-        stop = min(stop, int(_word_start(db, f(nxt[0]), f(nxt[1]), floor_db, look) * FRAME_S * sr))
-    i = max(0, int(start * FRAME_S * sr) - int(0.004 * sr))
-    stop = min(stop, len(x))
+    peak = float(np.abs(x).max()) or 1e-9
+    win = int(FRAME_S * sr)
+
+    def level(k0, k1):
+        return 20 * np.log10(max(float(np.sqrt(np.mean(x[k0:k1] ** 2))), 1e-12) / peak)
+
+    a, b = spans[first][1], spans[last][2]
+    i, j = int(round(a * sr)), int(round(b * sr))
+    prev_end = spans[first - 1][2] if first > 0 else 0.0
+    if a - prev_end > 0.02:                                  # after a rest
+        lo = max(int(prev_end * sr), i - int(PRE_S * sr))
+        while i - win >= lo and level(i - win, i) > QUIET_DB:
+            i -= win
+    nxt = spans[last + 1][1] if last + 1 < len(spans) else None
+    if nxt is None or nxt - b > 0.02:                        # into a rest
+        hi = min(len(x), j + int(TAIL_S * sr))
+        if nxt is not None:
+            hi = min(hi, int(nxt * sr) - int(PRE_S * sr))    # leave the next word its run-up
+        while j + win <= hi and level(j, j + win) > FLOOR_DB:
+            j += win
     if unvoiced_end:
-        stop = _unvoiced_end(x, sr, stop, floor_db)
-    return i, stop
+        j = _unvoiced_end(x, sr, j, FLOOR_DB)
+    return i, min(j, len(x))
 
 
 def fade(y, sr, in_ms=2.0, out_ms=12.0):
@@ -236,19 +240,20 @@ def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missin
     made = {}
     for note, (call, words, name) in PADS.items():
         x, sr = read_wav(KEPT / TAKES[call])
-        spans = windows(CALLS[call][0], RENDER_BPM)
-        if words is None:
-            a, b, nxt = spans[0][1], spans[-1][2], None
-        else:
-            idx = [k for k, s in enumerate(spans) if s[0] in words]
-            a, b = spans[idx[0]][1], spans[idx[-1]][2]
-            nxt = spans[idx[-1] + 1][1:] if idx[-1] + 1 < len(spans) else None
-        last = [n_ for n_ in CALLS[call][0] if n_.get("word") == (words[-1] if words else spans[-1][0])][-1]
-        i, j = tighten(x, sr, a, b, nxt, unvoiced_end=bool(last.get("phonemes")) and last["phonemes"][-1] in UNVOICED_END)
-        seg = x[i:j]
-        if note in ONSET_LIFT:
-            seg = lift_onset(seg, sr, int(a * sr) - i, ONSET_LIFT[note])
-        y = fade(wsola(seg, ratio, sr) if ratio != 1.0 else seg.copy(), sr)
+        notes = CALLS[call][0]
+        spans = windows(notes, RENDER_BPM)
+        idx = list(range(len(spans))) if words is None else [k for k, s_ in enumerate(spans) if s_[0] in words]
+        first, last = idx[0], idx[-1]
+        opening = next(n_ for n_ in notes if n_.get("word") == spans[first][0])["phonemes"][0]
+        closing = [n_ for n_ in notes if n_.get("word") == spans[last][0]][-1]["phonemes"][-1]
+        i, j = cut(x, sr, spans, first, last, unvoiced_end=closing in UNVOICED_END)
+        seg = x[i:j].copy()
+        lift = 0.0
+        if opening in CONTINUANT:
+            lift = float(np.clip(LIFT_TARGET_DB - onset_under_peak(seg, sr), 0.0, LIFT_MAX_DB))
+            if lift >= 1.0:
+                seg = lift_onset(seg, sr, lift, vowel_arrives(seg, sr))
+        y = fade(wsola(seg, ratio, sr) if ratio != 1.0 else seg, sr)
         y *= 0.89 / max(1e-9, float(np.abs(y).max()))
         path = out_dir / chop_file(note, name)
         if path.exists() and only_missing:
@@ -256,7 +261,8 @@ def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missin
             continue
         write(path, y, sr)
         made[note] = path
-        print(f"  pad {note}  {name:<22} {len(y) / sr * 1000:5.0f} ms  ({folder})")
+        print(f"  pad {note}  {name:<22} {len(y) / sr * 1000:5.0f} ms  ({folder})"
+              + (f"  onset lifted {lift:.0f} dB" if lift >= 1.0 else ""))
     return made
 
 

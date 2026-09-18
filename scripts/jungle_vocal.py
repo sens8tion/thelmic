@@ -119,43 +119,64 @@ def sung(ph, midi, beats, expr, word, **orn):
 
 
 # The user's instructive calls, 2026-09-18: "hop, ah - a-like-this" / "bump, ooh - a-like-that" /
-# "bubble, now bubble". The call word is spoken and percussive; the exclamation is where the singing
-# goes. One bar each at the render tempo, warped onto the grid.
+# "bubble, now bubble" / "bump to the mix". The call word is spoken and percussive; the rest is sung.
+# One bar each at the render tempo, then squeezed or chopped onto the grid.
+#
+# All on the root (the user: "I want them all sung on the fundamental - all as instructions"): every
+# note F#3, so any chop sits on any section. Falls are gone (they leave the root); scoops stay (they
+# land on it, and a scoop measured 6/6 legible against 4/6 without). The exclamations drop from
+# expr 1.0 to 0.6: fully sung, the pitch model wanders off the written note - and "now" at 1.0
+# came out as a slow swell that lost its n on a pad. The earlier melodic scores are in git
+# (f4e007f, dcb7fa0).
+#
+# Each call opens on a quarter-beat rest: the renderer puts a word's consonant at the start of its
+# note, and at the first frame of the file the "h" of "hop" came out already sounding, its onset
+# lost.
 GS3, B3, E3 = 56, 59, 52
+ROOT = FS3
+LEAD_IN = rest(0.25)
 LIKE, THIS = ["l", "ay", "k"], ["dh", "ih", "s"]
+# Straight after the k of "like", the renderer sings the "th" of this/that as ~50 ms of near silence
+# (46-61 dB under the take's peak): the k's closure swallows it, and the chop plays "is"/"at". After
+# a breath it sounds, 29-40 dB under, rising into the vowel - about where the h of "hop" sits.
+# ("the" after a vowel was never a problem.)
+BREATH = rest(0.15)
 CALLS = {
-    "hop-ah": ([sung(NO_CLOSURE["hop"], CS4, 0.4, 0.2, "hop", velocity=0.9),
-                rest(0.2),                      # the comma
-                sung(["aa"], A3, 0.6, 1.0, "ah", scoop=-1.2, scoop_beats=0.12, fall=-2.0, fall_beats=0.3),
+    "hop-ah": ([LEAD_IN,
+                sung(NO_CLOSURE["hop"], ROOT, 0.4, 0.2, "hop", velocity=0.9),
+                rest(0.2),                      # the comma: without it, "how about"
+                sung(["aa"], ROOT, 0.6, 0.6, "ah", scoop=-1.2, scoop_beats=0.12),
                 rest(0.3),
-                sung(["ax"], GS3, 0.25, 0.4, "a"), sung(LIKE, A3, 0.5, 0.4, "like"),
-                sung(THIS, FS3, 0.75, 0.6, "this", fall=-1.0, fall_beats=0.3),
-                rest(1.0)], "hop ah a like this"),
-    "bump-ooh": ([sung(NO_CLOSURE["bump"], CS4, 0.4, 0.2, "bump", velocity=0.9),
-                rest(0.2),                      # the comma
-                  sung(["uw"], B3, 0.6, 1.0, "ooh", scoop=-1.2, scoop_beats=0.12, fall=-2.0, fall_beats=0.3),
+                sung(["ax"], ROOT, 0.25, 0.4, "a"), sung(LIKE, ROOT, 0.5, 0.4, "like"),
+                BREATH,
+                sung(THIS, ROOT, 0.75, 0.6, "this"),
+                rest(0.6)], "hop ah a like this"),
+    "bump-ooh": ([LEAD_IN,
+                  sung(NO_CLOSURE["bump"], ROOT, 0.4, 0.2, "bump", velocity=0.9),
+                  rest(0.2),
+                  sung(["uw"], ROOT, 0.6, 0.6, "ooh", scoop=-1.2, scoop_beats=0.12),
                   rest(0.3),
-                  sung(["ax"], GS3, 0.25, 0.4, "a"), sung(LIKE, A3, 0.5, 0.4, "like"),
-                  sung(NO_CLOSURE["that"], E3, 0.75, 0.6, "that", fall=-1.0, fall_beats=0.3),
-                  rest(1.0)], "bump ooh a like that"),
-    "bubble-now": ([sung(["b", "ah"], CS4, 0.35, 0.3, "bubble", velocity=0.9),
-                    sung(["b", "ax", "l"], CS4, 0.3, 0.3, "bubble"),
+                  sung(["ax"], ROOT, 0.25, 0.4, "a"), sung(LIKE, ROOT, 0.5, 0.4, "like"),
+                  BREATH,
+                  sung(NO_CLOSURE["that"], ROOT, 0.75, 0.6, "that"),
+                  rest(0.6)], "bump ooh a like that"),
+    "bubble-now": ([LEAD_IN,
+                    sung(["b", "ah"], ROOT, 0.35, 0.3, "bubble", velocity=0.9),
+                    sung(["b", "ax", "l"], ROOT, 0.3, 0.3, "bubble"),
                     rest(0.35),
-                    sung(["n", "aw"], E4, 0.8, 1.0, "now", scoop=-1.5, scoop_beats=0.15),
-                    sung(["b", "ah"], A3, 0.35, 0.5, "bubble2"),
-                    sung(["b", "ax", "l"], FS3, 0.6, 0.6, "bubble2", fall=-1.0, fall_beats=0.3),
-                    rest(1.25)], "bubble now bubble"),
-    # the user, playing the kit: "bump to the mix". Run together, as it's said - with "bump" alone
-    # and "to the mix" as a pickup to beat 3, "to" was heard as "you"/"who's"/"do" in 11 of 12 takes
-    # whatever its length; connected, 6 of 6. "mix" is the stressed word, so it gets the velocity.
-    # Every word spelled out so none picks up the dictionary's trailing closure (the "uh").
-    # "mix" is still heard as "mixer" in most takes, short or long (a short "mix": 0 of 6).
-    "bump-to-the-mix": ([sung(NO_CLOSURE["bump"], CS4, 0.5, 0.2, "bump", velocity=0.9),
-                         sung(["t", "uw"], B3, 0.25, 0.4, "to"),
-                         sung(["dh", "ax"], A3, 0.25, 0.4, "the"),
-                         sung(["m", "ih", "k", "s"], FS3, 0.75, 0.6, "mix", velocity=0.9,
-                              fall=-1.0, fall_beats=0.3),
-                         rest(2.25)], "bump to the mix"),
+                    sung(["n", "aw"], ROOT, 0.8, 0.6, "now", scoop=-1.5, scoop_beats=0.15),
+                    sung(["b", "ah"], ROOT, 0.35, 0.5, "bubble2"),
+                    sung(["b", "ax", "l"], ROOT, 0.6, 0.6, "bubble2"),
+                    rest(1.0)], "bubble now bubble"),
+    # "bump to the mix" run together, as it's said: with "bump" alone and "to the mix" as a pickup,
+    # "to" was heard as "you"/"who's"/"do" in 11 of 12 takes; connected, 6 of 6. A short "mix" was
+    # worse (0 of 6): the s grows a rendered schwa ("mixer") that the chop trims instead.
+    "bump-to-the-mix": ([LEAD_IN,
+                         sung(NO_CLOSURE["bump"], ROOT, 0.5, 0.2, "bump", velocity=0.9),
+                         sung(["t", "uw"], ROOT, 0.25, 0.4, "to"),
+                         sung(["dh", "ax"], ROOT, 0.25, 0.4, "the"),
+                         sung(["m", "ih", "k", "s"], ROOT, 0.75, 0.6, "mix", velocity=0.9),
+                         rest(2.0)], "bump to the mix"),
 }
 for _name, (_notes, _truth) in CALLS.items():
     assert abs(sum(n["beats"] for n in _notes) - 4.0) < 1e-6, (_name, sum(n["beats"] for n in _notes))
