@@ -48,8 +48,9 @@ be behind: the bridge can't move a clip's start marker, so nothing puts her ahea
 Then the user: "I've concluded that the midi following is too abrupt no matter the settings I use; so
 I've switched to key aware -3st quantizer". So DERRETIDA no longer follows HARMONIA: Auto Shift's
 Quantizer shifts her 3 st down and snaps her to the set's scale (Scale Aware: F# minor) - a diatonic
-third under, which bends with her own pitch instead of stepping at note boundaries. Her formants follow
-66 % of the shift, 11 cents flat of the lead, 20 ms smoothing. USER_AUTO_SHIFT is the user's device,
+third under, which bends with her own pitch instead of stepping at note boundaries. Then they zeroed
+what they didn't like (vibrato, LFO, MIDI modulation) and settled on: formants shifted up 19 % and
+following 25 % of the pitch shift, 8 cents flat of the lead, 88 % strength, 80.6 ms smoothing. USER_AUTO_SHIFT is the user's device,
 read back raw; the script writes it only onto a freshly loaded Auto Shift, never over one that exists.
 The user also put an EQ Eight after the Delay, by hand. The five HARMONIA lines stay in rows 22-26 as
 a record, but no longer drive her.
@@ -221,32 +222,54 @@ LAG_MS = {
 
 AUTO_SHIFT = "query:AudioFx#Auto%20Shift"
 DELAY = "query:AudioFx#Delay"
-# The user's Auto Shift on DERRETIDA (2026-09-18), raw values as read back. Root and Scale go in before
-# Scale Aware: once it is on, they are greyed out and a write raises "parameter is disabled".
+# The user's Auto Shift on DERRETIDA, every parameter, raw, as read back on 2026-09-18 after they
+# "zero'ed the things I don't like" - vibrato, the LFO, and every MIDI modulation source (None, so the
+# MIDI > amounts do nothing). Root and Scale come first: once Scale Aware is on they are greyed out and
+# a write raises "parameter is disabled".
 USER_AUTO_SHIFT = (
-    ("Root", 6.0),                   # F#
-    ("Scale", 3.0),                  # Minor
-    ("Scale Aware", 1.0),            # On - the set's scale
-    ("Quantizer On", 1.0),
-    ("Strength", 1.0),               # 100 %
-    ("Pitch St.", -3.0),             # -3 st: a diatonic third under, once snapped to the scale
-    ("Pitch Scale Deg.", 0.0),
-    ("Pitch Fine", 0.445312),        # -11 ct
-    ("Formant Shift", 0.5),          # 0 %
-    ("Formant Follow", 0.664062),    # 66 %
-    ("Smooth On", 1.0),
-    ("Smooth Time", 0.5625),         # 20.0 ms
-    ("Glide Time", 0.070312),        # 9.89 ms
-    ("Attack Time", 0.117188),       # 13.7 ms
-    ("Release Time", 0.304688),      # 141 ms
-    ("Latch", 0.0),                  # Gate
-    ("PB Range", 0.0),               # 0 st
-    ("Input Gain", 0.59375),         # 4.5 dB
-    ("Vibrato Amt", 0.0),            # 0 ct
-    ("Vibrato Rate", 0.375816),      # 5.00 Hz
-    ("Vibrato Fade-In", 0.171875),   # 59.1 ms
-    ("Vibrato Natural", 1.0),        # On
-    ("Dry/Wet", 1.0),                # 100 %
+    ("Root", 6.0),                          # F#
+    ("Scale", 3.0),                         # Minor
+    ("Input Gain", 0.59375),                # 4.5 dB
+    ("Dry/Wet", 1.0),                       # 100 %
+    ("Scale Aware", 1.0),                   # On
+    ("Glide Time", 0.070312),               # 9.89 ms
+    ("PB Range", 0.0),                      # 0 st
+    ("Attack Time", 0.117188),              # 13.7 ms
+    ("Release Time", 0.304688),             # 141 ms
+    ("Latch", 0.0),                         # Gate
+    ("Pitch St.", -3.0),                    # -3 st
+    ("Pitch Scale Deg.", 0.0),              # 0 sd
+    ("Pitch Fine", 0.460938),               # -8 ct
+    ("Formant Shift", 0.595238),            # 19 %
+    ("Formant Follow", 0.25),               # 25 %
+    ("Quantizer On", 1.0),                  # On
+    ("Smooth On", 1.0),                     # On
+    ("Smooth Time", 0.796875),              # 80.6 ms
+    ("Strength", 0.875),                    # 88 %
+    ("LFO On", 0.0),                        # Off
+    ("LFO Retrig On", 1.0),                 # On
+    ("LFO Delay", 0.0),                     # 0.00 ms
+    ("LFO Fade-In", 0.0),                   # 0.00 ms
+    ("LFO Wave", 1.0),                      # Triangle
+    ("LFO Sync", 0.0),                      # Off
+    ("LFO Rate", 0.514679),                 # 0.50 Hz
+    ("LFO Synced", 12.0),                   # 1/4
+    ("Vibrato Fade-In", 0.171875),          # 59.1 ms
+    ("Vibrato Rate", 0.375816),             # 5.00 Hz
+    ("Vibrato Amt", 0.0),                   # 0 ct
+    ("Vibrato Natural", 1.0),               # On
+    ("LFO > Pitch", 0.0),                   # 0.00 st
+    ("LFO > Form.", 0.5),                   # 0.0 %
+    ("LFO > Vol", 0.0),                     # 0.0 %
+    ("LFO > Pan", 0.0),                     # 0.0 %
+    ("MIDI > Pitch Src", 0.0),              # None
+    ("MIDI > Form. Src", 0.0),              # None
+    ("MIDI > Vol Src", 0.0),                # None
+    ("MIDI > Pan Src", 0.0),                # None
+    ("MIDI > Pitch", 0.15625),              # 1.88 st
+    ("MIDI > Form.", 0.523438),             # 4.7 %
+    ("MIDI > Vol", 0.226562),               # 23 %
+    ("MIDI > Pan", 0.15625),                # 16 %
 )
 HARMONY_ONLY = "--harmony" in sys.argv
 
