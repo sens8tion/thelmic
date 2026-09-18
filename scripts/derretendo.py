@@ -45,9 +45,14 @@ where she lays back, and 30-35 ms on the long SOLs, where a second voice arrives
 no feedback, nothing past 35 ms - longer, and she stops being a second singer and becomes an echo. She can only
 be behind: the bridge can't move a clip's start marker, so nothing puts her ahead of the lead.
 
-Her voice: Formant Follow 50 %, so the further she's pitched down the darker she gets - a lower
-singer, not the same one tuned down (at the deepest, -9 st, her formants drop 4.5) - and a light vibrato (12 ct, 5 Hz, "Natural") that fades in over
-450 ms, so it only blooms on the held notes.
+Then the user: "I've concluded that the midi following is too abrupt no matter the settings I use; so
+I've switched to key aware -3st quantizer". So DERRETIDA no longer follows HARMONIA: Auto Shift's
+Quantizer shifts her 3 st down and snaps her to the set's scale (Scale Aware: F# minor) - a diatonic
+third under, which bends with her own pitch instead of stepping at note boundaries. Her formants follow
+66 % of the shift, 11 cents flat of the lead, 20 ms smoothing. USER_AUTO_SHIFT is the user's device,
+read back raw; the script writes it only onto a freshly loaded Auto Shift, never over one that exists.
+The user also put an EQ Eight after the Delay, by hand. The five HARMONIA lines stay in rows 22-26 as
+a record, but no longer drive her.
 
     python scripts/derretendo.py              # everything
     python scripts/derretendo.py --harmony    # her lines and Auto Shift only: leaves the Delay's timing alone
@@ -216,10 +221,34 @@ LAG_MS = {
 
 AUTO_SHIFT = "query:AudioFx#Auto%20Shift"
 DELAY = "query:AudioFx#Delay"
-FORMANT_FOLLOW = 0.5
+# The user's Auto Shift on DERRETIDA (2026-09-18), raw values as read back. Root and Scale go in before
+# Scale Aware: once it is on, they are greyed out and a write raises "parameter is disabled".
+USER_AUTO_SHIFT = (
+    ("Root", 6.0),                   # F#
+    ("Scale", 3.0),                  # Minor
+    ("Scale Aware", 1.0),            # On - the set's scale
+    ("Quantizer On", 1.0),
+    ("Strength", 1.0),               # 100 %
+    ("Pitch St.", -3.0),             # -3 st: a diatonic third under, once snapped to the scale
+    ("Pitch Scale Deg.", 0.0),
+    ("Pitch Fine", 0.445312),        # -11 ct
+    ("Formant Shift", 0.5),          # 0 %
+    ("Formant Follow", 0.664062),    # 66 %
+    ("Smooth On", 1.0),
+    ("Smooth Time", 0.5625),         # 20.0 ms
+    ("Glide Time", 0.070312),        # 9.89 ms
+    ("Attack Time", 0.117188),       # 13.7 ms
+    ("Release Time", 0.304688),      # 141 ms
+    ("Latch", 0.0),                  # Gate
+    ("PB Range", 0.0),               # 0 st
+    ("Input Gain", 0.59375),         # 4.5 dB
+    ("Vibrato Amt", 0.0),            # 0 ct
+    ("Vibrato Rate", 0.375816),      # 5.00 Hz
+    ("Vibrato Fade-In", 0.171875),   # 59.1 ms
+    ("Vibrato Natural", 1.0),        # On
+    ("Dry/Wet", 1.0),                # 100 %
+)
 HARMONY_ONLY = "--harmony" in sys.argv
-GLIDE_MS = 60.0                # how long a move inside a syllable slides
-VIBRATO = (("Vibrato Amt", 12.0), ("Vibrato Rate", 5.0), ("Vibrato Fade-In", 450.0))
 
 
 def midi_notes(entries) -> list[dict]:
@@ -330,20 +359,17 @@ def main() -> None:
             ch.set_clip_name(t, row, "derretendo" + (" (her, under)" if name == VOICE else "")).result(timeout=5)
             if abs(float(ch.get_clip_props(t, row).result(timeout=5).get("length", 0)) - LOOP_BEATS) < 0.01:
                 ch.set_clip_loop(t, row, True).result(timeout=5)
-        # her voice: Auto Shift, following MIDI, formants following a quarter of the shift down
+        # her voice: Auto Shift as the user set it - written only onto a freshly loaded one
         v = index_of(ch, VOICE)
+        fresh = "Auto Shift" not in [d["name"] for d in devices(v)]
         shift = device(v, "Auto Shift", AUTO_SHIFT)
-        idx = {n: p["index"] for n, p in params(v, shift).items()}
-        for pname, value in (("Scale Aware", 0.0), ("Quantizer On", 1.0), ("Strength", 1.0), ("Pitch St.", 0.0),
-                             ("Pitch Scale Deg.", 0.0), ("Formant Follow", FORMANT_FOLLOW), ("Formant Shift", 0.5),
-                             ("Vibrato Natural", 1.0), ("Dry/Wet", 1.0)):
-            try:
-                ch.set_device_param(v, shift, idx[pname], value).result(timeout=5)
-            except Exception as e:
-                print(f"    [note] Auto Shift {pname}: {e}")
-        set_number(ch, v, shift, "Glide Time", GLIDE_MS)
-        for pname, value in VIBRATO:
-            set_number(ch, v, shift, pname, value)
+        if fresh:
+            idx = {n: p["index"] for n, p in params(v, shift).items()}
+            for pname, value in USER_AUTO_SHIFT:
+                try:
+                    ch.set_device_param(v, shift, idx[pname], value).result(timeout=5)
+                except Exception as e:
+                    print(f"    [note] Auto Shift {pname}: {e}")
         if not HARMONY_ONLY:
             # her timing: a Delay, all wet, one tap, no filter, its time crossfading when it changes
             dl = device(v, "Delay", DELAY)
@@ -397,7 +423,8 @@ def main() -> None:
         # Auto Shift > MIDI In > MIDI On, External Source: HARMONIA, voice mode Mono.
         for name, db in ((LEAD, LEVEL_DB), (VOICE, LEVEL_DB - VOICE_UNDER_DB)):
             tt = index_of(ch, name)
-            set_number(ch, tt, ensure_level(ch, tt, name), "Output", db)
+            if "LEVEL" not in [d["name"] for d in devices(tt)]:     # a new lane: level it once, then it's the user's
+                set_number(ch, tt, ensure_level(ch, tt, name), "Output", db)
         # read back
         for name in (LEAD, VOICE):
             tt = index_of(ch, name)
@@ -407,8 +434,8 @@ def main() -> None:
                   + " > ".join(d["name"] for d in devices(tt)))
         print(f"  {MIDI:<13} (track {m + 1}) rows {rows[0] + 1}-{rows[-1] + 1}: " + ", ".join(v[0] for v in VARIANTS))
         ps = params(v, shift)
-        print("  Auto Shift:", {n: ps[n]["display"] for n in ("Quantizer On", "Strength", "Formant Follow", "Smooth Time",
-                                                              "Glide Time", "Vibrato Amt", "Vibrato Rate", "Vibrato Fade-In", "Vibrato Natural", "Latch")})
+        print("  Auto Shift:", {n: ps[n]["display"] for n in ("Scale Aware", "Pitch St.", "Pitch Fine", "Formant Follow",
+                                                              "Smooth Time", "Release Time")})
         if not HARMONY_ONLY:
             ps = params(v, dl)
             print("  Delay:", {n: ps[n]["display"] for n in ("Smoothing", "L Sync", "L Time", "Feedback", "Filter On", "Dry/Wet")})
