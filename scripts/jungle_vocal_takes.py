@@ -39,7 +39,7 @@ if SCRIPTS_DIR not in sys.path:
 
 from jungle_vocal import A3, CS4, E4, FS3, KEPT, SPEAKER, phrase, session_bpm  # noqa: E402
 
-TAKES = 6
+TAKES = 10
 # Render unhurried and warp to the grid in Live (the user's idea): at half the session tempo every
 # word gets double the time, so nothing is starved, and one bar warps to one bar at 2x on Complex
 # Pro. RENDER_BPM=None renders at the session tempo instead.
@@ -229,6 +229,8 @@ def main(argv=None):
     names = argv or sys.argv[1:] or list(PHRASES)
     if names and names[0] == "--measure":
         return remeasure(session_bpm())
+    gpu = "--gpu" in names           # the operator asked for it; the GPU is shared with Live
+    names = [n for n in names if n != "--gpu"] or list(PHRASES)
     session = session_bpm()
     bpm = session * RENDER_BPM_RATIO      # unhurried: warped back to the grid in Live
     KEPT.mkdir(parents=True, exist_ok=True)
@@ -241,7 +243,8 @@ def main(argv=None):
         t0 = time.monotonic()
         try:
             sound = vocal.render(vocal.VocalSpec(notes=notes, bpm=bpm, speaker=SPEAKER,
-                                                 takes=TAKES, truth=truth))
+                                                 takes=TAKES, truth=truth,
+                                                 provider="dml" if gpu else "cpu"), gpu_ok=gpu)
         except Exception as e:
             print(f"{name}: {e}\n")
             summary.append((name, None, [str(e)[:120]]))

@@ -34,7 +34,9 @@ REPO = Path(SCRIPTS_DIR).parent
 sys.path.insert(0, str(REPO))
 
 KEPT = REPO / "tracks" / "vocals"
-SPEAKER = "tiger_electric"          # the brightest mode: it cuts a dense mix
+SPEAKER = "tiger_glam"              # measured (local-sung-vocals bench/sweep_hook.py): 6/6 takes
+                                    # legible against 2/6 for tiger_electric, which the docs
+                                    # recommend for a dense mix. Legibility wins for a hook.
 
 CS4, E4, A3, FS3 = 61, 64, 57, 54
 # Every stop-final word comes back from the dictionary with a trailing "cl", the stop closure, and
@@ -74,7 +76,10 @@ def phrase(word, midi, tail, tail_midi=None, *, word_phonemes=None, scoop=-1.2,
       * the scoop is 0.15 beats: on a 176 ms note a 0.2-beat scoop was most of the note.
     """
     tags = 3.0 - lead_beats            # the phrase lands on beat 4, and is warped to fit
-    lead = {"midi": midi, "beats": lead_beats, "scoop": scoop, "scoop_beats": 0.15, "word": word}
+    # velocity 0.9 on the lead word: 6/6 legible and brighter, where the model's other emphasis
+    # control (gender) cost legibility at every setting tried
+    lead = {"midi": midi, "beats": lead_beats, "scoop": scoop, "scoop_beats": 0.15, "word": word,
+            "velocity": 0.9}
     lead.update({"phonemes": list(word_phonemes or NO_CLOSURE.get(word) or [])} if (word_phonemes or word in NO_CLOSURE)
                 else {"lyric": word})
     tail_note = {"midi": (tail_midi if tail_midi is not None else midi - 3), "word": tail,
