@@ -44,7 +44,8 @@ LINES = [
     ("vou pro mar", "RP_JV_90_vocal_flavor_Gb.wav", 0, -3),            # "I'm going to the sea" - sings F# minor
     ("te encontrar de novo", "RP_JV_85_vocal_jolt_A.wav", +2, -2),      # "I want to find you again" - G major -> A
     ("derretendo meu coracao", "RP_JV_85_vocal_vibe_Gb.wav", -4, -12),   # "melting my heart, like ice in the sun" - C# major -> A
-    ("vocalise - lab", "RP_JV_76_vocal_lab_A.wav", 0, -12),              # wordless; the most sustained (51% held); F# minor
+    ("vocalise - lab", "RP_JV_76_vocal_lab_A.wav", -12, -12),            # wordless; the most sustained (51% held); F# minor.
+                                                                          # An octave down: at pitch it's chipmunk (the user)
     ("hum - strike", "RP_JV_85_vocal_strike_A.wav", -3, -3),             # wordless hum; A minor -> F# minor
     ("ai ooh - mic", "RP_JV_96_vocal_mic_Gb.wav", -2, -13),              # wordless; G# minor -> F# minor
 ]
