@@ -16,7 +16,7 @@ audio: the user's ear decides.
 Cuts come from the score's own timing, tightened to where the word actually sounds.
 
     python scripts/jungle_vocal_chops.py             # write the chops, check legibility survived
-    python scripts/jungle_vocal_chops.py --kit       # load them onto a Drum Rack on MOUTH-OFF
+    python scripts/jungle_vocal_chops.py --kit       # both kits: MOUTH-OFF (at 170), BIG-MOUTH (as sung)
 """
 from __future__ import annotations
 
@@ -38,8 +38,15 @@ from jungle_vocal import CALLS, KEPT  # noqa: E402
 from jungle_vocal_takes import read_wav, windows  # noqa: E402
 
 RENDER_BPM, TRACK_BPM = 85.0, 170.0
-CHOP_DIR = Path(r"C:\Users\eric\Documents\Ableton\User Library\Samples\Imported\jungle_vocal_chops")
+_IMPORTED = Path(r"C:\Users\eric\Documents\Ableton\User Library\Samples\Imported")
+CHOP_DIR = _IMPORTED / "jungle_vocal_chops"
 CHOP_BROWSER = "user_library/Samples/Imported/jungle_vocal_chops"
+# Two kits side by side, same pads, for comparison (the user: "they may be too short... all the chops
+# twice as long"): the chops compressed to the track's 170, and the same cuts as sung, uncompressed.
+KITS = {
+    "MOUTH-OFF": (RENDER_BPM / TRACK_BPM, "jungle_vocal_chops"),
+    "BIG-MOUTH": (1.0, "jungle_vocal_chops_long"),
+}
 TAKES = {"hop-ah": "call-hop-ah-85bpm-104852.wav", "bump-ooh": "call-bump-ooh-85bpm-104852.wav",
          "bubble-now": "call-bubble-now-85bpm-104406.wav"}
 # pad note -> (call, words the chop spans, name). Push's 4x4 starts at 36: words low, whole calls up top.
@@ -129,9 +136,9 @@ def write(path: Path, y, sr):
         w.writeframes((np.clip(y, -1, 1) * 32767).astype("<i2").tobytes())
 
 
-def build():
-    CHOP_DIR.mkdir(parents=True, exist_ok=True)
-    ratio = RENDER_BPM / TRACK_BPM
+def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missing=False):
+    out_dir = _IMPORTED / folder
+    out_dir.mkdir(parents=True, exist_ok=True)
     made = {}
     for note, (call, words, name) in PADS.items():
         x, sr = read_wav(KEPT / TAKES[call])
@@ -142,12 +149,15 @@ def build():
             chosen = [s for s in spans if s[0] in words]
             a, b = chosen[0][1], chosen[-1][2]
         i, j = tighten(x, sr, a, b)
-        y = fade(wsola(x[i:j], ratio, sr), sr)
+        y = fade(wsola(x[i:j], ratio, sr) if ratio != 1.0 else x[i:j].copy(), sr)
         y *= 0.89 / max(1e-9, float(np.abs(y).max()))
-        path = CHOP_DIR / f"{note:02d}-{name}.wav"
+        path = out_dir / f"{note:02d}-{name}.wav"
+        if path.exists() and only_missing:
+            made[note] = path             # loaded on a pad, and Live holds it open: never rewrite
+            continue
         write(path, y, sr)
         made[note] = path
-        print(f"  pad {note}  {name:<22} {(j - i) / sr * 1000:5.0f} ms at 85 -> {len(y) / sr * 1000:4.0f} ms at 170")
+        print(f"  pad {note}  {name:<22} {len(y) / sr * 1000:5.0f} ms  ({folder})")
     return made
 
 
@@ -169,11 +179,10 @@ def check_legibility():
             print(f"  {name:<22} {label:<7} WER {wer:<8} heard {heard}")
 
 
-TRACK = "MOUTH-OFF"
 LEVEL_DB = -8.0          # unmatched on the meter (the user is playing): start low
 
 
-def kit():
+def kit(TRACK="MOUTH-OFF", folder="jungle_vocal_chops"):
     """Put the chops on a Drum Rack on a new track. Additive only: an existing track or pad is left
     exactly as the user has it; playback is never stopped."""
     os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
@@ -201,7 +210,7 @@ def kit():
             if _pad_device(ch, t, note):
                 print(f"  pad {note} {name}: already loaded, left alone")
                 continue
-            _load_pad(ch, t, note, CHOP_BROWSER, f"{note:02d}-{name}.wav")
+            _load_pad(ch, t, note, f"user_library/Samples/Imported/{folder}", f"{note:02d}-{name}.wav")
 
             def prop(key, value):
                 return ch.set_drum_pad_chain_device_property(t, 0, note, key, value, 0).result(timeout=10)
@@ -241,7 +250,9 @@ def kit():
 
 if __name__ == "__main__":
     if "--kit" in sys.argv:
-        kit()
+        for track, (ratio, folder) in KITS.items():
+            build(ratio, folder, only_missing=True)
+            kit(track, folder)
     else:
         build()
         print()
