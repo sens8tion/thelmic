@@ -14,7 +14,8 @@ stretch back to length - and the WSOLA grains warbled on the held vowels. Now ea
 Complex Pro (formants kept), transposed into F# minor or its relative A major, and detuned by her
 measured tuning (2-13 cents flat). Tempo is Live's auto-warp: it reads a 16-bar loop as 64 beats at
 170 whatever it was recorded at, which is half-time - the long notes hang. From row FIRST_ROW down,
-beside the other vocal lanes; the whole-bar ones loop as beds.
+beside the other vocal lanes; the whole-bar ones loop as beds. The vocalise has its own lane,
+SAUDADE-AH, where Auto Shift corrects its formants.
 
     python scripts/saudade.py
 """
@@ -38,20 +39,21 @@ TRACK, AFTER = "SAUDADE", "MOUTHFUL"
 LEVEL_DB = -8.0
 COMPLEX_PRO = 6
 HALF_TIME_BEATS = 64.0     # a 16-bar loop at half-time: 16 bars x 4 beats at 170
-COMPLEX = 4
-# The vocalise's chipmunk is baked into the sample (pitched up, formants and all). Complex Pro keeps
-# formants, so an octave down in it was "a low chipmunk" that "sounds resampled" (the user); Complex
-# moves the formants down with the pitch, which undoes it.
-WARP_MODE = {"vocalise - lab": COMPLEX}
+# The vocalise's pitch was right; its FORMANTS are baked 4 semitones high (measured: its spectral
+# envelope sits +4.0 st from the same singer's other loops, which agree within ~1). An octave down in
+# Complex Pro was "a low chipmunk"; in Complex, formants and all, "a man - too low". So it plays at its
+# own pitch on its own lane, where Auto Shift lowers the formants alone - pitch correction off.
+VOCALISE_LANE = "SAUDADE-AH"
+FORMANT_SHIFT_ST = -4.0
+AUTO_SHIFT = "query:AudioFx#Auto%20Shift"
 
 # (clip name, file, semitones into F# minor / A major, cents her tuning is off) - measured
 LINES = [
     ("vou pro mar", "RP_JV_90_vocal_flavor_Gb.wav", 0, -3),            # "I'm going to the sea" - sings F# minor
     ("te encontrar de novo", "RP_JV_85_vocal_jolt_A.wav", +2, -2),      # "I want to find you again" - G major -> A
     ("derretendo meu coracao", "RP_JV_85_vocal_vibe_Gb.wav", -4, -12),   # "melting my heart, like ice in the sun" - C# major -> A
-    ("vocalise - lab", "RP_JV_76_vocal_lab_A.wav", -12, -12),            # wordless; the most sustained (51% held); F# minor.
-                                                                          # An octave down: at pitch it's chipmunk (the user) -
-                                                                          # and in Complex, not Pro: see WARP_MODE
+    ("vocalise - lab", "RP_JV_76_vocal_lab_A.wav", 0, -12),              # wordless; the most sustained; F# minor. On
+                                                                          # VOCALISE_LANE, formants lowered: see above
     ("hum - strike", "RP_JV_85_vocal_strike_A.wav", -3, -3),             # wordless hum; A minor -> F# minor
     ("ai ooh - mic", "RP_JV_96_vocal_mic_Gb.wav", -2, -13),              # wordless; G# minor -> F# minor
 ]
@@ -99,11 +101,13 @@ def place() -> None:
         for _ in range(FIRST_ROW + len(LINES) - have):
             ch.create_scene(-1).result(timeout=10)
         for row, (name, f, semis, cents) in enumerate(LINES, start=FIRST_ROW):
+            if name == "vocalise - lab":
+                continue                                               # its own lane: place_vocalise()
             if row not in filled:
                 ch.load_audio_to_slot(t, row, BROWSER, f).result(timeout=30)
             for _ in range(40):
                 try:
-                    ch.set_clip_warp(t, row, warping=True, warp_mode=WARP_MODE.get(name, COMPLEX_PRO)).result(timeout=5)
+                    ch.set_clip_warp(t, row, warping=True, warp_mode=COMPLEX_PRO).result(timeout=5)
                     break
                 except Exception:
                     time.sleep(0.25)
@@ -126,6 +130,50 @@ def place() -> None:
         ch.stop()
 
 
+def place_vocalise() -> None:
+    """The vocalise on VOCALISE_LANE, beside SAUDADE, at the same row: its own pitch, Complex Pro,
+    and Auto Shift lowering the formants by FORMANT_SHIFT_ST (the knob spans +-12 st over 0..1)."""
+    os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
+    from thelmic.live_channel import LiveChannel
+    from jungle_reset import index_of, track_names
+    from jungle_space import set_number
+    from jungle_levels_native import ensure_level
+    row, (name, f, semis, cents) = next((FIRST_ROW + i, line) for i, line in enumerate(LINES) if line[0] == "vocalise - lab")
+    ch = LiveChannel(lower_priority=False)
+    ch.start()
+    try:
+        if VOCALISE_LANE not in track_names(ch):
+            t = ch.create_audio_track(index_of(ch, TRACK) + 1).result(timeout=10)["index"]
+            ch.set_track_name(t, VOCALISE_LANE).result(timeout=5)
+            ch.load_device(t, AUTO_SHIFT).result(timeout=30)
+            time.sleep(1.0)
+        t = index_of(ch, VOCALISE_LANE)
+        clips = ch.get_track_clips(t).result(timeout=10)
+        filled = {c.get("slot", c.get("index")) for c in (clips.get("clips", clips) if isinstance(clips, dict) else clips)}
+        if row not in filled:
+            ch.load_audio_to_slot(t, row, BROWSER, f).result(timeout=30)
+        for _ in range(40):
+            try:
+                ch.set_clip_warp(t, row, warping=True, warp_mode=COMPLEX_PRO).result(timeout=5)
+                break
+            except Exception:
+                time.sleep(0.25)
+        ch.set_clip_pitch(t, row, coarse=semis, fine=-cents).result(timeout=5)
+        ch.set_clip_name(t, row, name).result(timeout=5)
+        if abs(float(ch.get_clip_props(t, row).result(timeout=5).get("length", 0)) - HALF_TIME_BEATS) < 0.01:
+            ch.set_clip_loop(t, row, True).result(timeout=5)
+        shift = next(d["index"] for d in ch.get_track_info(t).result(timeout=5)["devices"] if d["name"] == "Auto Shift")
+        idx = {p["name"]: p["index"] for p in ch.get_device_info(t, shift).result(timeout=10)["parameters"]}
+        ch.set_device_param(t, shift, idx["Quantizer On"], 0.0).result(timeout=5)
+        ch.set_device_param(t, shift, idx["Formant Shift"], 0.5 + FORMANT_SHIFT_ST / 24).result(timeout=5)
+        lv = ensure_level(ch, t, VOCALISE_LANE)
+        set_number(ch, t, lv, "Output", LEVEL_DB)
+        print(f"  {VOCALISE_LANE} row {row + 1}: {name}, formants {FORMANT_SHIFT_ST:+g} st")
+    finally:
+        ch.stop()
+
+
 if __name__ == "__main__":
     mirror()
     place()
+    place_vocalise()
