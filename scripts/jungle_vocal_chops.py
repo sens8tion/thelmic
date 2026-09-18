@@ -67,13 +67,31 @@ PADS = {
     49: ("bump-ooh", None, "bump-ooh-a-like-that"),
     50: ("bubble-now", None, "bubble-now-bubble"),
 }
+# pad -> version. New names, because Live holds the old files open on the pads.
 # v2: these chops lost the start of their word ("now" was heard as "ow") and are cut again, leading
-# consonant included. New names, because Live holds the v1 files open on the pads.
-REVISED = {37, 38, 39, 42, 43, 46}
+#     consonant included.
+# v3: "now" still read as "ow" on its own, while the same audio inside "bubble, now bubble" read
+#     right. The renderer sang it as a slow swell: its first 30 ms are 27 dB under the word's peak
+#     and it takes 270 ms to come within 6 dB of it - the other consonant-led chops start 6-17 dB
+#     under and get there in 10-90 ms. Hit on its own over drums, only the swell is heard.
+REVISED = {37: 2, 38: 2, 39: 2, 42: 2, 43: 2, 46: 3}
+# pad -> dB: lift the leading consonant to where the other chops' are, then ramp the lift away over
+# the swell, which stays a swell.
+ONSET_LIFT = {46: 12.0}
+LIFT_HOLD_S, LIFT_RAMP_S = 0.02, 0.2    # held to just past the note (the consonant sits before it)
 
 
 def chop_file(note, name):
-    return f"{note:02d}-{name}{'-v2' if note in REVISED else ''}.wav"
+    v = REVISED.get(note, 1)
+    return f"{note:02d}-{name}{f'-v{v}' if v > 1 else ''}.wav"
+
+
+def lift_onset(y, sr, note_at, db):
+    """`db` of gain up to `note_at` samples (+ a hold), then down to none over LIFT_RAMP_S, in dB."""
+    t = np.arange(len(y))
+    hold = note_at + int(LIFT_HOLD_S * sr)
+    ramp = np.clip((t - hold) / (LIFT_RAMP_S * sr), 0.0, 1.0)
+    return y * 10 ** (db * (1.0 - ramp) / 20)
 
 
 def wsola(x, ratio, sr, frame_ms=25.0, tolerance_ms=6.0):
@@ -195,7 +213,10 @@ def build(ratio=RENDER_BPM / TRACK_BPM, folder="jungle_vocal_chops", only_missin
             a, b = spans[idx[0]][1], spans[idx[-1]][2]
             nxt = spans[idx[-1] + 1][1:] if idx[-1] + 1 < len(spans) else None
         i, j = tighten(x, sr, a, b, nxt)
-        y = fade(wsola(x[i:j], ratio, sr) if ratio != 1.0 else x[i:j].copy(), sr)
+        seg = x[i:j]
+        if note in ONSET_LIFT:
+            seg = lift_onset(seg, sr, int(a * sr) - i, ONSET_LIFT[note])
+        y = fade(wsola(seg, ratio, sr) if ratio != 1.0 else seg.copy(), sr)
         y *= 0.89 / max(1e-9, float(np.abs(y).max()))
         path = out_dir / chop_file(note, name)
         if path.exists() and only_missing:
