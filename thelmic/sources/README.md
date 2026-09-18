@@ -28,17 +28,26 @@ encumber the rendered audio is an unsettled legal question: it is flagged, not r
 
 ## Setup
 
-### 1. Credentials file
+### 1. Credentials: opsec
 
-Per-source credentials live in `<repo>/.thelmic/.env` (gitignored). The loader
-reads it once at `import thelmic.sources` time. Real environment variables
-take precedence — set `FREESOUND_API_KEY` in your shell to override.
+Freesound's credentials live in 1Password, declared in `<repo>/secrets.toml` (safe to commit: it
+holds references, never values). Nothing reads them from a file: run whatever needs them under
+opsec, which injects them into the environment and scrubs them from the output.
 
 ```
-FREESOUND_API_KEY=...your token...
-FREESOUND_CLIENT_ID=...your client id...
-# FREESOUND_OAUTH_TOKEN=...   # optional — see "OAuth full-res" below
+opsec run -- python -m thelmic.sources search freesound "ragga shout"
+opsec check freesound_api_key          # present? length + fingerprint, never the value
+opsec status                           # everything thelmic declares, and whether it resolves
 ```
+
+| Secret | Env var | Needed for |
+|---|---|---|
+| `freesound_api_key` | `FREESOUND_API_KEY` | search, metadata, preview MP3s |
+| `freesound_oauth_token` (optional) | `FREESOUND_OAUTH_TOKEN` | full-resolution originals |
+
+Putting a value in needs a human at a terminal: `opsec set <name>` (or copy it, then
+`opsec set <name> --from-clipboard`). The plaintext credentials files this used to read are
+ignored now, and importing `thelmic.sources` warns while one still exists.
 
 ### 2. Get a Freesound API key (free)
 
@@ -48,7 +57,8 @@ FREESOUND_CLIENT_ID=...your client id...
    (`http://freesound.org/home/app_permissions/permission_granted/` for
    non-web apps), Description, accept the terms
 4. Submit → the table at the top shows your **Client id** and **Api key**
-5. Paste both into `.thelmic/.env`
+5. `opsec set freesound_api_key` and paste the **Api key**. (The client id is only needed for
+   the OAuth steps below, done by hand; nothing at runtime reads it.)
 
 Token auth gives you metadata + 30s preview MP3s (high quality, very usable
 for sample chopping). For full-resolution originals, see OAuth below.
@@ -64,7 +74,7 @@ client identifier. Standard Authorization Code flow:
 3. Freesound redirects to your callback URL with ?code=...
 4. POST https://freesound.org/apiv2/oauth2/access_token/
      grant_type=authorization_code & client_id=... & client_secret=... & code=...
-5. Drop the returned access_token into FREESOUND_OAUTH_TOKEN in .thelmic/.env
+5. `opsec set freesound_oauth_token` and paste the returned access_token
 ```
 
 Once set, `freesound.fetch()` uses the API download endpoint with bearer auth

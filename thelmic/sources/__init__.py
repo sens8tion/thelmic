@@ -35,7 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from . import _config  # noqa: F401  — populates os.environ from ~/.thelmic/.env
+from . import _config  # noqa: F401  — credentials come from opsec; warns about a stale plaintext file
 from ._base import Sound, SourceError
 from ._cache import cache_root
 

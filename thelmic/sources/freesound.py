@@ -1,7 +1,8 @@
 """Freesound.org adapter.
 
-Reads ``FREESOUND_API_KEY`` from the environment. Get one at
-https://freesound.org/apiv2/apply/ — free, instant.
+Reads ``FREESOUND_API_KEY`` from the environment, which opsec fills: both Freesound credentials
+are declared in ``<repo>/secrets.toml``, so run with ``opsec run -- ...``. Get a key at
+https://freesound.org/apiv2/apply/ — free, instant — and put it in with ``opsec set``.
 
 Token-auth gives metadata + 30s previews. To download the FULL original file
 you need OAuth2 — set ``FREESOUND_OAUTH_TOKEN`` (a user access token) and
@@ -22,6 +23,10 @@ _BASE = "https://freesound.org/apiv2"
 _FIELDS = "id,name,url,previews,duration,license,tags,download,type"
 
 
+_NO_KEY = ("FREESOUND_API_KEY not set: run under `opsec run -- ...` "
+           "(declared in secrets.toml; `opsec check freesound_api_key`)")
+
+
 def _key() -> str | None:
     return os.environ.get("FREESOUND_API_KEY")
 
@@ -36,7 +41,7 @@ def available() -> bool:
 
 def search(query: str, *, limit: int = 10, **filters) -> list[Sound]:
     if not available():
-        raise SourceError("FREESOUND_API_KEY not set")
+        raise SourceError(_NO_KEY)
     params = {
         "query": query,
         "page_size": min(limit, 150),
@@ -88,7 +93,7 @@ def fetch(sound: Sound) -> Path:
         # Token-auth users can still pull preview MP3s, but the freesound CDN
         # now requires the Token header on those URLs too.
         if not _key():
-            raise SourceError("FREESOUND_API_KEY not set")
+            raise SourceError(_NO_KEY)
         headers = {"Authorization": f"Token {_key()}"}
     if not url:
         raise SourceError(f"no download URL for {sound.id}")

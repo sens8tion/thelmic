@@ -1,14 +1,23 @@
-"""Lightweight env loader for ``<repo>/.thelmic/.env`` and ``~/.thelmic/.env``.
+"""Where thelmic keeps its source state - and where credentials do NOT come from.
 
-Called once at import time. Only sets keys that aren't already in os.environ
-(real env vars always win). Project file overrides home file. Format:
-``KEY=value`` per line, ``#`` comments OK.
+Credentials (``FREESOUND_API_KEY``, ``FREESOUND_OAUTH_TOKEN``) live in 1Password and are declared
+in ``<repo>/secrets.toml``. Run anything that needs them under opsec, which injects them into the
+environment and scrubs them from the output::
+
+    opsec run -- python -m thelmic.sources search freesound "ragga shout"
+
+This module used to read ``KEY=value`` lines out of ``<repo>/.thelmic/.env`` and
+``~/.thelmic/.env``: credentials in plaintext, against how secrets work on this machine. It no
+longer reads them, and warns if either file is still there, so a stale copy gets noticed and
+removed rather than silently shadowing the vault.
 """
 
 from __future__ import annotations
 
-import os
+import warnings
 from pathlib import Path
+
+_PLAINTEXT = (".thelmic", ".env")
 
 
 def _repo_root() -> Path:
@@ -23,26 +32,16 @@ def config_dir() -> Path:
     return _repo_root() / ".thelmic"
 
 
-def _load_file(path: Path) -> None:
-    if not path.is_file():
-        return
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            k, v = k.strip(), v.strip().strip('"').strip("'")
-            if k and k not in os.environ:
-                os.environ[k] = v
-    except OSError:
-        pass
+def _warn_plaintext() -> None:
+    for base in (_repo_root(), Path.home()):
+        path = base.joinpath(*_PLAINTEXT)
+        if path.is_file():
+            warnings.warn(
+                f"{path} is no longer read: thelmic's credentials come from opsec "
+                "(secrets.toml; run with `opsec run -- ...`). Once `opsec check` shows them "
+                "present, delete that file.",
+                stacklevel=3,
+            )
 
 
-def _load() -> None:
-    # Project file wins; home file fills gaps. (`_load_file` skips already-set keys.)
-    _load_file(config_dir() / ".env")
-    _load_file(Path.home() / ".thelmic" / ".env")
-
-
-_load()
+_warn_plaintext()

@@ -11,3 +11,8 @@ sessions/*/
 # credentials — never commit
 .env
 .thelmic/.env
+
+# opsec: values never land on disk; references may
+.env.*
+!.env.op
+!.env.*.op
