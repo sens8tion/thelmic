@@ -15,6 +15,7 @@ added at the bottom as needed; an existing clip is never replaced.
 
     python scripts/rap_audition.py            # stretch + place
     python scripts/rap_audition.py --files    # stretch only
+    python scripts/rap_audition.py --mark-wet # grey out the ones too wet to use
 """
 from __future__ import annotations
 
@@ -106,6 +107,38 @@ LABELS = {
     "VOX_LBP_130_vocal_phrase_chao_Emin.wav": "chão",
     "VOX_LBP_130_vocal_phrase_famoso_Emin.wav": "famoso",
 }
+
+
+# Too wet to use (the user: "some of them are too effect laden to be intelligible"). Measured: stereo
+# 20-25 dB stronger in the gaps than under the words (reverb/delay tails), or as wide under the
+# words as in the gaps (a double, a backing layer, a stereo effect) - and the transcriber could
+# not make them out. Marked in place, since the bridge cannot delete a clip: renamed and greyed.
+WET = {
+    "007_Vocal_174bpm_G_-_REFLEXDNB_Zenhiser_-_REFLEXDNB_Zenhiser.wav", "004_Vocal_Loop_140bpm_C_-_CONCUSSION_Zenhiser.wav",
+    "tp_udnb_174_vocal_phrase_mysterious_Amin.wav", "VOX_URG_145_vocal_rap_too_easy_backing_dry.wav",
+    "VR_HBD3_150_vocal_shout_loop_SoundboiKilla_fx.wav", "PMRDW3_Vocal_Shout_Jungle.wav", "PMJP2_Vocal_Skanka.wav",
+    "DS_UKDNB_vocal_adlib_male_whoop_wet.wav", "DS_UKDNB_vocal_adlib_male_whoh_wet.wav",
+    "SO_BFV_130_vocal_loop_kelake_Dmin.wav",
+}
+WET_COLOR = 55    # 13 + 3 * 14: Live's grey column, a dark row (bridge/helpers/shading.py)
+
+
+def mark_wet() -> None:
+    os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
+    from thelmic.live_channel import LiveChannel
+    from jungle_reset import index_of
+    ch = LiveChannel(lower_priority=False)
+    ch.start()
+    try:
+        for lane, files in LANES.items():
+            t = index_of(ch, lane)
+            for row, name in enumerate(files, start=FIRST_ROW):
+                if name in WET:
+                    ch.set_clip_name(t, row, f"WET · {LABELS[name]}").result(timeout=5)
+                    ch.set_clip_color(t, row, WET_COLOR).result(timeout=5)
+                    print(f"  {lane:<13} row {row:2d}  WET · {LABELS[name]}")
+    finally:
+        ch.stop()
 
 
 # --- WAV in and out, without soundfile ---------------------------------------------------------
@@ -277,6 +310,10 @@ def place(made: dict[str, Path]) -> None:
 
 
 if __name__ == "__main__":
+    if "--mark-wet" in sys.argv:
+        mark_wet()
+        sys.exit()
     made = build()
     if "--files" not in sys.argv:
         place(made)
+        mark_wet()
