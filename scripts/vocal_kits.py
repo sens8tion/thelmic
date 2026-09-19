@@ -231,9 +231,11 @@ def build() -> dict[str, dict[int, Path]]:
 
 def rebuild(made: dict[str, dict[int, Path]]) -> None:
     """A kit that replaces a track: rename it and swap its Drum Rack for a fresh one - the effects
-    after the rack, the mixer and the clips stay. A new kit: a new track beside the previous kit,
-    with the same effects (silent until turned up). Then fill the pads; a pad holding an older cut
-    of its phrase gets the new one with its settings kept."""
+    after the rack, the mixer and the clips stay. A new kit - or one whose old track has gone from
+    the set (2026-09-19: the set was back to its six drum and bass lanes, and the user asked for
+    "the other vocals in 3 lanes") - gets a new track beside the previous kit, with the same effects
+    (silent until turned up). Then fill the pads; a pad holding an older cut of its phrase gets the
+    new one with its settings kept."""
     os.environ.setdefault("LIVE_CHANNEL_ENABLED", "1")
     import time
     from thelmic.live_channel import LiveChannel
@@ -259,7 +261,7 @@ def rebuild(made: dict[str, dict[int, Path]]) -> None:
         previous = None
         for new, (old, picks) in KITS.items():
             if new not in track_names(ch):
-                if old:
+                if old and old in track_names(ch):
                     t = index_of(ch, old)
                     devs = ch.get_track_info(t).result(timeout=5)["devices"]
                     if not devs or devs[0]["name"] != "Drum Rack" or devs[0].get("class_name", "DrumGroupDevice") != "DrumGroupDevice":
