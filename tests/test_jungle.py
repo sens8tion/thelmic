@@ -245,14 +245,18 @@ def _is_fill(bar_events) -> bool:
 # J2 - every bar is dealt by chance from the section's distribution
 # ---------------------------------------------------------------------------
 
-_OCCUPANCY_SEEDS = range(1, 49)     # 48 sections, 32 bars of each
+_OCCUPANCY_SEEDS = range(1, 25)     # 24 pieces, 64 bars of each: about 60 sections
 
 
-def _occupancy_by_class() -> dict[str, float]:
+def _occupancy_by_class(only=None) -> dict[str, float]:
+    """only: a (kick style, carrier) pair to keep, or None for every section."""
     seen = {"spine": [], "signature": [], "eighth": [], "odd": []}
     for seed in _OCCUPANCY_SEEDS:
-        signature = jungle.section_for(seed, 0).signature_slots()
-        for bar_events in _dealt_bars(seed, 2):
+        for bar, bar_events in enumerate(_dealt_bars(seed, 4)):
+            section = jungle.section_at(seed, bar)
+            if only is not None and (section.kick_style, section.carrier) != only:
+                continue
+            signature = section.signature_slots()
             slots = {_slot(e) for e in bar_events}
             for slot in range(16):
                 name = ("spine" if slot in (0, 4, 10, 12) else "signature" if slot in signature
@@ -271,28 +275,34 @@ def test_slot_occupancy_matches_the_research_by_class():
 
 
 def test_each_section_has_two_to_four_signature_hits_that_land_in_most_bars():
-    counts = set()
+    counts, landed = set(), []
     for seed in range(1, 13):
-        section = jungle.section_for(seed, 0)
-        counts.add(len(section.signature))
-        assert 2 <= len(section.signature) <= 4
-        assert not section.signature_slots() & {0, 4, 10, 12}
-        bars = _dealt_bars(seed, 16)
-        for hit in section.signature:
-            landed = mean(hit.slot in {_slot(e) for e in bar_events} for bar_events in bars)
-            assert 0.76 <= landed <= 1.0, (seed, hit, landed)       # 80-100%, less 256 bars of noise
-    assert len(counts) > 1                                          # sections differ in how many
+        in_section = defaultdict(list)
+        for bar, bar_events in enumerate(_dealt_bars(seed, 16)):
+            in_section[jungle.section_at(seed, bar)].append({_slot(e) for e in bar_events})
+        for section, bars in in_section.items():
+            counts.add(len(section.signature))
+            assert 2 <= len(section.signature) <= 4
+            assert not section.signature_slots() & {0, 4, 10, 12}
+            for hit in section.signature:
+                share = mean(hit.slot in slots for slots in bars)
+                landed.append(share)
+                assert share >= 0.60, (seed, hit, share)        # 80%, less the noise of a 24-bar section
+    assert mean(landed) >= 0.85                                  # 80-100%: 0.90 expected
+    assert mean(share >= 0.80 for share in landed) >= 0.80
+    assert counts == {2, 3, 4}                                  # sections differ in how many
 
 
 def test_sections_differ_in_where_their_signature_hits_fall():
     assert len({jungle.section_for(seed, 0).signature_slots() for seed in range(1, 13)}) >= 8
+    assert len({jungle.section_for(1, index).signature_slots() for index in range(12)}) >= 8
 
 
 def test_no_bar_is_read_from_a_table():
     """Within a section the bars are all dealt: nearly every bar is its own."""
     for seed in (1, 2, 3):
         patterns = {_cells(b) for b in _dealt_bars(seed, 16)}
-        assert len(patterns) >= 250             # of 256
+        assert len(patterns) >= 245             # of 256
 
 
 def test_the_deal_is_seeded():
@@ -304,7 +314,7 @@ def test_the_deal_is_seeded():
 
 
 def test_kicks_stay_break_kick_sparse():
-    """About 2-3.5 kicks a bar (rhythm.md 10.3, break-kick sections), never beside a spine kick."""
+    """About 2-3.5 kicks a bar (rhythm.md 10.3: break-kick sections 2.4-3.5), never beside a spine kick."""
     per_bar = [sum(e.layer == "kick" for e in b) for seed in range(1, 13) for b in _dealt_bars(seed, 16)]
     assert 2.0 <= mean(per_bar) <= 3.5
     for seed in range(1, 13):
@@ -321,15 +331,16 @@ _LAG_SEEDS = range(1, 13)           # 12 sections, 256 bars of each
 
 @lru_cache(maxsize=None)
 def _lag_profile() -> dict:
-    lags = {1: [], 2: [], 3: [], 4: [], 8: []}
+    lags = {1: [], 2: [], 3: [], 4: [], 8: [], 16: []}
     baseline, changed, near_copies, identical = [], [], 0, 0
     for seed in _LAG_SEEDS:
         cells = [_cells(b) for b in _dealt_bars(seed, 16)]
         for lag, values in lags.items():
             values.extend(jungle.similarity(cells[i], cells[i + lag]) for i in range(len(cells) - lag))
-        # two bars from the same section, far apart and at unrelated places in their groups
-        baseline.extend(jungle.similarity(cells[i], cells[(i * 7 + 37) % len(cells)])
-                        for i in range(0, len(cells), 3))
+        # two bars of the same section, far apart and at unrelated places in their groups
+        for i in range(len(cells) - 9):
+            if jungle.section_at(seed, i) == jungle.section_at(seed, i + 9):
+                baseline.append(jungle.similarity(cells[i], cells[i + 9]))
         for a, b in zip(cells, cells[1:]):
             changed.append(sum(x != y for x, y in zip(a, b)))
             near_copies += jungle.similarity(a, b) > 0.8
@@ -352,7 +363,10 @@ def test_the_four_bar_group_returns():
     assert lag[4] - lag[1] == pytest.approx(0.131, abs=0.04)
     assert lag[2] - lag[1] == pytest.approx(0.081, abs=0.04)
     assert lag[1] < lag[2] < lag[4]
-    assert lag[8] > lag[1] + 0.08               # reference: lag 8 0.465
+    # and it fades as sections turn over. Reference: lag 8 0.110 above lag 1, lag 16 0.034 above.
+    assert lag[4] > lag[8] > lag[16] > lag[1]
+    assert lag[8] - lag[1] == pytest.approx(0.110, abs=0.04)
+    assert lag[16] - lag[1] == pytest.approx(0.034, abs=0.04)
 
 
 def test_the_group_returns_similar_not_identical():
@@ -861,3 +875,134 @@ def test_a_breakdown_is_busier_and_no_quieter():
     kicks = lambda sparsity: mean(sum(l == "kick" for _, l, _ in _drums(_bank(i, s, sparsity=sparsity)))
                                   for s in range(1, 13) for i in range(4))
     assert kicks(0.70) <= kicks(0.55) + 1e-9
+
+
+# ---------------------------------------------------------------------------
+# J11 - nested clocks
+# ---------------------------------------------------------------------------
+
+def _clock_intervals(name: str) -> list[int]:
+    """Bars between successive changes of one layer, over 12 pieces of 4000 bars."""
+    out = []
+    for seed in range(1, 13):
+        starts = sorted({getattr(jungle.clocks_at(seed, bar), name) for bar in range(0, 4000, 4)})
+        out.extend(b - a for a, b in zip(starts, starts[1:]))
+    return out
+
+
+def test_the_layers_turn_over_on_their_own_clocks():
+    """Reference: riff about every 8 bars, sub tone about every 16 (median 17), kick style 28, carrier 32."""
+    assert median(_clock_intervals("riff_start")) == 8
+    assert median(_clock_intervals("tone_start")) == pytest.approx(17, abs=3)
+    assert median(_clock_intervals("section_start")) == pytest.approx(30, abs=4)
+    for name in ("riff_start", "tone_start", "section_start"):
+        assert all(interval % 4 == 0 for interval in _clock_intervals(name))    # on the phrase grid
+    assert min(_clock_intervals("section_start")) >= 28
+    assert max(_clock_intervals("section_start")) <= 40
+
+
+def test_the_slow_layers_change_where_the_riff_changes():
+    """Reference: 77% of kick changes land on a riff change; a section change is 3-4 layers at once."""
+    for seed in range(1, 7):
+        riff_changes = {jungle.clocks_at(seed, bar).riff_start for bar in range(0, 2000, 4)}
+        tone_changes = {jungle.clocks_at(seed, bar).tone_start for bar in range(0, 2000, 4)}
+        section_changes = {jungle.clocks_at(seed, bar).section_start for bar in range(0, 2000, 4)}
+        assert tone_changes <= riff_changes
+        assert section_changes <= tone_changes          # riff, tone, kick style and carrier together
+        assert len(riff_changes) > len(tone_changes) > len(section_changes) > 40
+
+
+def test_nothing_is_quantised_to_the_bank():
+    """The engine picked per 16-bar bank; the clocks run in bars from the start of the piece."""
+    off_the_bank = [bar for seed in range(1, 7) for bar in
+                    {jungle.clocks_at(seed, b).section_start for b in range(0, 2000, 4)} if bar % 16]
+    assert len(off_the_bank) >= 40
+
+
+def test_a_section_holds_its_identity_and_the_next_one_has_its_own():
+    for seed in range(1, 7):
+        sections = []
+        for bar in range(0, 1200):
+            state = jungle.state_at(seed, bar)
+            if not sections or sections[-1]["section"] != state["section"]:
+                sections.append(state)
+            held = sections[-1]
+            assert (state["kick_style"], state["carrier"], state["hat_accent"], state["signature"]) == (
+                held["kick_style"], held["carrier"], held["hat_accent"], held["signature"])
+        changed = mean(a["signature"] != b["signature"] for a, b in zip(sections, sections[1:]))
+        assert changed >= 0.9
+    styles = [jungle.section_for(seed, index).kick_style for seed in range(1, 13) for index in range(100)]
+    # reference shares of bars: break kick 58%, sparse 26%, two-step 13%
+    assert mean(s == "break" for s in styles) == pytest.approx(0.60, abs=0.06)
+    assert mean(s == "sparse" for s in styles) == pytest.approx(0.27, abs=0.06)
+    assert mean(s == "two_step" for s in styles) == pytest.approx(0.13, abs=0.05)
+    assert {jungle.section_for(1, index).carrier for index in range(40)} == {"hats", "break"}
+
+
+def _kicks_by_style() -> dict[str, list[int]]:
+    kicks = defaultdict(list)
+    for seed in range(1, 13):
+        for bar, bar_events in enumerate(_dealt_bars(seed, 16)):
+            if not _is_fill(bar_events):
+                kicks[jungle.section_at(seed, bar).kick_style].append(
+                    sum(e.layer == "kick" for e in bar_events))
+    return kicks
+
+
+def test_kick_style_shows_in_the_notes():
+    """A break kick re-deals its slots every bar; a sparse one is the spine and little else;
+    a two-step is the spine exactly, every bar (rhythm.md 10.3)."""
+    kicks = _kicks_by_style()
+    assert set(kicks) == {"break", "sparse", "two_step"}
+    assert 2.4 <= mean(kicks["break"]) <= 3.5           # reference break-kick sections: 2.4-3.5 a bar
+    assert mean(kicks["sparse"]) < mean(kicks["break"]) - 0.3
+    assert mean(kicks["two_step"]) < mean(kicks["sparse"]) + 0.6
+    for seed in range(1, 13):
+        for bar, bar_events in enumerate(_dealt_bars(seed, 16)):
+            section = jungle.section_at(seed, bar)
+            if section.kick_style == "two_step":
+                assert {_slot(e) for e in bar_events if e.layer == "kick"} == {0, 10}
+
+
+def test_the_slot_chances_hold_whatever_the_kick_style_and_carrier():
+    """The other 8ths at 67% and the odd 16ths at 34% belong to every section: whichever lanes
+    carry them, the chance that the slot carries anything is the same."""
+    kinds = set()
+    for seed in range(1, 7):
+        for index in range(40):
+            section = jungle.section_for(seed, index)
+            kinds.add((section.kick_style, section.carrier))
+            signature = section.signature_slots()
+            for slot in range(16):
+                if slot in (0, 4, 10, 12) or slot in signature:
+                    continue
+                empty = 1.0
+                for lane in range(3):
+                    empty *= 1.0 - section.chance[lane][slot]
+                assert 1.0 - empty == pytest.approx(0.34 if slot % 2 else 0.67, abs=1e-9)
+    assert len(kinds) == 6                              # 3 kick styles x 2 carriers
+    # and as dealt, in the two commonest kinds of section
+    for only in (("break", "hats"), ("break", "break")):
+        occupancy = _occupancy_by_class(only)
+        assert occupancy["spine"] == 1.0
+        assert occupancy["eighth"] == pytest.approx(0.67, abs=0.07), only
+        assert occupancy["odd"] == pytest.approx(0.34, abs=0.07), only
+
+
+def test_the_carrier_shows_in_the_notes():
+    """When the break carries its own 16ths, more of the in-between hits are ghost snares."""
+    ghosts, hats = defaultdict(list), defaultdict(list)
+    for seed in range(1, 13):
+        for bar, bar_events in enumerate(_dealt_bars(seed, 16)):
+            carrier = jungle.section_at(seed, bar).carrier
+            ghosts[carrier].append(sum(e.layer == "ghost_snare" for e in bar_events))
+            hats[carrier].append(sum(e.layer in ("hat", "open_hat") for e in bar_events))
+    assert mean(ghosts["break"]) > mean(ghosts["hats"]) + 0.5
+    assert mean(hats["hats"]) > mean(hats["break"]) + 0.5
+
+
+def test_the_sub_tone_is_published_for_the_instrument():
+    names = {jungle.state_at(seed, bar)["sub_tone"]["name"] for seed in range(1, 7) for bar in range(0, 400, 4)}
+    assert names == {"clean", "odd-leaning", "clipped"}
+    state = jungle.state_at(1, 0)
+    assert state["sub_tone_start"] == 0 and state["section_start"] == 0 and state["riff_start"] == 0

@@ -1,7 +1,7 @@
 """Jungle - bars dealt by chance from a section's distribution, the sub's
 riff, and where the hooks go.
 
-Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J10).
+Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J11).
 
 The other archetypes read a bar from a step table. A jungle bar is dealt: a
 section holds a chance for every 16th slot in each of three lanes, and every
@@ -10,11 +10,17 @@ nearly so, the other 8th positions land about two times in three and the odd
 16ths about one time in three.
 
 A deal is seeded. The same seed and the same bar number always give the same
-bar, so "chance" here is the Determinism Contract's kind: no state, no clock,
-nothing drawn at run time.
+bar, so "chance" here is the Determinism Contract's kind: no state, no time
+of day, nothing drawn at run time.
 
 The sub is the opposite case: a riff is written once, from the seed, and
 repeats as written. Hooks are short shapes that come back about three times.
+
+Nothing here is quantised to the bank. Each layer has its own clock, counted
+in bars from the start of the piece: the riff turns over about every 8 bars,
+the sub's tone about every 16, and the section - signature hits, kick style
+and the 16th carrier - about every 32. The slow ones change only where the
+riff does.
 
 This module decides which slots sound, and how hard. It makes no events; the
 voices in thelmic/voices/jungle.py do that.
@@ -34,21 +40,53 @@ LANES         = ("low", "mid", "high")  # kick / snare and ghost snare / hat
 SPINE: dict[str, tuple[int, ...]] = {"low": (0, 10), "mid": (4, 12)}
 SPINE_SLOTS = frozenset(s for slots in SPINE.values() for s in slots)
 
-# J2 - chance per lane on a slot that is neither spine nor signature, as
-# (8th position, odd 16th). The lanes are dealt independently, so the chance
-# that the slot carries anything is 1 - (1-high)(1-mid)(1-low):
-#   8th position: 1 - 0.50 * 0.78 * 0.85 = 0.67   (reference: 0.67)
-#   odd 16th:     1 - 0.78 * 0.88 * 0.96 = 0.34   (reference: 0.34)
-_BETWEEN: dict[str, tuple[float, float]] = {
-    "high": (0.50, 0.22),
-    "mid":  (0.22, 0.12),
-    "low":  (0.15, 0.04),
+# J2 - the chance that a slot which is neither spine nor signature carries
+# anything at all, across the three lanes: (8th position, odd 16th).
+_SLOT_CHANCE = (0.67, 0.34)
+# The lanes are dealt independently. The kick's and the ghost snare's chances
+# come from the section's kick style and carrier (below); the hat's is whatever
+# makes the slot's chance come out: 1 - (1 - 0.67) / ((1 - ghost)(1 - kick)).
+#   break kick, hats carrying:  8th 1 - 0.50 * 0.78 * 0.85 = 0.67
+#                               odd 1 - 0.78 * 0.88 * 0.96 = 0.34
+
+# J11 - kick style, held with the rest of the section's identity for about 32
+# bars (reference: a median 28). Shares of the reference's bars
+# (rhythm.md section 10): break kick 58%, sparse or syncopated 26%, two-step
+# 13%, none 4%, four on the floor 0%. The spine is in all of them; the style
+# is how often the kick lands anywhere else, as (8th position, odd 16th).
+KICK_STYLES  = (("break", 0.60), ("sparse", 0.87), ("two_step", 1.0))
+_KICK_CHANCE = {
+    "break":    (0.15, 0.04),    # re-dealt every bar: about 3 kicks a bar
+    "sparse":   (0.04, 0.01),    # the spine and little else
+    "two_step": (0.00, 0.00),    # programmed: the spine exactly, every bar
 }
+# J11 - the 16th carrier, held as long (reference: a median 32 bars): what
+# carries the in-between hits. "hats": a high-passed layer over the break, the ghosts few. "break":
+# the break carries its own 16ths, more of them ghost snares. Ghost snare
+# chance as (8th position, odd 16th).
+CARRIER_STYLES = (("hats", 0.50), ("break", 1.0))
+_GHOST_CHANCE  = {"hats": (0.22, 0.12), "break": (0.36, 0.20)}
+# The carrier's dynamics, with it: the beat leads, or the "and" does.
+HAT_ACCENTS = (("straight", 0.50), ("lift", 1.0))
+# J11 - the sub's tone, held about 16 bars. The instrument's business; the
+# engine only says which. bass.md section 10: the typical record is
+# odd-leaning (3rd harmonic -20 to -27 dB), the extremes a clean sine
+# (THD -31 dB) and a clipped one (3rd harmonic -12 dB).
+SUB_TONES = (
+    ({"name": "odd-leaning", "third_harmonic_db": -24}, 0.50),
+    ({"name": "clean",       "third_harmonic_db": -31}, 0.80),
+    ({"name": "clipped",     "third_harmonic_db": -12}, 1.0),
+)
+# The slow layers change where the riff changes, once they have been held at
+# least this many bars. Riffs are held 8, 12 or 16 bars, so the sub's tone
+# turns over every 16-28 bars and the section - signature hits, the group's
+# lean, kick style and carrier together - every 28-40. A section change takes
+# the tone with it: three or four layers turning over on one bar.
+_TONE_HOLD, _SECTION_HOLD = 16, 28
+
 # No kick a 16th either side of a spine kick: fast double kicks are one of the
-# brief's top mistakes at this tempo. The hat takes up the slack so the slot's
-# chance is still 0.34: 1 - 0.75 * 0.88.
+# brief's top mistakes at this tempo. The hat takes up the slack.
 _BESIDE_SPINE_KICK      = frozenset({1, 9, 11, 15})
-_HAT_BESIDE_SPINE_KICK  = 0.25
 _BESIDE_SPINE_SNARE     = frozenset({3, 5, 11, 13})
 # The carrier over a spine hit. Reference high-band occupancy on the beats: 0.74-0.87.
 _HAT_ON_SPINE           = 0.80
@@ -61,11 +99,14 @@ _SIGNATURE_CHANCE = (0.80, 1.00)
 # its own way. 0 = four bars from one distribution (no group, lag 4 = lag 1);
 # 1 = four fixed bars (a loop). Tuned against the reference's lag profile,
 # where lag 4 sits 0.131 above lag 1 (0.486 against 0.355) and lag 2 sits
-# 0.081 above it (0.436): these two values give 0.130 and 0.082.
-_GROUP_LEAN     = 0.55
+# 0.081 above it (0.436), measured as the reference was: straight through, across
+# section changes. These two values give 0.130 and 0.084, and the profile then
+# fades as sections turn over: lag 8 +0.096 (reference +0.110), lag 16 +0.030
+# (reference +0.034).
+_GROUP_LEAN     = 0.61
 # Chance that bar 3 of the group leans the way bar 1 does, and bar 4 the way
 # bar 2 does: the 2-bar sub-period under the 4-bar one.
-_HALF_GROUP_TIE = 0.70
+_HALF_GROUP_TIE = 0.60
 
 # J4 - fills: the last bar of a group, about 1 group in 4, busier in the top
 # two lanes in the second half of the bar.
@@ -94,7 +135,7 @@ DROP_NOTE_BEATS = 3.0
 _BREAKDOWN_LIFT = 0.04
 
 # Tags that keep the separate draws apart.
-_T_SIGNATURE, _T_LEAN, _T_TIE, _T_DEAL, _T_FILL, _T_VELOCITY, _T_DROP = range(1, 8)
+_T_SIGNATURE, _T_LEAN, _T_TIE, _T_DEAL, _T_FILL, _T_VELOCITY, _T_DROP, _T_CLOCK = range(1, 9)
 
 _MASK = 0xFFFFFFFFFFFFFFFF
 
@@ -122,9 +163,12 @@ class SignatureHit:
 @dataclass(frozen=True)
 class JungleSection:
     """What a section holds still while its bars are re-dealt (scene rules)."""
-    seed:      int
-    index:     int
-    signature: tuple[SignatureHit, ...]
+    seed:       int
+    index:      int
+    kick_style: str
+    carrier:    str
+    hat_accent: str
+    signature:  tuple[SignatureHit, ...]
     # chance[lane index][slot]: the section's distribution.
     chance:    tuple[tuple[float, ...], ...]
     # lean[position in group][lane index][slot]: the same, as each of the four
@@ -161,21 +205,23 @@ class BarDeal:
 # The section's distribution
 # ---------------------------------------------------------------------------
 
-def _base_chance(lane: str, slot: int) -> float:
+def _base_chance(lane: str, slot: int, kick_style: str, carrier: str) -> float:
     if slot in SPINE.get(lane, ()):
         return 1.0
     if slot in SPINE_SLOTS:
         return _HAT_ON_SPINE if lane == "high" else 0.0
-    odd = slot % 2 == 1
-    if odd and slot in _BESIDE_SPINE_KICK:
-        if lane == "low":
-            return 0.0
-        if lane == "high":
-            return _HAT_BESIDE_SPINE_KICK
-    return _BETWEEN[lane][1 if odd else 0]
+    odd = slot % 2
+    low = 0.0 if slot in _BESIDE_SPINE_KICK else _KICK_CHANCE[kick_style][odd]
+    mid = _GHOST_CHANCE[carrier][odd]
+    if lane == "low":
+        return low
+    if lane == "mid":
+        return mid
+    return 1.0 - (1.0 - _SLOT_CHANCE[odd]) / ((1.0 - mid) * (1.0 - low))
 
 
-def _signature_for(seed: int, index: int) -> tuple[SignatureHit, ...]:
+def _signature_for(seed: int, index: int, kick_style: str) -> tuple[SignatureHit, ...]:
+    """2-4 positions the section lands in 80-100% of its bars, and in which lane."""
     count = 2 + int(_unit(seed, index, _T_SIGNATURE, 0) * 3)          # 2, 3 or 4
     ranked = sorted(_SIGNATURE_SLOTS, key=lambda s: _unit(seed, index, _T_SIGNATURE, 1, s))
     hits: list[SignatureHit] = []
@@ -191,6 +237,8 @@ def _signature_for(seed: int, index: int) -> tuple[SignatureHit, ...]:
             lane = "mid" if u < 0.75 else "high"
         else:                                       # an "e" or "a": a drag or a pickup
             lane = "mid" if u < 0.55 else "low" if u < 0.85 else "high"
+        if lane == "low" and kick_style != "break":
+            lane = "mid"                            # only a break kick has kicks of its own to sign with
         if any(hit.lane == lane and abs(hit.slot - slot) == 1 for hit in hits):
             continue                                # two in a row in one lane is a roll, not a signature
         if lane == "mid" and any(hit.lane == "mid" and abs(hit.slot - slot) == 2
@@ -202,13 +250,21 @@ def _signature_for(seed: int, index: int) -> tuple[SignatureHit, ...]:
     return tuple(sorted(hits, key=lambda hit: hit.slot))
 
 
+def sub_tone_of(seed: int, tone_index: int) -> dict:
+    return dict(_pick(SUB_TONES, _unit(seed, _T_CLOCK, 3, tone_index)))
+
+
 @lru_cache(maxsize=256)
 def section_for(seed: int, index: int = 0) -> JungleSection:
-    """The section with this index: its signature hits and its chances."""
-    signature = _signature_for(seed, index)
+    """The section with this index: its identity and its chances."""
+    kick_style = _pick(KICK_STYLES, _unit(seed, _T_CLOCK, 0, index))
+    carrier = _pick(CARRIER_STYLES, _unit(seed, _T_CLOCK, 1, index))
+    hat_accent = _pick(HAT_ACCENTS, _unit(seed, _T_CLOCK, 2, index))
+    signature = _signature_for(seed, index, kick_style)
     signed = {(hit.lane, hit.slot): hit.chance for hit in signature}
     chance = tuple(
-        tuple(signed.get((lane, slot), _base_chance(lane, slot)) for slot in range(STEPS_PER_BAR))
+        tuple(signed.get((lane, slot), _base_chance(lane, slot, kick_style, carrier))
+              for slot in range(STEPS_PER_BAR))
         for lane in LANES
     )
 
@@ -227,12 +283,30 @@ def section_for(seed: int, index: int = 0) -> JungleSection:
               for lane_i in range(len(LANES)))
         for position in range(GROUP_BARS)
     )
-    return JungleSection(seed=seed, index=index, signature=signature, chance=chance, lean=lean)
+    return JungleSection(seed=seed, index=index, kick_style=kick_style, carrier=carrier,
+                         hat_accent=hat_accent, signature=signature, chance=chance, lean=lean)
 
 
-def section_index(seed: int, global_bar: int) -> int:
-    """Which section a bar belongs to. One section, until the clocks turn it over."""
-    return 0
+def section_at(seed: int, global_bar: int) -> JungleSection:
+    """The section a bar belongs to, by the clocks (J11)."""
+    return section_for(seed, clocks_at(seed, global_bar).section)
+
+
+def state_at(seed: int, global_bar: int) -> dict:
+    """What the layers are doing in this bar, for a caller that voices them.
+
+    The break's part of it shows in the notes. The sub's tone does not: an
+    instrument that wants it asks here.
+    """
+    clocks, section = clocks_at(seed, global_bar), section_at(seed, global_bar)
+    return {
+        "riff": clocks.riff, "riff_start": clocks.riff_start,
+        "sub_tone": sub_tone_of(seed, clocks.tone), "sub_tone_start": clocks.tone_start,
+        "section": clocks.section, "section_start": clocks.section_start,
+        "kick_style": section.kick_style, "carrier": section.carrier,
+        "hat_accent": section.hat_accent,
+        "signature": tuple((hit.lane, hit.slot) for hit in section.signature),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +346,7 @@ def deal_bar(
                 (J9); "breakdown" when the sub is out, which is busier on top (J10).
     roll, gap:  the bar before a drop that has one (J9).
     """
-    section = section_for(seed, section_index(seed, global_bar))
+    section = section_at(seed, global_bar)
     signed = {(hit.lane, hit.slot) for hit in section.signature}
     lean = section.lean[global_bar % GROUP_BARS]
     fill = is_fill_bar(seed, global_bar)
@@ -300,7 +374,8 @@ def deal_bar(
                 kind = "fill"
             else:
                 continue
-            hits.append(Hit(lane, slot, kind, _velocity(seed, global_bar, lane, slot, kind)))
+            hits.append(Hit(lane, slot, kind,
+                            _velocity(seed, global_bar, lane, slot, kind, section.hat_accent)))
     if roll:
         # 16th snares through the last half bar, growing; the spine snare stays what it is.
         hits = [h for h in hits if not (h.lane == "mid" and h.slot >= _ROLL_FROM and h.kind != "spine")]
@@ -313,7 +388,8 @@ def deal_bar(
     return BarDeal(global_bar=global_bar, is_fill=fill, hits=tuple(hits))
 
 
-def _velocity(seed: int, global_bar: int, lane: str, slot: int, kind: str) -> int:
+def _velocity(seed: int, global_bar: int, lane: str, slot: int, kind: str,
+              hat_accent: str = "straight") -> int:
     """Dynamics carry the feel (J5): the spine leads, the 8ths sit under it,
     the odd 16ths under those, and the ghost snares are quiet and never level."""
     u = _unit(seed, _T_VELOCITY, global_bar, LANES.index(lane), slot)
@@ -338,6 +414,8 @@ def _velocity(seed: int, global_bar: int, lane: str, slot: int, kind: str) -> in
         return (28 if odd else 38) + int(u * 19)    # ghosts: 28-46 / 38-56
     if kind == "signature":
         return 88 + int(u * 9)                      # open hat accent
+    if hat_accent == "lift" and not odd:            # the "and" leads: offbeat hats
+        return (88 if slot % 4 == 2 else 74) + int(u * 9)
     if slot in SPINE_SLOTS:
         return 84 + int(u * 9)
     return (60 if odd else 74) + int(u * 13)        # 60-72 / 74-86
@@ -364,7 +442,6 @@ def similarity(a: tuple[int, ...], b: tuple[int, ...]) -> float:
 # Unlike the break, a riff is written once and repeats as written: "the bass
 # lands regularly and gives the track its structure" (bass.md section 11).
 
-BEATS_PER_BAR = 4
 SUB_MAX_BEATS = 4.0          # nothing in the reference is held past 1.4 bars; the rule caps at a bar
 
 # What the instrument has to do to a sub note; the engine can only say so.
@@ -385,11 +462,13 @@ _T_RIFF, _T_FALL = 10, 11
 
 # Riff lengths: 4 bars 39% of the time, 8 bars 31% (scene rules) -> 56 : 44.
 _RIFF_PERIODS = ((4, 0.56), (8, 1.0))
-# How long a riff is held before it changes, in bars. Reference: median 11,
-# interquartile 7-15, changes on the phrase grid.
+# How long a riff is held before it changes, in bars. Reference: the riff is
+# the 8-bar clock (archetypes.md); runs have a median of 11 bars, interquartile
+# 7-15, and change on the phrase grid (bass.md 11.2). These give a median of 8
+# and a mean of 11.4.
 _RIFF_HOLD = {
-    4: ((8, 0.50), (12, 0.80), (16, 1.0)),
-    8: ((8, 0.25), (16, 1.0)),
+    4: ((8, 0.62), (12, 0.80), (16, 1.0)),
+    8: ((8, 0.40), (16, 1.0)),
 }
 # About one phrase in two or three ends on the fundamental and a gap.
 FALL_CHANCE = 0.40
@@ -466,30 +545,62 @@ def _pick(table, u: float):
     return table[-1][0]
 
 
-_RIFF_STARTS: dict[int, list[tuple[int, int, int]]] = {}   # seed -> [(start_bar, held, period)]
+@dataclass(frozen=True)
+class Clocks:
+    """Where each layer's clock stands in one bar (J11): an index and the bar it started on."""
+    riff:          int
+    riff_start:    int
+    riff_held:     int
+    riff_period:   int
+    tone:          int
+    tone_start:    int
+    section:       int
+    section_start: int
 
 
-def _riff_span(seed: int, global_bar: int) -> tuple[int, int, int, int]:
-    """(index, start_bar, held_bars, period) of the riff sounding in this bar.
+_CLOCKS: dict[int, list[Clocks]] = {}      # seed -> one entry per riff, in order
 
-    Spans are laid end to end from bar 0. The list is only a memo: it is a pure
-    function of the seed.
+
+def clocks_at(seed: int, global_bar: int) -> Clocks:
+    """The clocks in this bar.
+
+    Riffs are laid end to end from bar 0, and every slower layer changes only
+    where a riff does, once it has been held long enough: so the changes nest,
+    and now and then three or four land on one bar - a section change. The list
+    is only a memo: it is a pure function of the seed.
     """
-    spans = _RIFF_STARTS.setdefault(seed, [])
-    while not spans or spans[-1][0] + spans[-1][1] <= global_bar:
+    spans = _CLOCKS.setdefault(seed, [])
+    while not spans or spans[-1].riff_start + spans[-1].riff_held <= global_bar:
         index = len(spans)
-        start = spans[-1][0] + spans[-1][1] if spans else 0
         period = _pick(_RIFF_PERIODS, _unit(seed, _T_RIFF, index, 0))
         held = _pick(_RIFF_HOLD[period], _unit(seed, _T_RIFF, index, 1))
-        spans.append((start, held, period))
+        if not spans:
+            spans.append(Clocks(0, 0, held, period, 0, 0, 0, 0))
+            continue
+        last = spans[-1]
+        start = last.riff_start + last.riff_held
+        new_section = start - last.section_start >= _SECTION_HOLD
+        new_tone = new_section or start - last.tone_start >= _TONE_HOLD
+        spans.append(Clocks(
+            index, start, held, period,
+            last.tone + 1 if new_tone else last.tone, start if new_tone else last.tone_start,
+            last.section + 1 if new_section else last.section,
+            start if new_section else last.section_start,
+        ))
     low, high = 0, len(spans) - 1
-    while low < high:                                # the span holding global_bar
+    while low < high:                                # the riff holding global_bar
         mid = (low + high + 1) // 2
-        if spans[mid][0] <= global_bar:
+        if spans[mid].riff_start <= global_bar:
             low = mid
         else:
             high = mid - 1
-    return (low, *spans[low])
+    return spans[low]
+
+
+def _riff_span(seed: int, global_bar: int) -> tuple[int, int, int, int]:
+    """(index, start_bar, held_bars, period) of the riff sounding in this bar."""
+    clocks = clocks_at(seed, global_bar)
+    return (clocks.riff, clocks.riff_start, clocks.riff_held, clocks.riff_period)
 
 
 @lru_cache(maxsize=512)

@@ -2250,7 +2250,8 @@ Chance that a 16th slot carries at least one drum hit:
 - Three lanes are dealt independently: low (kick), mid (snare and ghost
   snare), high (hat, the 16th carrier). The chances above are for the slot,
   across lanes, which is how the scene rules state them. Per lane, on a slot
-  that is neither spine nor signature:
+  that is neither spine nor signature, in a break-kick section whose carrier
+  is the hats:
 
   | lane | other 8th | odd 16th |
   |---|---|---|
@@ -2259,11 +2260,15 @@ Chance that a 16th slot carries at least one drum hit:
   | low (kick) | 0.15 | 0.04 |
   | any of them | 0.67 | 0.34 |
 
+  The kick's and the ghost snare's chances belong to the section's kick style
+  and carrier (J11). The hat's chance is whatever makes the last row come out,
+  so the last row holds in every section.
+
 - A hat rides a spine hit 80% of the time (reference high-band occupancy on
   the beats: 0.74-0.87).
 - No kick on a snare slot and no kick a 16th either side of a spine kick
   (brief, top mistake 10: fast double kicks at jungle tempo). That gives about
-  3 kicks a bar; the reference's break-kick sections run 2.4-3.5 (rhythm
+  3 kicks a bar in a break-kick section; the reference's run 2.4-3.5 (rhythm
   section 10.3).
 - Two signature hits never sit side by side in one lane, and a signature
   snare beside a spine snare is a drag: "louder than a ghost but softer than
@@ -2284,7 +2289,9 @@ Chance that a 16th slot carries at least one drum hit:
   lag-8 0.465, lag-2 0.436 (rhythm, lag profile).
 - So a group is four different bars, A-B-C-D, and the group returns. Each
   position in the group leans the section's distribution its own way; each
-  pass is dealt afresh from that lean.
+  pass is dealt afresh from that lean. The lean belongs to the section and
+  changes with it, so the return fades with distance as it does in the
+  reference: lag 8 is 0.110 above lag 1 and lag 16 only 0.034 above.
 - "Three bars then a fill" is contradicted (position test p = 0.20) and is not
   a jungle archetype at all (archetypes, "Form, and the DJ"). No bar is
   repeated and then broken.
@@ -2298,7 +2305,9 @@ Chance that a 16th slot carries at least one drum hit:
   drum hits, with a certain spine and impossible cells (no kick under a snare),
   so every correlation sits about 0.17 higher. The rules to meet are therefore:
   lag 1 equals the same-section random baseline (reference: 0.355 against
-  0.356); lag 4 is 0.131 above lag 1; lag 2 is 0.081 above lag 1.
+  0.356); lag 4 is 0.131 above lag 1; lag 2 is 0.081 above lag 1; lag 8 is
+  0.110 above; lag 16 is 0.034 above. All measured straight through a piece,
+  across its section changes, as the reference was.
 - For the same reason the reference's "15 of 48 cells change from bar to bar"
   (of about 26 onsets) becomes about 10 of 48 here (of about 16 hits).
 
@@ -2459,6 +2468,35 @@ Chance that a 16th slot carries at least one drum hit:
 - The engine's 4-bar minimum hold (Rhythmic Pattern Minimum Hold) is replaced
   for JUNGLE by these clocks. The in-between hits change every bar (J2); the
   section's identity does not.
+- The clocks count bars from the start of the piece (bank index x 16 + bar),
+  not from the start of a bank: nothing is picked per 16-bar bank, and a
+  section change lands on any 4-bar line.
+- Riffs are held 8, 12 or 16 bars (median 8, mean 11.4). A slower layer turns
+  over at the first riff change after it has been held long enough: the sub's
+  tone after 16 bars (so every 16-28), the section after 28 (so every 28-40,
+  median 32).
+- A section is the scene of the scene rules: its signature hits, the lean of
+  its 4-bar group, its kick style and its carrier are set once and held. Kick
+  style and carrier are on one clock here; the reference's 28 and 32 are not
+  told apart. A section change takes the sub's tone with it, so riff, tone,
+  kick style and carrier turn over on one bar.
+- Kick style (rhythm section 10; shares of the reference's bars):
+
+  | style | share | the kick, beyond the spine |
+  |---|---|---|
+  | break kick | 60% (reference 58%) | re-dealt every bar: 15% on an 8th, 4% on an odd 16th; may hold a signature kick |
+  | sparse | 27% (26%) | 4% and 1%: the spine and little else |
+  | two-step | 13% (13%) | none: the spine exactly, every bar, as a programmed kick repeats |
+
+  The reference's remaining 4% has no kick at all; the spine rule (J1) wins.
+- Carrier (rhythm section 9): "hats" - a layer over the break carries the
+  16ths, ghost snares at 22% and 12%; "break" - the break carries its own,
+  ghost snares at 36% and 20% and the hats fewer. Half the sections each. With
+  the carrier goes its accent: the beat leads, or the "and" does.
+- Sub tone (bass section 10): odd-leaning (3rd harmonic about -24 dB), clean
+  (THD -31 dB) or clipped (3rd harmonic -12 dB). A tone is not a note: the
+  engine publishes which one holds in `jungle.state_at(seed, bar)` and the
+  instrument applies it.
 
 ### Implementation status
 
@@ -2467,7 +2505,7 @@ Chance that a 16th slot carries at least one drum hit:
 | J0 | implemented | `archetypes.py`, `note_generation_chain.py` | `tests/test_jungle.py` |
 | J1 | implemented | `archetypes.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J2 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
-| J3 | implemented, in one section: the group does not yet drift (reference lag 16: 0.389) | `jungle.py` | `tests/test_jungle.py` |
+| J3 | implemented | `jungle.py` | `tests/test_jungle.py` |
 | J4 | implemented | `jungle.py` | `tests/test_jungle.py` |
 | J5 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J6 | implemented. The pitch drop, the sine and the absence of a duck are published as `jungle.SUB_VOICE` for the instrument; the engine cannot make them | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
@@ -2475,4 +2513,4 @@ Chance that a 16th slot carries at least one drum hit:
 | J8 | implemented | `note_generation_chain.py` | `tests/test_jungle.py` |
 | J9 | implemented | `jungle.py`, `voices/jungle.py`, `note_generation_chain.py` | `tests/test_jungle.py` |
 | J10 | implemented, as far as notes go: "brighter" is the instrument's | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
-| J11 | not yet | | |
+| J11 | implemented. The sub's tone is published, not sounded | `jungle.py` | `tests/test_jungle.py` |
