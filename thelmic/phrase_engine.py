@@ -34,17 +34,22 @@ def context_for_phrase(
     pending_sr:           SignatureRhythm,
     previous_active:      RhythmicArchetype | None,
     is_drop_phrase:       bool,
+    forced_archetype:     RhythmicArchetype | None = None,
 ) -> PhraseContext:
     """Produce PhraseContext for the phrase starting at phrase_start_frame.
 
     pending_sr:       SignatureRhythm for the current landscape position
     previous_active:  archetype active in the prior phrase (None = first phrase)
     is_drop_phrase:   whether this phrase commits a structural change
+    forced_archetype: an archetype asked for by name; it is both pending and
+                      active, whatever the biases would have selected
     """
-    pending = pending_archetype_for(pending_sr)
+    pending = forced_archetype or pending_archetype_for(pending_sr)
 
     # Active archetype: only changes at a drop; otherwise carries forward
-    if is_drop_phrase or previous_active is None:
+    if forced_archetype is not None:
+        active = forced_archetype
+    elif is_drop_phrase or previous_active is None:
         active = pending
     else:
         active = previous_active

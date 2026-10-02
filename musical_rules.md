@@ -573,7 +573,12 @@ AMEN
 FOUR_ON_THE_FLOOR
 HAPPY_HARDCORE
 GABBER
+JUNGLE
 ```
+
+JUNGLE is the one archetype that is asked for by name rather than selected
+from the terrain's biases, and the one whose rules are measured: see
+"Jungle - Measured Rules" at the end of this document.
 
 Rules:
 
@@ -795,6 +800,23 @@ ride:  xxxxxxxxxxxxxxxx
 
 In high-density archetypes such as GABBER, sub may absorb the bass role and
 bass may be suppressed entirely.
+
+#### JUNGLE
+
+```text
+kick:  x.........x.....
+snare: ....x.......x...
+hat:   x.x.x.x.x.x.x.x.
+sub:   x.....x.........
+bass:  ................
+ride:  ................
+```
+
+The kick and snare rows are the measured spine and are certain in every bar.
+The hat row is where the 16th carrier is likely, not where it is fixed, and
+the sub row is where a riff's attacks sit: for JUNGLE every bar is dealt by
+chance and the sub plays a riff. "Jungle - Measured Rules" governs. Bass is
+suppressed: the sub is the bass.
 
 ---
 
@@ -1602,6 +1624,7 @@ Duration expresses the physical character of the genre. Short notes = stabs (per
 | FOUR_ON_THE_FLOOR | 0.07–0.12s | 0.50–0.65s | French house pump stab |
 | HAPPY_HARDCORE | 0.06–0.10s | 0.45–0.55s | Short bright stab, every 8th note |
 | GABBER | — (suppressed) | 0.04–0.08s | Bass suppressed; sub minimal stab |
+| JUNGLE | — (suppressed) | about 0.21s (0.6 beats) | Clean sine sub, struck notes; see Jungle - Measured Rules J6 |
 
 At high stability (Oak/Nott), multiply durations by 1.2–1.4.
 At low stability (Chaos), multiply by 0.6–0.8.
@@ -1840,6 +1863,7 @@ All other archetypes use patterns with deliberate gaps:
 | FOUR_ON_THE_FLOOR | Off-beat 8ths | 4 hits/bar on the "and" |
 | HAPPY_HARDCORE | All 16 steps | Genre-correct constant hat |
 | GABBER | All 16 steps | Genre-correct constant hat |
+| JUNGLE | Dealt by chance | 8ths likely, odd 16ths sparse; see Jungle - Measured Rules J2 |
 
 ### Hat Sparsity Gating
 
@@ -2146,3 +2170,237 @@ ant = compute_anticipation(block, ...)  # use block-start step
 This means the anticipation state changes at most once per 4 bars, not once per step.
 
 **Exception:** the final 4 bars before a drop (bars 13-16 of the final phrase) may change more rapidly — this is the "maximum tension" zone where the grid reminder fires.
+
+---
+
+## Jungle - Measured Rules
+
+The JUNGLE archetype is not inherited from the hard-dance rules above. It is
+written from measurement: seven analyses of a 21-minute reference DJ set
+(871 bars at 166 BPM), set against what the press and the forums say jungle is.
+Where a rule here contradicts an earlier section, **this section wins for
+JUNGLE and only for JUNGLE**. The other ten archetypes are unchanged.
+
+Every number below is a number about arrangement, rhythm or balance. Nothing
+was sampled or copied from the reference.
+
+Sources, all under `tracks/`:
+
+| short name | file |
+|---|---|
+| README | `2026-09-16_reaper/README.md` |
+| archetypes | `2026-09-16_reaper/archetypes.md` |
+| scene rules | `2026-09-16_jungle_scene_rules.md` |
+| brief | `2026-09-15_jungle_research.md` |
+| rhythm | `2026-09-16_reaper/rhythm.md` |
+| bass | `2026-09-16_reaper/bass.md` |
+| hooks | `2026-09-16_reaper/hooks.md` |
+| drops | `2026-09-16_reaper/drops.md` |
+
+### J0 - Scope and selection
+
+- JUNGLE is asked for by name: `generate_bank(..., archetype="jungle")`.
+  `select_archetype` never returns it, so the terrain cannot wander into it and
+  no existing bias triple changes meaning.
+- AMEN and TWO_STEP keep their tables. They describe hardcore and mid-90s
+  drum and bass; the measurement finds two-step in 13% of the reference and the
+  revival refusing it (archetypes: "The revival refuses two-step"), and no
+  section of the reference puts a kick on step 3, where AMEN has one
+  (rhythm section 10.3). They are not corrected because existing callers and
+  the terrain depend on them.
+- Why not wider: risers, rolls, compression builds and a release burst are
+  genre-correct for hardstyle, hard house and gabber. The measurement is of
+  jungle only.
+
+### J1 - The spine
+
+```text
+kick:  x.........x.....
+snare: ....x.......x...
+```
+
+- Kick on step 0 and step 10 (the "and" of 3); snares on steps 4 and 12.
+  Reference: 91% and 66% of bars for the kicks, 94% and 89% for the snares
+  (README, "Inside the bar"; rhythm section 1).
+- Inside a section the spine is certain: every bar, 100%, whatever sparsity,
+  pressure or drop proximity say (scene rules, "The spine": "required and
+  prominent in every scene"). The only bar that may lose a spine hit is the
+  one 16th of gap before a drop (J9).
+- No kick on step 12 under the snare. No four-on-the-floor: 0% of the
+  reference (rhythm section 10).
+- The spine is prominent: it is the loudest thing in its lane.
+
+### J2 - Every bar is dealt by chance
+
+Bars are not read from a step table. Each section holds a distribution and
+every bar is dealt from it (scene rules, "In-scene variation is chance";
+rhythm section 3: "a stable distribution of hits, continually re-dealt").
+
+Chance that a 16th slot carries at least one drum hit:
+
+| slot class | chance | source |
+|---|---|---|
+| spine (0, 4, 10, 12) | 100% | scene rules |
+| signature hits: 2-4 further positions per section | 80-100% each | scene rules, "Signature hits" |
+| the other 8th positions | about 67% | rhythm section 1 (other even 16ths 0.67) |
+| the odd 16ths ("e" and "a") | about 34% | rhythm section 1 (odd 16ths 0.34) |
+
+- The deal is seeded: the same seed and the same bar number give the same
+  bar. Chance here means "dealt from a seed", so the Determinism Contract holds.
+- Three lanes are dealt: low (kick), mid (snare and ghost snare), high (hat,
+  the 16th carrier). The chances above are for the slot, across lanes.
+- The odd 16ths stay mostly empty: "they are the 34% that keeps it from
+  turning into a wall" (rhythm, "What this means", 2 and 10).
+- Sparsity does not thin the break (J10).
+
+### J3 - The 4-bar group returns; neighbouring bars do not match
+
+- Neighbouring bars are as unalike as two random bars from the same section:
+  lag-1 similarity 0.355 against a random baseline of 0.356 (rhythm section 3).
+- The 4-bar group comes back similar, not identical: lag-4 similarity 0.486,
+  lag-8 0.465, lag-2 0.436 (rhythm, lag profile).
+- So a group is four different bars, A-B-C-D, and the group returns. Each
+  position in the group leans the section's distribution its own way; each
+  pass is dealt afresh from that lean.
+- "Three bars then a fill" is contradicted (position test p = 0.20) and is not
+  a jungle archetype at all (archetypes, "Form, and the DJ"). No bar is
+  repeated and then broken.
+- Nothing is a literal loop: only 2% of reference bars are near-copies of the
+  bar before.
+- Similarity is measured as in rhythm section 3: each bar is a 48-cell vector
+  (16 slots x 3 lanes) and similarity is the Pearson correlation of two bars'
+  vectors.
+
+### J4 - Fills
+
+- A fill lands on the 4-bar line about 1 opportunity in 4: 6.5% of bars, one
+  every 15.5 bars (rhythm section 4; scene rules, "How often things change").
+- A fill is a slightly busier, brighter bar, not a drum roll: 1.23 times the
+  onsets of a normal bar, 1.30 times its high-band energy, and the low band
+  about level (1.06 times) (rhythm section 4).
+- The fill is the last bar of its 4-bar group, and its extra hits are in the
+  second half of the bar, where the reference puts its high accents (hooks,
+  "Call and response" verdict 2: 58% in the second half, peaking on 3& and 4).
+  The reference cannot tell the last bar of the group from the second
+  (rhythm section 4); the scene rules choose the last.
+
+### J5 - Ghost notes and timing
+
+- Quiet ghost snares with varied velocity carry the feel (brief section 1:
+  "A much quieter ghost line fills the gaps with varied velocity"; "Dynamics
+  carry the feel"). The rule above that switches ghosts off because "hard
+  dance is mechanically quantized" does not apply to JUNGLE.
+- Ghosts are on the 16th grid, in the mid lane, on layer `ghost_snare`. They
+  are never on a spine slot and carry no structural authority.
+- Timing is straight: 52% swing (README, "Inside the bar"; archetypes: swung
+  breaks "Contradicted"). Placement is quantised: 8th positions sit within
+  7.5 ms. No swing is applied and no hit leaves the 16th grid.
+- Off-8th hits are softer than 8th hits; flat dynamics are the second of the
+  brief's top mistakes.
+
+### J6 - The sub
+
+- One low voice. A clean sine sub: fundamental 16.6 dB above its second
+  harmonic, 65.6% of its power below 60 Hz (README, "The low end"). No reese
+  in the sub's lane, so JUNGLE has no mid bass: the `bass` layer is silent, as
+  in GABBER.
+- Each note starts with a fast pitch drop: +30 semitones, settling with a
+  12 ms time constant (bass section 9.4; archetypes, "Bass"). This is the
+  instrument's job; the engine publishes the numbers for it.
+- Not ducked under the kick: the measured duck is -0.5 dB (README). Kick and
+  sub share the room by register: kick body 60-250 Hz, sub below 60 Hz.
+- Notes start about a beat apart (median gap 1.00 beat) and last about 0.6
+  beats (median 0.60, bass section 2). Nothing is held past 4 beats; the
+  reference never holds past 1.4 bars.
+- About 0.9 pitch changes a bar (bass section 3). The moves are mostly repeats
+  (34.6%) and 1-2 semitone steps (28.5%); fifths 7.4%, octaves 1.8%.
+- Attacks sit at the front of the bar, on the 1 and the 2& (hooks, "Call and
+  response" verdict). Short notes live on the 8th grid, in pairs: "da-da-DUM"
+  is a short on a beat, a short on its "&", a held note on the next beat
+  (bass section 13.5). No bar of 8th stabs, no 16th runs (bass section 13.8).
+- Riffs are 4 bars (39% of the time) or 8 bars (31%) and are held about 11
+  bars before they change: median 11, interquartile 7-15 (bass section 11;
+  scene rules, "The bass"). Bar 1 of a 4-bar riff is the busiest and bar 4 the
+  thinnest (bass section 13.3).
+- About one phrase in two or three ends by falling to a low note on the
+  fundamental and leaving a gap (scene rules, "The bass").
+- A riff repeats as written: unlike the break, it is not re-dealt each bar
+  (bass section 11: "The bass lands regularly and gives the track its
+  structure").
+
+### J7 - Hooks
+
+- A hook sounds in 39% of bars: 3.1 bars in every 8 (hooks section 2).
+- Hooks are fragments: median 1.2 beats, 81% under 2 beats (hooks section 4).
+  Struck, not swelled.
+- Fundamentals sit at 233-392 Hz, MIDI notes 58 to 67 (hooks section 5). The
+  hook starts above where the bass stops; there is no top-octave hook layer.
+- A shape recurs about three times at 4- or 8-bar spacing and is then
+  replaced (hooks section 3 and "What this means", 4).
+- Pitch: the 5th, the minor 3rd, the root and the 4th of the section's key
+  carry the weight (hooks section 6). Minor.
+- Under a hook the low-end pattern thins (low-band flux -2.1 dB); the sub is
+  not turned down (hooks "What this means", 8).
+- The hook window rule above (bars 0, 1, 4, 12 of 16) does not apply to
+  JUNGLE. Neither does call and response: the reference does not answer a call
+  with the sub (hooks, "Call and response" verdict).
+
+### J8 - No sustained voices
+
+- 81% of melodic events are under two beats and the set holds 5 sustained
+  sounds in 21 minutes (README, "Where our track disagrees", 5; archetypes,
+  "Hooks and space"). JUNGLE plays no drones.
+
+### J9 - Drops are subtraction
+
+- Before a drop the break keeps running at full density while the low end is
+  taken out: 82% of drops, low end down a median 19 dB, for a median 1.2 bars
+  (README, "Drops are subtraction"; drops section 2).
+- No riser: 0 of 22 drops (drops section 2).
+- Rolls before 27% of drops; a gap before 27%, and then a median of 80 ms,
+  one 16th (drops sections 2 and 3). So by default there is no roll and no gap.
+- The break is not thinned, compressed or dissolved on the way in: the
+  Pre-Drop Anticipation Patterns and Percussive Removal rules above do not
+  apply to JUNGLE.
+- The drop is a re-weighting, not a lift: sub +10 dB, total level only
+  +2.6 dB (README). There is no release burst: the Post-Drop Release rule
+  above does not apply. Everything arrives on bar 1 (drops section 4).
+- The drop bar has fewer onsets than a groove bar (21 band-onsets against 32,
+  README, "Density"). The first bar of a drop often holds a single sub note
+  before the bassline proper starts on bar 2 (drops section 4).
+
+### J10 - Breakdowns
+
+- A breakdown is brighter and busier, and only 1.3 dB quieter: centroid
+  +277 Hz, onset density up in 64% of them (README, "Breakdowns get brighter
+  and busier").
+- So when the sub is out, the break does not thin and does not get quieter;
+  it gets slightly busier on top.
+
+### J11 - Nested clocks
+
+- The riff changes about every 8 bars, the sub tone about every 16 (median
+  17), kick style about every 28 and the 16th carrier about every 32
+  (archetypes, "Form, and the DJ").
+- The slow layers change where the riff changes: 77% of kick changes
+  (archetypes). Three or four layers turning over together is a section change.
+- The engine's 4-bar minimum hold (Rhythmic Pattern Minimum Hold) is replaced
+  for JUNGLE by these clocks. The in-between hits change every bar (J2); the
+  section's identity does not.
+
+### Implementation status
+
+| rule | status | code | test |
+|---|---|---|---|
+| J0 | implemented | `archetypes.py`, `note_generation_chain.py` | `tests/test_jungle.py` |
+| J1 | implemented | `archetypes.py`, `voices/jungle.py` | `tests/test_jungle.py` |
+| J2 | not yet: hats are fixed on the 8ths | | |
+| J3 | not yet | | |
+| J4 | not yet | | |
+| J5 | timing implemented; ghosts not yet | `voices/jungle.py` | `tests/test_jungle.py` |
+| J6 | mid bass silent; the sub plays the table's two steps on one note | `voices/sub.py` | `tests/test_jungle.py` |
+| J7 | not yet: the hook window above still applies | | |
+| J8 | implemented | `note_generation_chain.py` | `tests/test_jungle.py` |
+| J9 | not yet: a JUNGLE build or drop phrase plays as a steady one | | |
+| J10 | not yet | | |
+| J11 | not yet | | |

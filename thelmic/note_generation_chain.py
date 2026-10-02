@@ -30,6 +30,8 @@ from thelmic.voices.call import CallIntentStream
 from thelmic.voices.response import ResponseIntentStream
 from thelmic.voices.ghost_32nd import Ghost32ndStream
 from thelmic.voices.drones import DroneSpaceyStream, DroneRumbleStream, DroneTensionStream
+from thelmic.voices.jungle import JungleBreakStream
+from thelmic.archetypes import RhythmicArchetype, resolve_archetype
 from thelmic.phrase_engine import context_for_phrase, pending_archetype_for
 from thelmic.landscape_map import SignatureRhythm
 from thelmic.phrase_arc import compute_arc, ArcDimensions
@@ -38,6 +40,7 @@ from thelmic.anticipation_engine import compute_anticipation, AnticipationState
 
 VERSION    = "v1.0"
 BANK_STEPS = BARS_PER_PHRASE * PHRASES_PER_BANK * 16
+_HOOK_BARS = frozenset({0, 1, 4, 12})  # sub-phrase layout: build/hold/release
 
 _kick_stream     = KickIntentStream()
 _snare_stream    = SnareIntentStream()
@@ -51,6 +54,7 @@ _ghost_stream    = Ghost32ndStream()
 _drone_spacey    = DroneSpaceyStream()
 _drone_rumble    = DroneRumbleStream()
 _drone_tension   = DroneTensionStream()
+_jungle_break    = JungleBreakStream()
 
 
 def generate_bank(
@@ -61,6 +65,7 @@ def generate_bank(
     previous_active_archetype=None,
     phrases_until_drop: int = 8,
     heat: float = 0.5,
+    archetype=None,
 ) -> Bank:
     """Generate one bank of events.
 
@@ -68,7 +73,15 @@ def generate_bank(
     is_drop_phrase:           whether this phrase commits a structural change
     signature_rhythm:         active feature's SignatureRhythm (for bass/hook notes)
     previous_active_archetype: archetype from prior phrase (for commitment logic)
+    archetype:                an archetype asked for by name (a RhythmicArchetype or
+                              its value, e.g. "jungle"); it plays whatever the
+                              signature rhythm's biases would have selected. JUNGLE
+                              is reached only this way. Needs dims and signature_rhythm.
     """
+    forced = resolve_archetype(archetype) if archetype is not None else None
+    if forced is not None and (dims is None or signature_rhythm is None):
+        raise ValueError("archetype needs dims and signature_rhythm")
+
     profile = StructureProfile(
         phrase_length_bars=BARS_PER_PHRASE * PHRASES_PER_BANK,
         subphrase_length_bars=4,
@@ -89,6 +102,7 @@ def generate_bank(
         context = context_for_phrase(
             phrase_start, dims, signature_rhythm,
             previous_active_archetype, is_drop_phrase,
+            forced_archetype=forced,
         )
 
     _response_stream.reset()
@@ -163,6 +177,9 @@ def intents_for_frame(
     arc: Optional[ArcDimensions] = None,
     ant: Optional[AnticipationState] = None,
 ) -> tuple[Intent, ...]:
+    if context is not None and context.active_archetype == RhythmicArchetype.JUNGLE:
+        return _jungle_intents_for_frame(frame, context, dims, sr)
+
     intents: list[Intent] = [
         *_kick_stream.intents_for_frame(frame, context, dims),
         *_snare_stream.intents_for_frame(frame, context, dims, sr=sr, ant=ant),
@@ -182,7 +199,6 @@ def intents_for_frame(
         # boundaries (bars 4, 12 = hold start, release start).
         # Hook and call/response are MUTUALLY EXCLUSIVE within a bar.
         bar_0idx  = frame.bar_index - 1        # 0-indexed bar within phrase
-        _HOOK_BARS = frozenset({0, 1, 4, 12})  # sub-phrase layout: build/hold/release
         is_hook_bar = bar_0idx in _HOOK_BARS
 
         hook_active          = sp < 0.50 and is_hook_bar
@@ -214,6 +230,25 @@ def intents_for_frame(
         intents.extend(_drone_rumble.intents_for_frame(frame, context, dims, sr, ant))
         intents.extend(_drone_tension.intents_for_frame(frame, context, dims, sr, ant))
 
+    return tuple(intents)
+
+
+def _jungle_intents_for_frame(
+    frame: StructureFrame,
+    context: PhraseContext,
+    dims: Dimensions,
+    sr: SignatureRhythm,
+) -> tuple[Intent, ...]:
+    """The JUNGLE rhythm section (musical_rules.md, "Jungle - measured rules").
+
+    A break, a clean sub and short hooks. No mid bass (the sub is the bass, as
+    in GABBER), no call and response, no drones: the reference has no sustained
+    voice and no riser.
+    """
+    intents: list[Intent] = [*_jungle_break.intents_for_frame(frame)]
+    intents.extend(_sub_stream.intents_for_frame(frame, context, dims, sr))
+    if dims.sparsity < 0.50 and (frame.bar_index - 1) in _HOOK_BARS:
+        intents.extend(_hook_stream.intents_for_frame(frame, context, dims, sr))
     return tuple(intents)
 
 

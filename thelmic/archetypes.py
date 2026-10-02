@@ -24,6 +24,10 @@ class RhythmicArchetype(str, Enum):
     FOUR_ON_THE_FLOOR = "four_on_the_floor"
     HAPPY_HARDCORE    = "happy_hardcore"
     GABBER            = "gabber"
+    # Measured, not inherited (musical_rules.md, "Jungle - measured rules").
+    # Never returned by select_archetype: a caller asks for it by name
+    # (generate_bank(..., archetype="jungle")).
+    JUNGLE            = "jungle"
 
 
 @dataclass(frozen=True)
@@ -172,7 +176,39 @@ PATTERNS: dict[RhythmicArchetype, ArchetypePattern] = {
         open_hat_steps    = frozenset({7, 15}),
         sub_steps         = frozenset(range(16)),
     ),
+
+    RhythmicArchetype.JUNGLE: ArchetypePattern(
+        archetype         = RhythmicArchetype.JUNGLE,
+        # The measured spine (tracks/2026-09-16_reaper/README.md): kick on 1
+        # (91% of bars) and the "and" of 3 (66%), snares on 2 (94%) and 4 (89%).
+        # No kick under the beat-4 snare: that is the two-step the revival refuses.
+        kick_steps        = frozenset({0, 10}),
+        snare_steps       = frozenset({4, 12}),
+        # The 8ths are where the 16th carrier is likely, not where it is fixed:
+        # every bar is dealt by chance from the section's distribution
+        # (thelmic/jungle.py). No open hat by default.
+        closed_hat_steps  = frozenset({0, 2, 4, 6, 8, 10, 12, 14}),
+        open_hat_steps    = frozenset(),
+        # Sub attacks at the front of the bar, on the 1 and the 2& (hooks.md).
+        sub_steps         = frozenset({0, 6}),
+    ),
 }
+
+# The archetypes the terrain can reach through select_archetype. JUNGLE is
+# deliberately not among them: it is asked for by name.
+SELECTABLE: frozenset[RhythmicArchetype] = frozenset(
+    a for a in RhythmicArchetype if a is not RhythmicArchetype.JUNGLE
+)
+
+
+def resolve_archetype(value) -> RhythmicArchetype:
+    """An archetype from its enum member or its name ("jungle", "JUNGLE")."""
+    if isinstance(value, RhythmicArchetype):
+        return value
+    try:
+        return RhythmicArchetype(str(value).lower())
+    except ValueError:
+        raise ValueError(f"unknown rhythmic archetype: {value!r}") from None
 
 
 def select_archetype(density_bias: float, syncopation_bias: float,
@@ -188,6 +224,8 @@ def select_archetype(density_bias: float, syncopation_bias: float,
         — HAPPY_HARDCORE, GABBER, STUTTER, BREAKBEAT_HARDCORE, AMEN
 
     Within each band, density and syncopation biases select the specific archetype.
+
+    JUNGLE is never selected here; it is requested by name (see resolve_archetype).
     """
     d = density_bias
     s = syncopation_bias
