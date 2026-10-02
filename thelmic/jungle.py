@@ -1,7 +1,7 @@
 """Jungle - bars dealt by chance from a section's distribution, the sub's
 riff, and where the hooks go.
 
-Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J7).
+Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J10).
 
 The other archetypes read a bar from a step table. A jungle bar is dealt: a
 section holds a chance for every 16th slot in each of three lanes, and every
@@ -73,8 +73,28 @@ FILL_CHANCE = 0.25
 _FILL_LIFT  = 0.45
 _FILL_FROM  = 8
 
+# J9 - drops are subtraction. Before a drop the low end is out for this many
+# 16ths while the break runs on: 1.25 bars (reference: a median 1.2 bars).
+LOW_END_OUT_STEPS = 20
+# A roll before 27% of drops, a gap before 27% - and then one 16th of it.
+ROLL_CHANCE = 0.27
+GAP_CHANCE  = 0.27
+_ROLL_FROM  = 8              # a roll is the last half bar, not a build
+_GAP_SLOT   = 15             # the last 16th before the drop; never a spine slot
+# The first bar of a drop has fewer onsets than a groove bar (21 band-onsets
+# against 32): everything that is neither spine nor signature is dealt at half
+# its chance.
+_DROP_BAR_THIN = 0.50
+# The sub's first bar of a drop: one held note on the fundamental, the
+# bassline proper from bar 2 (drops.md section 4).
+DROP_NOTE_BEATS = 3.0
+# J10 - a breakdown is busier on top, not thinner: onset density up about 0.6
+# a bar. With the sub out, every possible hit in the top two lanes moves this
+# far towards certain.
+_BREAKDOWN_LIFT = 0.04
+
 # Tags that keep the separate draws apart.
-_T_SIGNATURE, _T_LEAN, _T_TIE, _T_DEAL, _T_FILL, _T_VELOCITY = range(1, 7)
+_T_SIGNATURE, _T_LEAN, _T_TIE, _T_DEAL, _T_FILL, _T_VELOCITY, _T_DROP = range(1, 8)
 
 _MASK = 0xFFFFFFFFFFFFFFFF
 
@@ -119,7 +139,7 @@ class JungleSection:
 class Hit:
     lane:     str
     slot:     int
-    kind:     str    # "spine" | "signature" | "between" | "fill"
+    kind:     str    # "spine" | "signature" | "between" | "fill" | "roll"
     velocity: int
 
 
@@ -173,6 +193,9 @@ def _signature_for(seed: int, index: int) -> tuple[SignatureHit, ...]:
             lane = "mid" if u < 0.55 else "low" if u < 0.85 else "high"
         if any(hit.lane == lane and abs(hit.slot - slot) == 1 for hit in hits):
             continue                                # two in a row in one lane is a roll, not a signature
+        if lane == "mid" and any(hit.lane == "mid" and abs(hit.slot - slot) == 2
+                                 and (hit.slot + slot) // 2 in SPINE["mid"] for hit in hits):
+            continue                                # one drag to a backbeat, not one each side
         low, high = _SIGNATURE_CHANCE
         chance = low + (high - low) * _unit(seed, index, _T_SIGNATURE, 3, slot)
         hits.append(SignatureHit(lane, slot, round(chance, 3)))
@@ -223,11 +246,31 @@ def is_fill_bar(seed: int, global_bar: int) -> bool:
     return _unit(seed, _T_FILL, global_bar // GROUP_BARS) < FILL_CHANCE
 
 
+def drop_has_roll(seed: int, drop_bar: int) -> bool:
+    """Whether the drop landing on this bar is one of the 27% with a roll before it."""
+    return _unit(seed, _T_DROP, 0, drop_bar) < ROLL_CHANCE
+
+
+def drop_has_gap(seed: int, drop_bar: int) -> bool:
+    """Whether the drop landing on this bar is one of the 27% with a 16th of gap before it."""
+    return _unit(seed, _T_DROP, 1, drop_bar) < GAP_CHANCE
+
+
 @lru_cache(maxsize=4096)
-def deal_bar(seed: int, global_bar: int, under_hook: bool = False) -> BarDeal:
+def deal_bar(
+    seed: int,
+    global_bar: int,
+    under_hook: bool = False,
+    state: str = "groove",
+    roll: bool = False,
+    gap: bool = False,
+) -> BarDeal:
     """Deal one bar. global_bar counts from the start of the piece.
 
     under_hook: a hook sounds in this bar, so the kick's in-between hits thin (J7).
+    state:      "groove"; "drop" for the first bar of a drop, which is thinner
+                (J9); "breakdown" when the sub is out, which is busier on top (J10).
+    roll, gap:  the bar before a drop that has one (J9).
     """
     section = section_for(seed, section_index(seed, global_bar))
     signed = {(hit.lane, hit.slot) for hit in section.signature}
@@ -240,8 +283,13 @@ def deal_bar(seed: int, global_bar: int, under_hook: bool = False) -> BarDeal:
             p = lean[lane_i][slot]
             if p <= 0.0:
                 continue
-            if under_hook and lane == "low" and p < 1.0 and (lane, slot) not in signed:
+            dealt = p < 1.0 and (lane, slot) not in signed       # neither spine nor signature
+            if under_hook and lane == "low" and dealt:
                 p *= _LOW_UNDER_HOOK
+            if state == "drop" and dealt:
+                p *= _DROP_BAR_THIN
+            elif state == "breakdown" and dealt and lane != "low":
+                p += (1.0 - p) * _BREAKDOWN_LIFT
             u = _unit(seed, _T_DEAL, global_bar, lane_i, slot)
             if slot in SPINE.get(lane, ()):
                 kind = "spine"
@@ -253,6 +301,15 @@ def deal_bar(seed: int, global_bar: int, under_hook: bool = False) -> BarDeal:
             else:
                 continue
             hits.append(Hit(lane, slot, kind, _velocity(seed, global_bar, lane, slot, kind)))
+    if roll:
+        # 16th snares through the last half bar, growing; the spine snare stays what it is.
+        hits = [h for h in hits if not (h.lane == "mid" and h.slot >= _ROLL_FROM and h.kind != "spine")]
+        for slot in range(_ROLL_FROM, STEPS_PER_BAR):
+            if slot not in SPINE["mid"]:
+                ramp = (slot - _ROLL_FROM) / (STEPS_PER_BAR - 1 - _ROLL_FROM)
+                hits.append(Hit("mid", slot, "roll", 58 + int(ramp * 42)))
+    if gap:
+        hits = [h for h in hits if h.slot != _GAP_SLOT]
     return BarDeal(global_bar=global_bar, is_fill=fill, hits=tuple(hits))
 
 

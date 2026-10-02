@@ -683,3 +683,181 @@ def test_no_hook_and_no_sub_when_sparsity_takes_them_out():
     assert {"hook", "sub"} <= layers(0.2)
     assert "hook" not in layers(0.55) and "sub" in layers(0.55)         # the hook leaves first
     assert not {"hook", "sub"} & layers(0.70)
+
+
+# ---------------------------------------------------------------------------
+# J9 - drops are subtraction
+# ---------------------------------------------------------------------------
+
+LOW_END_OUT_STEPS = 20              # 1.25 bars; reference: a median 1.2 bars
+
+
+def _drums(bank) -> list:
+    return sorted((int(e.musical_step), e.layer, e.velocity) for e in bank.all_events()
+                  if e.layer in DRUM_LAYERS)
+
+
+def _before_drop(index: int, seed: int = 1, **extra):
+    return _bank(index, seed, phrases_until_drop=0, **extra)
+
+
+def _drop(index: int, seed: int = 1, **extra):
+    return _bank(index, seed, is_drop_phrase=True, **extra)
+
+
+def _plain_approaches():
+    """(seed, index) of banks whose drop has neither a roll nor a gap: the default."""
+    return [(seed, index) for seed in range(1, 7) for index in range(8)
+            if not any(e.reason == "jungle_roll" for e in _before_drop(index, seed).all_events())
+            and not jungle.drop_has_gap(seed, (index + 1) * 16)]
+
+
+def test_before_a_drop_the_break_keeps_running_at_full_density():
+    """Reference: 82% of drops are set up by the break running on while the low end is out."""
+    plain = _plain_approaches()
+    assert len(plain) >= 20
+    for seed, index in plain:
+        assert _drums(_before_drop(index, seed)) == _drums(_bank(index, seed))
+    # and with a roll or a gap, every bar but the last is still the steady bank's
+    for seed in range(1, 7):
+        for index in range(8):
+            before = [d for d in _drums(_before_drop(index, seed)) if d[0] < 240]
+            steady = [d for d in _drums(_bank(index, seed)) if d[0] < 240]
+            assert before == steady
+
+
+def test_before_a_drop_the_low_end_is_out_for_about_a_bar():
+    for seed in range(1, 7):
+        for index in range(8):
+            sub = [e for e in _before_drop(index, seed).all_events() if e.layer == "sub"]
+            assert sub                                                  # it was there to take away
+            out_from = 256 - LOW_END_OUT_STEPS
+            assert all(e.musical_step < out_from for e in sub)
+            for e in sub:                                               # and nothing rings into the hole
+                assert e.musical_step + e.duration / BEAT * 4 <= out_from + 0.05
+            # until then the sub is the steady bank's
+            steady = [(e.musical_step, e.note) for e in _bank(index, seed).all_events()
+                      if e.layer == "sub" and e.musical_step < out_from]
+            assert [(e.musical_step, e.note) for e in sub] == steady
+    assert LOW_END_OUT_STEPS / 16 == pytest.approx(1.2, abs=0.1)
+
+
+def test_no_riser_no_build_and_nothing_withheld_before_a_drop():
+    """Reference: 0 risers in 22 drops. The other archetypes withhold and compress here."""
+    for seed in (1, 2, 3):
+        for index in range(4):
+            events = _before_drop(index, seed).all_events()
+            assert {e.layer for e in events} <= set(DRUM_LAYERS) | {"sub", "hook"}
+            # hats do not thin towards the drop and the hook is not withheld
+            hats = lambda bank, lo, hi: sum(e.layer == "hat" and lo <= _bar(e) < hi for e in bank.all_events())
+            assert hats(_before_drop(index, seed), 8, 15) == hats(_bank(index, seed), 8, 15)
+            hook = lambda bank: [(e.musical_step, e.note) for e in bank.all_events() if e.layer == "hook"]
+            assert hook(_before_drop(index, seed)) == hook(_bank(index, seed))
+    # level does not climb into the drop: over many approaches the last four bars are as loud
+    # as the four before them, and no busier
+    late, early = [], []
+    for seed, index in _plain_approaches():
+        events = [e for e in _before_drop(index, seed).all_events() if e.layer in DRUM_LAYERS]
+        late.extend(e.velocity for e in events if _bar(e) >= 12)
+        early.extend(e.velocity for e in events if 8 <= _bar(e) < 12)
+    assert mean(late) == pytest.approx(mean(early), abs=2)
+    assert len(late) / len(early) == pytest.approx(1.0, abs=0.06)
+
+
+def test_a_roll_before_about_a_quarter_of_drops_and_a_gap_of_one_sixteenth_before_about_a_quarter():
+    """Reference: rolls before 27% of drops; a gap before 27%, median 80 ms = one 16th."""
+    rolls = gaps = drops = 0
+    for seed in range(1, 21):
+        for index in range(10):
+            drops += 1
+            events = _before_drop(index, seed).all_events()
+            last_bar = [e for e in events if e.layer in DRUM_LAYERS and _bar(e) == 15]
+            roll = [e for e in last_bar if e.reason == "jungle_roll"]
+            if roll:
+                rolls += 1
+                assert min(_slot(e) for e in roll) >= 8                 # half a bar, not a build
+                velocities = [e.velocity for e in sorted(roll, key=_slot)]
+                assert velocities == sorted(velocities) and max(velocities) < 118
+            if jungle.drop_has_gap(seed, (index + 1) * 16):
+                gaps += 1
+                assert 15 not in {_slot(e) for e in last_bar}           # one 16th of silence...
+                assert {12, 13, 14} & {_slot(e) for e in last_bar}      # ...and no more than that
+            assert {0, 10} <= {_slot(e) for e in last_bar if e.layer == "kick"}
+            assert {4, 12} <= {_slot(e) for e in last_bar if e.layer == "snare"}
+    assert rolls / drops == pytest.approx(0.27, abs=0.08)
+    assert gaps / drops == pytest.approx(0.27, abs=0.08)
+
+
+def test_the_drop_bar_has_fewer_onsets_than_a_groove_bar():
+    """Reference: 21 band-onsets in a drop bar against 32 in a groove bar (0.66)."""
+    first, groove = [], []
+    for seed in range(1, 13):
+        for index in range(6):
+            per_bar = defaultdict(int)
+            for step, _, _ in _drums(_drop(index, seed)):
+                per_bar[step // 16] += 1
+            first.append(per_bar[0])
+            groove.extend(per_bar[b] for b in range(1, 16))
+            events = _drop(index, seed).all_events()
+            assert {0, 10} <= {_slot(e) for e in events if e.layer == "kick" and _bar(e) == 0}
+            assert {4, 12} <= {_slot(e) for e in events if e.layer == "snare" and _bar(e) == 0}
+    assert mean(first) / mean(groove) == pytest.approx(0.66, abs=0.12)
+
+
+def test_the_drop_is_the_bass_and_there_is_no_burst():
+    """Reference: sub +10 dB, total level +2.6 dB; everything arrives on bar 1, the bassline on bar 2."""
+    for seed in (1, 2, 3, 4):
+        for index in range(4):
+            drop, steady = _drop(index, seed), _bank(index, seed)
+            sub = [e for e in drop.all_events() if e.layer == "sub"]
+            first_bar = [e for e in sub if _bar(e) == 0]
+            assert len(first_bar) == 1                                  # one held note...
+            note = first_bar[0]
+            assert note.musical_step == 0 and note.note == _FUNDAMENTAL  # ...on the fundamental
+            assert 2.0 <= note.duration / BEAT <= 4.0
+            assert note.velocity == max(e.velocity for e in sub)        # the sub is the event
+            # the bassline proper from bar 2, and the break from bar 2, are the steady bank's
+            later = lambda bank, layers: sorted((e.musical_step, e.layer, e.note, e.velocity)
+                                                for e in bank.all_events()
+                                                if e.layer in layers and _bar(e) >= 1)
+            assert later(drop, {"sub"}) == later(steady, {"sub"})
+            assert later(drop, set(DRUM_LAYERS)) == later(steady, set(DRUM_LAYERS))
+            # no burst: no drum in the drop bar is louder than the same drum in a groove bar
+            for layer in ("kick", "snare", "hat"):
+                loudest = lambda bank, bars: max((e.velocity for e in bank.all_events()
+                                                  if e.layer == layer and _bar(e) in bars), default=0)
+                assert loudest(drop, {0}) <= loudest(steady, set(range(1, 16)))
+
+
+def test_emphasis_and_release_do_not_reach_jungle():
+    """A caller's drop dims (release 1, emphasis 1) are the other archetypes' burst: ignored here."""
+    key = lambda e: (e.time, e.layer, e.note, e.velocity, e.duration)
+    burst = generate_bank(0, Dimensions(0.30, 0.2, 0.2, 1.0, 1.0), signature_rhythm=_sr(),
+                          heat=0.9, archetype="jungle", is_drop_phrase=True)
+    plain = generate_bank(0, Dimensions(0.30, 0.2, 0.2, 0.0, 0.0), signature_rhythm=_sr(),
+                          heat=0.3, archetype="jungle", is_drop_phrase=True)
+    assert sorted(map(key, burst.all_events())) == sorted(map(key, plain.all_events()))
+
+
+# ---------------------------------------------------------------------------
+# J10 - breakdowns are brighter and busier
+# ---------------------------------------------------------------------------
+
+def test_a_breakdown_is_busier_and_no_quieter():
+    """Reference: with the bass out, onset density goes up (+0.6 a bar) and level falls only 1.3 dB."""
+    groove, breakdown, groove_velocity, breakdown_velocity = [], [], [], []
+    for seed in range(1, 13):
+        for index in range(4):
+            down = _bank(index, seed, sparsity=0.70)
+            assert not any(e.layer in ("sub", "hook") for e in down.all_events())
+            assert {0, 10} <= {_slot(e) for e in down.all_events() if e.layer == "kick" and _bar(e) == 7}
+            groove.append(len(_drums(_bank(index, seed))) / 16)
+            breakdown.append(len(_drums(down)) / 16)
+            groove_velocity.extend(v for _, _, v in _drums(_bank(index, seed)))
+            breakdown_velocity.extend(v for _, _, v in _drums(down))
+    assert 0.2 <= mean(breakdown) - mean(groove) <= 1.5
+    assert mean(breakdown_velocity) == pytest.approx(mean(groove_velocity), abs=2)
+    # the extra is on top: kicks do not multiply
+    kicks = lambda sparsity: mean(sum(l == "kick" for _, l, _ in _drums(_bank(i, s, sparsity=sparsity)))
+                                  for s in range(1, 13) for i in range(4))
+    assert kicks(0.70) <= kicks(0.55) + 1e-9

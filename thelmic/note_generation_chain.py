@@ -106,6 +106,10 @@ def generate_bank(
             forced_archetype=forced,
         )
 
+    # JUNGLE has no phrase arc: nothing is withheld before a drop and nothing
+    # bursts after it (musical_rules.md, Jungle - Measured Rules J9).
+    is_jungle = context is not None and context.active_archetype == RhythmicArchetype.JUNGLE
+
     _response_stream.reset()
     resolver = ResolveStream()
     phrases  = [Phrase(phrase_index=index) for index in range(PHRASES_PER_BANK)]
@@ -133,11 +137,17 @@ def generate_bank(
             )
             if dims is not None else None
         )
-        # Merge base dims with arc offsets
-        frame_dims = _apply_arc(dims, arc) if dims is not None else None
-        result = resolver.resolve(frame, intents_for_frame(
-            frame, context, frame_dims, signature_rhythm, arc, ant,
-        ))
+        if is_jungle:
+            intents = _jungle_intents_for_frame(
+                frame, context, dims, signature_rhythm, phrases_until_drop,
+            )
+        else:
+            # Merge base dims with arc offsets
+            frame_dims = _apply_arc(dims, arc) if dims is not None else None
+            intents = intents_for_frame(
+                frame, context, frame_dims, signature_rhythm, arc, ant,
+            )
+        result = resolver.resolve(frame, intents)
         for event in result.events:
             midi_event = _resolved_to_midi_event(event, frame)
             phrases[(midi_event.bar_index - 1) // BARS_PER_PHRASE].events.append(midi_event)
@@ -240,16 +250,18 @@ def _jungle_intents_for_frame(
     context: PhraseContext,
     dims: Dimensions,
     sr: SignatureRhythm,
+    phrases_until_drop: int = 8,
 ) -> tuple[Intent, ...]:
-    """The JUNGLE rhythm section (musical_rules.md, "Jungle - measured rules").
+    """The JUNGLE rhythm section (musical_rules.md, "Jungle - Measured Rules").
 
     A break, a clean sub and short hooks. No mid bass (the sub is the bass, as
     in GABBER), no call and response, no drones: the reference has no sustained
-    voice and no riser.
+    voice and no riser. dims are the caller's own: no arc is applied.
     """
+    drop = context.is_drop_phrase
     return (
-        *_jungle_break.intents_for_frame(frame, dims, sr),
-        *_jungle_sub.intents_for_frame(frame, dims, sr),
+        *_jungle_break.intents_for_frame(frame, dims, sr, drop, phrases_until_drop),
+        *_jungle_sub.intents_for_frame(frame, dims, sr, drop, phrases_until_drop),
         *_jungle_hook.intents_for_frame(frame, dims, sr),
     )
 

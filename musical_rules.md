@@ -2224,8 +2224,8 @@ snare: ....x.......x...
   (README, "Inside the bar"; rhythm section 1).
 - Inside a section the spine is certain: every bar, 100%, whatever sparsity,
   pressure or drop proximity say (scene rules, "The spine": "required and
-  prominent in every scene"). The only bar that may lose a spine hit is the
-  one 16th of gap before a drop (J9).
+  prominent in every scene"). Not even the 16th of gap before a drop (J9)
+  takes a spine hit: it is the last 16th of the bar.
 - No kick on step 12 under the snare. No four-on-the-floor: 0% of the
   reference (rhythm section 10).
 - The spine is prominent: it is the loudest thing in its lane.
@@ -2267,7 +2267,7 @@ Chance that a 16th slot carries at least one drum hit:
   section 10.3).
 - Two signature hits never sit side by side in one lane, and a signature
   snare beside a spine snare is a drag: "louder than a ghost but softer than
-  the backbeat" (brief section 1).
+  the backbeat" (brief section 1). A backbeat gets one drag, not one each side.
 - The reference's "26 onsets a bar" counts band onsets in audio, where one
   snare hit is an onset in three bands. The engine deals drum hits: about 16 a
   bar on about 10 of the 16 slots (reference: 11 of 16 sixteenths in use,
@@ -2409,6 +2409,19 @@ Chance that a 16th slot carries at least one drum hit:
 - No riser: 0 of 22 drops (drops section 2).
 - Rolls before 27% of drops; a gap before 27%, and then a median of 80 ms,
   one 16th (drops sections 2 and 3). So by default there is no roll and no gap.
+  Each is dealt per drop at 27%. A roll is 16th snares through the last half
+  bar, growing, under the spine snare's level. A gap is the last 16th before
+  the drop, silent in every lane.
+- The low end is out for the last 20 sixteenths before the drop: 1.25 bars.
+  "Low end" here is the sub: no note starts in the hole and none rings into
+  it. The kick keeps its place in the break; taking the kick's own low end out
+  (the reference's "high-passed break") is the instrument's job.
+- A caller marks the phrase before a drop with `phrases_until_drop=0` and the
+  drop with `is_drop_phrase=True`, as for every archetype. For JUNGLE neither
+  changes the break's density, and the dimensions' `release` and `emphasis`
+  are ignored. A caller that raises sparsity for the phrase before a drop
+  takes the hook (at 0.50) or the sub (at 0.65) out for the whole phrase,
+  which is not what the reference does.
 - The break is not thinned, compressed or dissolved on the way in: the
   Pre-Drop Anticipation Patterns and Percussive Removal rules above do not
   apply to JUNGLE.
@@ -2418,6 +2431,11 @@ Chance that a 16th slot carries at least one drum hit:
 - The drop bar has fewer onsets than a groove bar (21 band-onsets against 32,
   README, "Density"). The first bar of a drop often holds a single sub note
   before the bassline proper starts on bar 2 (drops section 4).
+- So in the first bar of a drop phrase everything that is neither spine nor
+  signature is dealt at half its chance, the sub holds one note on the
+  fundamental for 3 beats - its loudest note - and from bar 2 the break and the
+  riff are exactly what a steady phrase would have played. No velocity is
+  raised.
 
 ### J10 - Breakdowns
 
@@ -2426,6 +2444,10 @@ Chance that a 16th slot carries at least one drum hit:
   and busier").
 - So when the sub is out, the break does not thin and does not get quieter;
   it gets slightly busier on top.
+- The engine has no breakdown phase: the sub is out when sparsity reaches
+  0.65. From there every possible hit in the hat and snare lanes moves 4% of
+  the way to certain (about +0.6 hits a bar); the kick lane and every velocity
+  are unchanged.
 
 ### J11 - Nested clocks
 
@@ -2451,6 +2473,6 @@ Chance that a 16th slot carries at least one drum hit:
 | J6 | implemented. The pitch drop, the sine and the absence of a duck are published as `jungle.SUB_VOICE` for the instrument; the engine cannot make them | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J7 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J8 | implemented | `note_generation_chain.py` | `tests/test_jungle.py` |
-| J9 | not yet: a JUNGLE build or drop phrase plays as a steady one | | |
-| J10 | not yet | | |
+| J9 | implemented | `jungle.py`, `voices/jungle.py`, `note_generation_chain.py` | `tests/test_jungle.py` |
+| J10 | implemented, as far as notes go: "brighter" is the instrument's | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J11 | not yet | | |
