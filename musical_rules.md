@@ -2247,8 +2247,31 @@ Chance that a 16th slot carries at least one drum hit:
 
 - The deal is seeded: the same seed and the same bar number give the same
   bar. Chance here means "dealt from a seed", so the Determinism Contract holds.
-- Three lanes are dealt: low (kick), mid (snare and ghost snare), high (hat,
-  the 16th carrier). The chances above are for the slot, across lanes.
+- Three lanes are dealt independently: low (kick), mid (snare and ghost
+  snare), high (hat, the 16th carrier). The chances above are for the slot,
+  across lanes, which is how the scene rules state them. Per lane, on a slot
+  that is neither spine nor signature:
+
+  | lane | other 8th | odd 16th |
+  |---|---|---|
+  | high (hat) | 0.50 | 0.22 |
+  | mid (ghost snare) | 0.22 | 0.12 |
+  | low (kick) | 0.15 | 0.04 |
+  | any of them | 0.67 | 0.34 |
+
+- A hat rides a spine hit 80% of the time (reference high-band occupancy on
+  the beats: 0.74-0.87).
+- No kick on a snare slot and no kick a 16th either side of a spine kick
+  (brief, top mistake 10: fast double kicks at jungle tempo). That gives about
+  3 kicks a bar; the reference's break-kick sections run 2.4-3.5 (rhythm
+  section 10.3).
+- Two signature hits never sit side by side in one lane, and a signature
+  snare beside a spine snare is a drag: "louder than a ghost but softer than
+  the backbeat" (brief section 1).
+- The reference's "26 onsets a bar" counts band onsets in audio, where one
+  snare hit is an onset in three bands. The engine deals drum hits: about 16 a
+  bar on about 10 of the 16 slots (reference: 11 of 16 sixteenths in use,
+  README, "Density").
 - The odd 16ths stay mostly empty: "they are the 34% that keeps it from
   turning into a wall" (rhythm, "What this means", 2 and 10).
 - Sparsity does not thin the break (J10).
@@ -2270,6 +2293,14 @@ Chance that a 16th slot carries at least one drum hit:
 - Similarity is measured as in rhythm section 3: each bar is a 48-cell vector
   (16 slots x 3 lanes) and similarity is the Pearson correlation of two bars'
   vectors.
+- What carries over from the reference is the shape of the lag profile, not
+  its level. The reference's cells are band onsets in audio; the engine's are
+  drum hits, with a certain spine and impossible cells (no kick under a snare),
+  so every correlation sits about 0.17 higher. The rules to meet are therefore:
+  lag 1 equals the same-section random baseline (reference: 0.355 against
+  0.356); lag 4 is 0.131 above lag 1; lag 2 is 0.081 above lag 1.
+- For the same reason the reference's "15 of 48 cells change from bar to bar"
+  (of about 26 onsets) becomes about 10 of 48 here (of about 16 hits).
 
 ### J4 - Fills
 
@@ -2394,10 +2425,10 @@ Chance that a 16th slot carries at least one drum hit:
 |---|---|---|---|
 | J0 | implemented | `archetypes.py`, `note_generation_chain.py` | `tests/test_jungle.py` |
 | J1 | implemented | `archetypes.py`, `voices/jungle.py` | `tests/test_jungle.py` |
-| J2 | not yet: hats are fixed on the 8ths | | |
-| J3 | not yet | | |
-| J4 | not yet | | |
-| J5 | timing implemented; ghosts not yet | `voices/jungle.py` | `tests/test_jungle.py` |
+| J2 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
+| J3 | implemented, in one section: the group does not yet drift (reference lag 16: 0.389) | `jungle.py` | `tests/test_jungle.py` |
+| J4 | implemented | `jungle.py` | `tests/test_jungle.py` |
+| J5 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J6 | mid bass silent; the sub plays the table's two steps on one note | `voices/sub.py` | `tests/test_jungle.py` |
 | J7 | not yet: the hook window above still applies | | |
 | J8 | implemented | `note_generation_chain.py` | `tests/test_jungle.py` |

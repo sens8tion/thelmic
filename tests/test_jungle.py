@@ -201,3 +201,233 @@ def test_no_mid_bass_no_drones_no_call_and_response():
 def test_generation_is_reproducible():
     key = lambda e: (e.time, e.layer, e.note, e.velocity, e.duration)
     assert [key(e) for e in _bank(3).all_events()] == [key(e) for e in _bank(3).all_events()]
+
+
+# ---------------------------------------------------------------------------
+# Measurement harness for the dealt bars (J2-J5)
+# ---------------------------------------------------------------------------
+
+from functools import lru_cache
+from statistics import mean, median, pstdev
+
+from thelmic import jungle
+
+LANE_LAYERS = (("kick",), ("snare", "ghost_snare"), ("hat", "open_hat"))   # low / mid / high
+
+
+@lru_cache(maxsize=None)
+def _dealt_bars(seed: int, banks: int) -> tuple:
+    """The drum events of `banks` consecutive banks, one tuple of events per bar."""
+    bars = []
+    for index in range(banks):
+        per_bar = defaultdict(list)
+        for event in _bank(index, seed).all_events():
+            if event.layer in DRUM_LAYERS:
+                per_bar[_bar(event)].append(event)
+        bars.extend(tuple(per_bar[b]) for b in range(16))
+    return tuple(bars)
+
+
+def _cells(bar_events) -> tuple[int, ...]:
+    """A bar as rhythm.md section 3 measures it: 16 slots x 3 lanes = 48 cells."""
+    cells = [0] * 48
+    for event in bar_events:
+        lane = next(i for i, layers in enumerate(LANE_LAYERS) if event.layer in layers)
+        cells[lane * 16 + _slot(event)] = 1
+    return tuple(cells)
+
+
+def _is_fill(bar_events) -> bool:
+    return any(event.reason == "jungle_fill" for event in bar_events)
+
+
+# ---------------------------------------------------------------------------
+# J2 - every bar is dealt by chance from the section's distribution
+# ---------------------------------------------------------------------------
+
+_OCCUPANCY_SEEDS = range(1, 49)     # 48 sections, 32 bars of each
+
+
+def _occupancy_by_class() -> dict[str, float]:
+    seen = {"spine": [], "signature": [], "eighth": [], "odd": []}
+    for seed in _OCCUPANCY_SEEDS:
+        signature = jungle.section_for(seed, 0).signature_slots()
+        for bar_events in _dealt_bars(seed, 2):
+            slots = {_slot(e) for e in bar_events}
+            for slot in range(16):
+                name = ("spine" if slot in (0, 4, 10, 12) else "signature" if slot in signature
+                        else "odd" if slot % 2 else "eighth")
+                seen[name].append(slot in slots)
+    return {name: mean(hits) for name, hits in seen.items()}
+
+
+def test_slot_occupancy_matches_the_research_by_class():
+    """Spine 100%, signature hits 80-100%, the other 8ths about 67%, the odd 16ths about 34%."""
+    occupancy = _occupancy_by_class()
+    assert occupancy["spine"] == 1.0
+    assert 0.80 <= occupancy["signature"] <= 1.0
+    assert occupancy["eighth"] == pytest.approx(0.67, abs=0.05)
+    assert occupancy["odd"] == pytest.approx(0.34, abs=0.05)
+
+
+def test_each_section_has_two_to_four_signature_hits_that_land_in_most_bars():
+    counts = set()
+    for seed in range(1, 13):
+        section = jungle.section_for(seed, 0)
+        counts.add(len(section.signature))
+        assert 2 <= len(section.signature) <= 4
+        assert not section.signature_slots() & {0, 4, 10, 12}
+        bars = _dealt_bars(seed, 16)
+        for hit in section.signature:
+            landed = mean(hit.slot in {_slot(e) for e in bar_events} for bar_events in bars)
+            assert 0.76 <= landed <= 1.0, (seed, hit, landed)       # 80-100%, less 256 bars of noise
+    assert len(counts) > 1                                          # sections differ in how many
+
+
+def test_sections_differ_in_where_their_signature_hits_fall():
+    assert len({jungle.section_for(seed, 0).signature_slots() for seed in range(1, 13)}) >= 8
+
+
+def test_no_bar_is_read_from_a_table():
+    """Within a section the bars are all dealt: nearly every bar is its own."""
+    for seed in (1, 2, 3):
+        patterns = {_cells(b) for b in _dealt_bars(seed, 16)}
+        assert len(patterns) >= 250             # of 256
+
+
+def test_the_deal_is_seeded():
+    assert _cells(_dealt_bars(1, 1)[5]) != _cells(_dealt_bars(2, 1)[5])
+    fresh = generate_bank(3, _dims(), signature_rhythm=_sr(7), heat=0.6, archetype="jungle")
+    again = generate_bank(3, _dims(), signature_rhythm=_sr(7), heat=0.6, archetype="jungle")
+    key = lambda e: (e.time, e.layer, e.note, e.velocity, e.duration)
+    assert [key(e) for e in fresh.all_events()] == [key(e) for e in again.all_events()]
+
+
+def test_kicks_stay_break_kick_sparse():
+    """About 2-3.5 kicks a bar (rhythm.md 10.3, break-kick sections), never beside a spine kick."""
+    per_bar = [sum(e.layer == "kick" for e in b) for seed in range(1, 13) for b in _dealt_bars(seed, 16)]
+    assert 2.0 <= mean(per_bar) <= 3.5
+    for seed in range(1, 13):
+        for bar_events in _dealt_bars(seed, 16):
+            assert not {_slot(e) for e in bar_events if e.layer == "kick"} & {1, 4, 9, 11, 12, 15}
+
+
+# ---------------------------------------------------------------------------
+# J3 - neighbouring bars do not match; the 4-bar group returns
+# ---------------------------------------------------------------------------
+
+_LAG_SEEDS = range(1, 13)           # 12 sections, 256 bars of each
+
+
+@lru_cache(maxsize=None)
+def _lag_profile() -> dict:
+    lags = {1: [], 2: [], 3: [], 4: [], 8: []}
+    baseline, changed, near_copies, identical = [], [], 0, 0
+    for seed in _LAG_SEEDS:
+        cells = [_cells(b) for b in _dealt_bars(seed, 16)]
+        for lag, values in lags.items():
+            values.extend(jungle.similarity(cells[i], cells[i + lag]) for i in range(len(cells) - lag))
+        # two bars from the same section, far apart and at unrelated places in their groups
+        baseline.extend(jungle.similarity(cells[i], cells[(i * 7 + 37) % len(cells)])
+                        for i in range(0, len(cells), 3))
+        for a, b in zip(cells, cells[1:]):
+            changed.append(sum(x != y for x, y in zip(a, b)))
+            near_copies += jungle.similarity(a, b) > 0.8
+            identical += a == b
+    pairs = len(changed)
+    return {"lag": {k: mean(v) for k, v in lags.items()}, "baseline": mean(baseline),
+            "changed": median(changed), "near_copies": near_copies / pairs, "identical": identical}
+
+
+def test_neighbouring_bars_are_as_unalike_as_random_ones():
+    """Reference: lag 1 0.355 against a same-section random baseline of 0.356."""
+    profile = _lag_profile()
+    assert profile["lag"][1] == pytest.approx(profile["baseline"], abs=0.03)
+    assert profile["lag"][3] == pytest.approx(profile["baseline"], abs=0.03)
+
+
+def test_the_four_bar_group_returns():
+    """Reference: lag 4 is 0.131 above lag 1 (0.486 against 0.355), lag 2 is 0.081 above (0.436)."""
+    lag = _lag_profile()["lag"]
+    assert lag[4] - lag[1] == pytest.approx(0.131, abs=0.04)
+    assert lag[2] - lag[1] == pytest.approx(0.081, abs=0.04)
+    assert lag[1] < lag[2] < lag[4]
+    assert lag[8] > lag[1] + 0.08               # reference: lag 8 0.465
+
+
+def test_the_group_returns_similar_not_identical():
+    """Reference: 2% of bars are near-copies (r > 0.8) of the bar before; no bar repeats exactly."""
+    profile = _lag_profile()
+    assert profile["near_copies"] <= 0.04
+    assert profile["identical"] == 0
+    for seed in (1, 2, 3):
+        cells = [_cells(b) for b in _dealt_bars(seed, 16)]
+        same_four_bars_later = mean(cells[i] == cells[i + 4] for i in range(len(cells) - 4))
+        assert same_four_bars_later <= 0.02
+
+
+def test_bars_change_about_a_third_of_what_they_hold():
+    """Reference: a median 15 of 48 band cells change from bar to bar, of about 26 onsets.
+    The engine deals drum hits, not band onsets - about 16 a bar - so fewer cells can change;
+    the share is the same order: more than half as many cells change as there are hits."""
+    profile = _lag_profile()
+    hits = mean(len(b) for seed in _LAG_SEEDS for b in _dealt_bars(seed, 16))
+    assert 8 <= profile["changed"] <= 15
+    assert profile["changed"] / hits >= 0.5     # reference: 15 / 26 = 0.58
+
+
+# ---------------------------------------------------------------------------
+# J4 - fills
+# ---------------------------------------------------------------------------
+
+def _fill_census():
+    bars = [(i, b) for seed in range(1, 25) for i, b in enumerate(_dealt_bars(seed, 16))]
+    return bars, [(i, b) for i, b in bars if _is_fill(b)], [(i, b) for i, b in bars if not _is_fill(b)]
+
+
+def test_a_fill_lands_on_the_four_bar_line_about_one_time_in_four():
+    """Reference: 6.5% of bars are fills, one every 15.5 bars: 1 opportunity in 4."""
+    bars, fills, _ = _fill_census()
+    assert all(i % 4 == 3 for i, _ in fills)
+    assert len(fills) / len(bars) == pytest.approx(0.065, abs=0.015)
+    assert len(fills) / (len(bars) / 4) == pytest.approx(0.25, abs=0.06)
+
+
+def test_a_fill_is_a_slightly_busier_brighter_bar_not_a_roll():
+    """Reference: 1.23x the onsets of a normal bar; high band 1.30x, low band 1.06x."""
+    _, fills, normal = _fill_census()
+    count = lambda rows, layers: mean(sum(e.layer in layers for e in b) for _, b in rows)
+    assert count(fills, DRUM_LAYERS) / count(normal, DRUM_LAYERS) == pytest.approx(1.23, abs=0.10)
+    assert count(fills, {"kick"}) / count(normal, {"kick"}) == pytest.approx(1.0, abs=0.12)
+    top = {"hat", "open_hat", "snare", "ghost_snare"}
+    assert count(fills, top) / count(normal, top) > 1.2
+    for _, bar_events in fills:
+        assert all(_slot(e) >= 8 for e in bar_events if e.reason == "jungle_fill")
+        assert {0, 10} <= {_slot(e) for e in bar_events if e.layer == "kick"}
+        assert {4, 12} <= {_slot(e) for e in bar_events if e.layer == "snare"}
+        snare_lane = {_slot(e) for e in bar_events if e.layer in ("snare", "ghost_snare")}
+        assert len(snare_lane & set(range(8, 16))) < 8          # not a roll of 16ths
+    assert mean(len({_slot(e) for e in b}) for _, b in fills) < 14      # nor a wall of them
+
+
+# ---------------------------------------------------------------------------
+# J5 - ghosts and dynamics
+# ---------------------------------------------------------------------------
+
+def test_ghost_snares_are_quiet_varied_and_off_the_spine():
+    ghosts = [e for seed in range(1, 13) for b in _dealt_bars(seed, 16) for e in b
+              if e.layer == "ghost_snare"]
+    bars = 12 * 256
+    assert 1.0 <= len(ghosts) / bars <= 3.0                     # a ghost line, not a roll
+    velocities = [e.velocity for e in ghosts]
+    assert max(velocities) < 60                                 # the spine snare is 118
+    assert len(set(velocities)) >= 12 and pstdev(velocities) > 4
+    assert not {_slot(e) for e in ghosts} & {0, 4, 10, 12}
+    assert all(e.structural_authority is False for e in ghosts)
+
+
+def test_the_odd_sixteenths_sit_under_the_eighths():
+    hats = [e for seed in range(1, 13) for b in _dealt_bars(seed, 16) for e in b if e.layer == "hat"]
+    odd = mean(e.velocity for e in hats if _slot(e) % 2)
+    even = mean(e.velocity for e in hats if _slot(e) % 2 == 0)
+    assert even - odd >= 8                                      # "off-16ths 12 softer"

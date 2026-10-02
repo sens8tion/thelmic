@@ -245,7 +245,7 @@ def _jungle_intents_for_frame(
     in GABBER), no call and response, no drones: the reference has no sustained
     voice and no riser.
     """
-    intents: list[Intent] = [*_jungle_break.intents_for_frame(frame)]
+    intents: list[Intent] = [*_jungle_break.intents_for_frame(frame, sr)]
     intents.extend(_sub_stream.intents_for_frame(frame, context, dims, sr))
     if dims.sparsity < 0.50 and (frame.bar_index - 1) in _HOOK_BARS:
         intents.extend(_hook_stream.intents_for_frame(frame, context, dims, sr))
