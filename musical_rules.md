@@ -2358,6 +2358,17 @@ Chance that a 16th slot carries at least one drum hit:
 - A riff repeats as written: unlike the break, it is not re-dealt each bar
   (bass section 11: "The bass lands regularly and gives the track its
   structure").
+- The riff lives on a home note above the fundamental - the minor third, the
+  fourth or the fifth - and a neighbour one scale step away, and falls to the
+  fundamental; it never goes below it. The fundamental is an octave under the
+  signature rhythm's root, as for every archetype's sub.
+- The riff's last bar may be a one-bar hole: the reference's bass is out for a
+  median of 1 bar at a time (bass section 5).
+- The reference counts 34.6% of transitions as repeats. With notes a beat
+  apart and 0.9 changes a bar, about 70% of the engine's transitions are
+  repeats: the two reference numbers come from different detectors and cannot
+  both be met. The change rate is the one kept.
+- The sub leaves when sparsity reaches 0.65, as the other archetypes' sub does.
 
 ### J7 - Hooks
 
@@ -2375,6 +2386,14 @@ Chance that a 16th slot carries at least one drum hit:
 - The hook window rule above (bars 0, 1, 4, 12 of 16) does not apply to
   JUNGLE. Neither does call and response: the reference does not answer a call
   with the sub (hooks, "Call and response" verdict).
+- Placement in an 8-bar phrase: bars 4, 5 and 8 are the busiest (hooks, "Call
+  and response" verdict 2). Bars 4 and 8 share a shape that returns every 4
+  bars; bar 5 has one that returns every 8. Each is heard three times and
+  replaced. A one-off hook lands in another bar about 6 phrases in 10: most
+  shapes in the reference (61%) never come back.
+- One hook to a bar, of one to three notes; the last may be a dyad (a median
+  of 2 pitch classes sound at once in the reference).
+- The hook leaves when sparsity reaches 0.50, before the sub.
 
 ### J8 - No sustained voices
 
@@ -2429,8 +2448,8 @@ Chance that a 16th slot carries at least one drum hit:
 | J3 | implemented, in one section: the group does not yet drift (reference lag 16: 0.389) | `jungle.py` | `tests/test_jungle.py` |
 | J4 | implemented | `jungle.py` | `tests/test_jungle.py` |
 | J5 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
-| J6 | mid bass silent; the sub plays the table's two steps on one note | `voices/sub.py` | `tests/test_jungle.py` |
-| J7 | not yet: the hook window above still applies | | |
+| J6 | implemented. The pitch drop, the sine and the absence of a duck are published as `jungle.SUB_VOICE` for the instrument; the engine cannot make them | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
+| J7 | implemented | `jungle.py`, `voices/jungle.py` | `tests/test_jungle.py` |
 | J8 | implemented | `note_generation_chain.py` | `tests/test_jungle.py` |
 | J9 | not yet: a JUNGLE build or drop phrase plays as a steady one | | |
 | J10 | not yet | | |

@@ -1,6 +1,7 @@
-"""Jungle - bars dealt by chance from a section's distribution.
+"""Jungle - bars dealt by chance from a section's distribution, the sub's
+riff, and where the hooks go.
 
-Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J5).
+Rules: musical_rules.md, "Jungle - Measured Rules" (J2-J7).
 
 The other archetypes read a bar from a step table. A jungle bar is dealt: a
 section holds a chance for every 16th slot in each of three lanes, and every
@@ -11,6 +12,9 @@ nearly so, the other 8th positions land about two times in three and the odd
 A deal is seeded. The same seed and the same bar number always give the same
 bar, so "chance" here is the Determinism Contract's kind: no state, no clock,
 nothing drawn at run time.
+
+The sub is the opposite case: a riff is written once, from the seed, and
+repeats as written. Hooks are short shapes that come back about three times.
 
 This module decides which slots sound, and how hard. It makes no events; the
 voices in thelmic/voices/jungle.py do that.
@@ -220,8 +224,11 @@ def is_fill_bar(seed: int, global_bar: int) -> bool:
 
 
 @lru_cache(maxsize=4096)
-def deal_bar(seed: int, global_bar: int) -> BarDeal:
-    """Deal one bar. global_bar counts from the start of the piece."""
+def deal_bar(seed: int, global_bar: int, under_hook: bool = False) -> BarDeal:
+    """Deal one bar. global_bar counts from the start of the piece.
+
+    under_hook: a hook sounds in this bar, so the kick's in-between hits thin (J7).
+    """
     section = section_for(seed, section_index(seed, global_bar))
     signed = {(hit.lane, hit.slot) for hit in section.signature}
     lean = section.lean[global_bar % GROUP_BARS]
@@ -233,6 +240,8 @@ def deal_bar(seed: int, global_bar: int) -> BarDeal:
             p = lean[lane_i][slot]
             if p <= 0.0:
                 continue
+            if under_hook and lane == "low" and p < 1.0 and (lane, slot) not in signed:
+                p *= _LOW_UNDER_HOOK
             u = _unit(seed, _T_DEAL, global_bar, lane_i, slot)
             if slot in SPINE.get(lane, ()):
                 kind = "spine"
@@ -291,3 +300,324 @@ def similarity(a: tuple[int, ...], b: tuple[int, ...]) -> float:
     if var_a == 0 or var_b == 0:
         return 0.0
     return cov / (var_a * var_b) ** 0.5
+# ===========================================================================
+# The sub riff (J6)
+# ===========================================================================
+#
+# Unlike the break, a riff is written once and repeats as written: "the bass
+# lands regularly and gives the track its structure" (bass.md section 11).
+
+BEATS_PER_BAR = 4
+SUB_MAX_BEATS = 4.0          # nothing in the reference is held past 1.4 bars; the rule caps at a bar
+
+# What the instrument has to do to a sub note; the engine can only say so.
+# bass.md sections 6, 7 and 9.4; archetypes.md, "Bass".
+SUB_VOICE = {
+    "waveform":              "sine",    # fundamental 16.6 dB over its 2nd harmonic
+    "pitch_drop_semitones":  30,        # every note starts this far above its pitch...
+    "pitch_drop_tau_ms":     12,        # ...and falls with this time constant
+    "pitch_tail_semitones":  1,         # then a slow tail of about a semitone
+    "pitch_tail_settle_ms":  175,       # settling over 150-200 ms
+    "amp_attack_ms":         1,         # hard attack, no click layer
+    "sidechain_db":          0.0,       # not ducked under the kick (measured: -0.5 dB)
+    "kick_body_hz":          (60, 250), # kick and sub share the room by register:
+    "sub_below_hz":          60,        # 65.6% of the sub's power is below this
+}
+
+_T_RIFF, _T_FALL = 10, 11
+
+# Riff lengths: 4 bars 39% of the time, 8 bars 31% (scene rules) -> 56 : 44.
+_RIFF_PERIODS = ((4, 0.56), (8, 1.0))
+# How long a riff is held before it changes, in bars. Reference: median 11,
+# interquartile 7-15, changes on the phrase grid.
+_RIFF_HOLD = {
+    4: ((8, 0.50), (12, 0.80), (16, 1.0)),
+    8: ((8, 0.25), (16, 1.0)),
+}
+# About one phrase in two or three ends on the fundamental and a gap.
+FALL_CHANCE = 0.40
+
+# One-bar figures on the 8th grid: (slot, "S" short or "H" held). Attacks sit
+# at the front of the bar, on the 1 and the 2&; shorts come in pairs and lead
+# somewhere ("da-da-DUM"); pushes into beat 4 come from the 3&.
+_FIGURES = {
+    "anchors":         ((0, "H"), (6, "H")),                         # 1 and 2&
+    "anchors+4":       ((0, "H"), (6, "H"), (12, "H")),
+    "da-da-dum+3&":    ((0, "S"), (2, "S"), (4, "H"), (10, "H")),
+    "da-da-dum+4":     ((0, "S"), (2, "S"), (4, "H"), (12, "H")),
+    "push":            ((0, "H"), (6, "H"), (10, "S"), (12, "H")),   # 3& into 4
+    "one-two-push":    ((0, "H"), (4, "H"), (10, "S"), (12, "H")),
+    "pickup":          ((2, "S"), (4, "H"), (10, "H")),              # 1& into 2
+    "one-two-three":   ((0, "H"), (4, "H"), (8, "H")),
+    "one-two-four":    ((0, "H"), (4, "H"), (12, "H")),
+    "one-two-3&":      ((0, "H"), (4, "H"), (10, "H")),
+    "one-three-four":  ((0, "H"), (8, "H"), (12, "H")),
+    "one-two":         ((0, "H"), (4, "H")),
+    "one-four":        ((0, "H"), (12, "H")),
+    "one":             ((0, "H"),),
+    "rest":            (),                                           # a one-bar hole
+}
+# Bar 1 of a phrase is the busiest, bar 4 the thinnest (bass.md 13.3). Notes
+# start about a beat apart, with holes: most gaps are a beat or less, a few
+# are most of a bar.
+_FIGURES_FIRST  = (("da-da-dum+4", 0.30), ("one-two-push", 0.55), ("push", 0.75),
+                   ("da-da-dum+3&", 1.0))
+_FIGURES_MIDDLE = (("one-two-four", 0.22), ("one-two-three", 0.40), ("one-three-four", 0.55),
+                   ("anchors+4", 0.70), ("one-two-3&", 0.82), ("pickup", 0.90), ("anchors", 1.0))
+# The bass drops out often and briefly: a one-bar hole is the reference's
+# normal punctuation (bass.md section 5).
+_FIGURES_LAST   = (("rest", 0.15), ("one", 0.40), ("one-four", 0.65), ("one-two", 0.85),
+                   ("anchors", 1.0))
+
+# Lengths in beats. Median 0.60; shorts are a 16th to an 8th; the time-weight
+# sits at 1-1.5 beats. A note is also cut by the next one.
+_SHORT_BEATS = ((0.25, 0.30), (0.40, 0.70), (0.50, 1.0))
+_HELD_BEATS  = ((0.50, 0.15), (0.60, 0.45), (0.75, 0.60), (1.00, 0.78), (1.50, 0.92), (2.00, 1.0))
+
+# Semitones above the fundamental. A riff lives on a home note - the minor
+# third, the fourth or the fifth - and a neighbour one scale step away, so its
+# moves are repeats and 1-2 semitone steps; it falls to the fundamental.
+_RIFF_HOMES = ((7, 0.40), (5, 0.70), (3, 1.0))
+_NEIGHBOURS = {7: (5, 8), 5: (3, 7), 3: (2, 5)}
+_BAR_MOVE_CHANCE  = 0.50     # the bar's note differs from the bar before's
+_LATE_MOVE_CHANCE = 0.22     # the bar's last held note steps to the other note
+
+
+@dataclass(frozen=True)
+class SubNote:
+    slot:     int
+    offset:   int      # semitones above the fundamental
+    beats:    float
+    velocity: int
+    kind:     str      # "riff" | "fall"
+
+
+@dataclass(frozen=True)
+class Riff:
+    index:     int
+    start_bar: int
+    held_bars: int
+    period:    int                                  # 4 or 8 bars
+    fall_slot: int
+    bars:      tuple[tuple[SubNote, ...], ...]      # one tuple of notes per bar of the period
+
+
+def _pick(table, u: float):
+    for value, ceiling in table:
+        if u < ceiling:
+            return value
+    return table[-1][0]
+
+
+_RIFF_STARTS: dict[int, list[tuple[int, int, int]]] = {}   # seed -> [(start_bar, held, period)]
+
+
+def _riff_span(seed: int, global_bar: int) -> tuple[int, int, int, int]:
+    """(index, start_bar, held_bars, period) of the riff sounding in this bar.
+
+    Spans are laid end to end from bar 0. The list is only a memo: it is a pure
+    function of the seed.
+    """
+    spans = _RIFF_STARTS.setdefault(seed, [])
+    while not spans or spans[-1][0] + spans[-1][1] <= global_bar:
+        index = len(spans)
+        start = spans[-1][0] + spans[-1][1] if spans else 0
+        period = _pick(_RIFF_PERIODS, _unit(seed, _T_RIFF, index, 0))
+        held = _pick(_RIFF_HOLD[period], _unit(seed, _T_RIFF, index, 1))
+        spans.append((start, held, period))
+    low, high = 0, len(spans) - 1
+    while low < high:                                # the span holding global_bar
+        mid = (low + high + 1) // 2
+        if spans[mid][0] <= global_bar:
+            low = mid
+        else:
+            high = mid - 1
+    return (low, *spans[low])
+
+
+@lru_cache(maxsize=512)
+def _write_riff(seed: int, index: int, start_bar: int, held_bars: int, period: int) -> Riff:
+    def u(*keys: int) -> float:
+        return _unit(seed, _T_RIFF, index, 2, *keys)
+
+    home = _pick(_RIFF_HOMES, u(0))
+    near = _NEIGHBOURS[home][0 if u(1) < 0.6 else 1]
+    fall_slot = _pick(((6, 0.40), (8, 0.70), (0, 1.0)), u(2))
+
+    bars: list[tuple[SubNote, ...]] = []
+    pitch = home
+    for bar in range(period):
+        if bar >= 4 and u(3, bar) < 0.6:
+            bars.append(bars[bar - 4])               # an 8-bar riff's second half mostly restates its first
+            if bars[-1]:
+                pitch = bars[-1][0].offset
+            continue
+        if bar > 0 and u(4, bar) < _BAR_MOVE_CHANCE:
+            pitch = near if pitch == home else home
+        position = bar % GROUP_BARS
+        table = (_FIGURES_FIRST if position == 0 else _FIGURES_LAST if position == GROUP_BARS - 1
+                 else _FIGURES_MIDDLE)
+        figure = _FIGURES[_pick(table, u(5, bar))]
+        other = near if pitch == home else home
+        late = len(figure) >= 2 and u(6, bar) < _LATE_MOVE_CHANCE
+        notes = []
+        for n, (slot, length) in enumerate(figure):
+            last_held = late and n == len(figure) - 1 and length == "H"
+            beats = _pick(_SHORT_BEATS if length == "S" else _HELD_BEATS, u(7, bar, slot))
+            velocity = (88 if length == "S" else 104) + int(u(8, bar, slot) * (11 if length == "S" else 9))
+            notes.append(SubNote(slot, other if last_held else pitch, beats, velocity, "riff"))
+        bars.append(tuple(notes))
+    return Riff(index=index, start_bar=start_bar, held_bars=held_bars, period=period,
+                fall_slot=fall_slot, bars=tuple(bars))
+
+
+def riff_at(seed: int, global_bar: int) -> Riff:
+    """The riff sounding in this bar."""
+    return _write_riff(seed, *_riff_span(seed, global_bar))
+
+
+def is_fall_bar(seed: int, global_bar: int) -> bool:
+    """The last bar of a 4-bar phrase, about one phrase in two or three."""
+    if global_bar % GROUP_BARS != GROUP_BARS - 1:
+        return False
+    return _unit(seed, _T_FALL, global_bar // GROUP_BARS) < FALL_CHANCE
+
+
+def _written_sub_bar(seed: int, global_bar: int) -> tuple[SubNote, ...]:
+    riff = riff_at(seed, global_bar)
+    notes = riff.bars[(global_bar - riff.start_bar) % riff.period]
+    if not is_fall_bar(seed, global_bar):
+        return notes
+    # The phrase drops to a low "dum" on the fundamental and leaves a gap.
+    fall_beats = {0: 2.0, 6: 1.5, 8: 1.0}[riff.fall_slot]
+    kept = tuple(note for note in notes if note.slot < riff.fall_slot)
+    return kept + (SubNote(riff.fall_slot, 0, fall_beats, 116, "fall"),)
+
+
+@lru_cache(maxsize=4096)
+def sub_bar(seed: int, global_bar: int) -> tuple[SubNote, ...]:
+    """The sub's notes in this bar, each cut where the next note starts."""
+    notes = _written_sub_bar(seed, global_bar)
+    following = _written_sub_bar(seed, global_bar + 1)
+    onsets = [note.slot for note in notes]
+    if following:
+        onsets.append(STEPS_PER_BAR + following[0].slot)
+    out = []
+    for n, note in enumerate(notes):
+        beats = min(note.beats, SUB_MAX_BEATS)
+        if n + 1 < len(onsets):
+            beats = min(beats, (onsets[n + 1] - note.slot) / 4.0)
+        out.append(SubNote(note.slot, note.offset, beats, note.velocity, note.kind))
+    return tuple(out)
+
+
+# ===========================================================================
+# Hooks (J7)
+# ===========================================================================
+
+HOOK_LOW_NOTE, HOOK_HIGH_NOTE = 58, 67     # 233 Hz to 392 Hz
+# Under a hook the low-end pattern thins (low-band flux -2.1 dB): the kick's
+# in-between hits are dealt at this share of their chance. The sub is untouched.
+_LOW_UNDER_HOOK = 0.60
+
+_T_HOOK = 12
+
+# Where hooks sit in an 8-bar phrase: bars 4, 5 and 8 are the busiest
+# (hooks.md, "Call and response" verdict 2). Bars 4 and 8 share a shape that
+# returns every 4 bars; bar 5 has one that returns every 8. Each comes back
+# three times and is replaced. A fourth, one-off hook lands elsewhere about
+# 6 phrases in 10: most shapes in the reference never come back.
+#   expected bars with a hook in 8: 0.85 + 0.85 + 0.80 + 0.60 = 3.1  (39%)
+_HOOK_PHRASE          = 8
+_HOOK_FOUR_BAR_SLOTS  = (3, 7)
+_HOOK_EIGHT_BAR_SLOT  = 4
+_HOOK_ONE_OFF_BARS    = (0, 1, 2, 5, 6)
+_HOOK_FOUR_BAR_CHANCE = 0.85
+_HOOK_EIGHT_BAR_CHANCE = 0.80
+_HOOK_ONE_OFF_CHANCE  = 0.60
+_HOOK_RETURNS         = 3
+
+# Length of a hook in 16ths. Reference: median 1.2 beats, 81% under 2 beats;
+# 44% of events 0.5-1 beat, 38% 1-2, 11% 2-3, 5% 3-4, 3% longer.
+_HOOK_LENGTHS = ((3, 0.22), (4, 0.44), (5, 0.62), (6, 0.76), (7, 0.82),
+                 (9, 0.92), (12, 0.97), (16, 1.0))
+# Where it starts: towards the back of the bar, answering the drums.
+_HOOK_STARTS = ((2, 0.10), (4, 0.30), (6, 0.50), (8, 0.75), (10, 0.90), (12, 1.0))
+# Pitch classes above the root, by weight: 5th, minor 3rd, root, 4th.
+_HOOK_DEGREES = ((7, 0.30), (3, 0.55), (0, 0.80), (5, 1.0))
+_HOOK_DYAD_CHANCE = 0.35       # median 2 pitch classes sounding: dyads, not stacks
+
+
+@dataclass(frozen=True)
+class HookNote:
+    slot:     int
+    note:     int      # MIDI note
+    steps:    int      # length in 16ths
+    velocity: int
+
+
+def _hook_shape_id(seed: int, global_bar: int) -> tuple[int, int] | None:
+    """(family, number) of the shape sounding in this bar, or None for no hook."""
+    phrase, bar = divmod(global_bar, _HOOK_PHRASE)
+    if bar in _HOOK_FOUR_BAR_SLOTS:
+        if _unit(seed, _T_HOOK, 0, global_bar) >= _HOOK_FOUR_BAR_CHANCE:
+            return None
+        appearance = phrase * len(_HOOK_FOUR_BAR_SLOTS) + _HOOK_FOUR_BAR_SLOTS.index(bar)
+        return (0, appearance // _HOOK_RETURNS)
+    if bar == _HOOK_EIGHT_BAR_SLOT:
+        if _unit(seed, _T_HOOK, 0, global_bar) >= _HOOK_EIGHT_BAR_CHANCE:
+            return None
+        return (1, phrase // _HOOK_RETURNS)
+    one_off = _HOOK_ONE_OFF_BARS[int(_unit(seed, _T_HOOK, 1, phrase) * len(_HOOK_ONE_OFF_BARS))]
+    if bar == one_off and _unit(seed, _T_HOOK, 2, phrase) < _HOOK_ONE_OFF_CHANCE:
+        return (2, phrase)
+    return None
+
+
+def has_hook(seed: int, global_bar: int) -> bool:
+    return _hook_shape_id(seed, global_bar) is not None
+
+
+@lru_cache(maxsize=1024)
+def _hook_shape(seed: int, family: int, number: int, root_class: int) -> tuple[HookNote, ...]:
+    def u(*keys: int) -> float:
+        return _unit(seed, _T_HOOK, 3, family, number, *keys)
+
+    length = _pick(_HOOK_LENGTHS, u(0))
+    start = min(_pick(_HOOK_STARTS, u(1)), STEPS_PER_BAR - length)
+    if length <= 3:
+        pieces = [length]
+    elif length <= 7:
+        first = 2 if u(2) < 0.6 else 3
+        pieces = [first, length - first]
+    else:
+        pieces = [2, 2, length - 4] if u(2) < 0.5 else [3, length - 6, 3]
+
+    def pitch(*keys: int) -> int:
+        degree = _pick(_HOOK_DEGREES, u(*keys))
+        for _ in range(4):                          # walk on if this degree has no note in the register
+            fits = [n for n in range(HOOK_LOW_NOTE, HOOK_HIGH_NOTE + 1) if n % 12 == (root_class + degree) % 12]
+            if fits:
+                return fits[0]
+            degree = {7: 3, 3: 0, 0: 5, 5: 7}[degree]
+        return HOOK_LOW_NOTE
+
+    notes, slot = [], start
+    for n, steps in enumerate(pieces):
+        velocity = 96 + int(u(4, n) * 13) - (6 if slot % 2 else 0)
+        first = pitch(3, n)
+        notes.append(HookNote(slot, first, steps, velocity))
+        if n == len(pieces) - 1 and u(5) < _HOOK_DYAD_CHANCE:
+            second = pitch(6, n)
+            if second != first:
+                notes.append(HookNote(slot, second, steps, velocity - 6))
+        slot += steps
+    return tuple(notes)
+
+
+def hook_bar(seed: int, global_bar: int, root_note: int) -> tuple[HookNote, ...]:
+    """The hook's notes in this bar; empty in about 5 bars of every 8."""
+    shape = _hook_shape_id(seed, global_bar)
+    if shape is None:
+        return ()
+    return _hook_shape(seed, shape[0], shape[1], root_note % 12)

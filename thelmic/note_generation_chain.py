@@ -30,7 +30,7 @@ from thelmic.voices.call import CallIntentStream
 from thelmic.voices.response import ResponseIntentStream
 from thelmic.voices.ghost_32nd import Ghost32ndStream
 from thelmic.voices.drones import DroneSpaceyStream, DroneRumbleStream, DroneTensionStream
-from thelmic.voices.jungle import JungleBreakStream
+from thelmic.voices.jungle import JungleBreakStream, JungleHookStream, JungleSubStream
 from thelmic.archetypes import RhythmicArchetype, resolve_archetype
 from thelmic.phrase_engine import context_for_phrase, pending_archetype_for
 from thelmic.landscape_map import SignatureRhythm
@@ -40,7 +40,6 @@ from thelmic.anticipation_engine import compute_anticipation, AnticipationState
 
 VERSION    = "v1.0"
 BANK_STEPS = BARS_PER_PHRASE * PHRASES_PER_BANK * 16
-_HOOK_BARS = frozenset({0, 1, 4, 12})  # sub-phrase layout: build/hold/release
 
 _kick_stream     = KickIntentStream()
 _snare_stream    = SnareIntentStream()
@@ -55,6 +54,8 @@ _drone_spacey    = DroneSpaceyStream()
 _drone_rumble    = DroneRumbleStream()
 _drone_tension   = DroneTensionStream()
 _jungle_break    = JungleBreakStream()
+_jungle_sub      = JungleSubStream()
+_jungle_hook     = JungleHookStream()
 
 
 def generate_bank(
@@ -199,6 +200,7 @@ def intents_for_frame(
         # boundaries (bars 4, 12 = hold start, release start).
         # Hook and call/response are MUTUALLY EXCLUSIVE within a bar.
         bar_0idx  = frame.bar_index - 1        # 0-indexed bar within phrase
+        _HOOK_BARS = frozenset({0, 1, 4, 12})  # sub-phrase layout: build/hold/release
         is_hook_bar = bar_0idx in _HOOK_BARS
 
         hook_active          = sp < 0.50 and is_hook_bar
@@ -245,11 +247,11 @@ def _jungle_intents_for_frame(
     in GABBER), no call and response, no drones: the reference has no sustained
     voice and no riser.
     """
-    intents: list[Intent] = [*_jungle_break.intents_for_frame(frame, sr)]
-    intents.extend(_sub_stream.intents_for_frame(frame, context, dims, sr))
-    if dims.sparsity < 0.50 and (frame.bar_index - 1) in _HOOK_BARS:
-        intents.extend(_hook_stream.intents_for_frame(frame, context, dims, sr))
-    return tuple(intents)
+    return (
+        *_jungle_break.intents_for_frame(frame, dims, sr),
+        *_jungle_sub.intents_for_frame(frame, dims, sr),
+        *_jungle_hook.intents_for_frame(frame, dims, sr),
+    )
 
 
 def _resolved_to_midi_event(event, frame: StructureFrame) -> MIDIEvent:

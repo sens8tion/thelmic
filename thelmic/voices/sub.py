@@ -56,7 +56,6 @@ def _archetype_durations(archetype) -> tuple[float, float]:
         RA.FOUR_ON_THE_FLOOR:  (0.12, 0.08),   # hard house pump: short sidechain notes
         RA.HAPPY_HARDCORE:     (0.10, 0.06),   # very short, rapid
         RA.GABBER:             (0.07, 0.05),   # minimal — kick absorbs sub
-        RA.JUNGLE:             (0.21, 0.12),   # ~0.6 beats: struck notes, never a drone
     }
     return table.get(archetype, (_PRIMARY_DUR_DEFAULT, _SECONDARY_DUR_DEFAULT))
 

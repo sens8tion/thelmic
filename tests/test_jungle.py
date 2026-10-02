@@ -431,3 +431,255 @@ def test_the_odd_sixteenths_sit_under_the_eighths():
     odd = mean(e.velocity for e in hats if _slot(e) % 2)
     even = mean(e.velocity for e in hats if _slot(e) % 2 == 0)
     assert even - odd >= 8                                      # "off-16ths 12 softer"
+
+
+# ---------------------------------------------------------------------------
+# J6 - the sub riff
+# ---------------------------------------------------------------------------
+
+BEAT = 60.0 / 174.0                 # durations are seconds at 174 BPM
+_SUB_SEEDS, _SUB_BANKS = range(1, 13), 16
+_ROOT = 30
+_FUNDAMENTAL = _ROOT - 12
+
+
+@lru_cache(maxsize=None)
+def _layer_notes(seed: int, banks: int, layer: str) -> tuple:
+    """(global 16th, note, length in beats, reason) for one layer, in time order."""
+    notes = []
+    for index in range(banks):
+        for event in _bank(index, seed).all_events():
+            if event.layer == layer:
+                notes.append((index * 256 + int(event.musical_step), event.note,
+                              event.duration / BEAT, event.reason))
+    return tuple(sorted(notes))
+
+
+@lru_cache(maxsize=None)
+def _sub_census() -> dict:
+    gaps, lengths, intervals, per_bar, slots = [], [], [], [], []
+    bars = falls = phrases = 0
+    for seed in _SUB_SEEDS:
+        notes = _layer_notes(seed, _SUB_BANKS, "sub")
+        count = defaultdict(int)
+        for step, _, beats, _ in notes:
+            count[step // 16] += 1
+            lengths.append(beats)
+            slots.append(step % 16)
+        for a, b in zip(notes, notes[1:]):
+            gaps.append((b[0] - a[0]) / 4.0)
+            intervals.append(abs(b[1] - a[1]))
+        total = _SUB_BANKS * 16
+        bars += total
+        per_bar.extend(count[b] for b in range(total))
+        fall_bars = {step // 16 for step, _, _, reason in notes if reason == "jungle_fall"}
+        phrases += total // 4
+        falls += len(fall_bars)
+    return {"gaps": gaps, "lengths": lengths, "intervals": intervals, "per_bar": per_bar,
+            "slots": slots, "bars": bars, "falls": falls, "phrases": phrases}
+
+
+def test_sub_notes_start_about_a_beat_apart_and_last_about_0_6_beats():
+    """Reference: median gap 1.00 beat, median note 0.60 beats, nothing held past 1.4 bars."""
+    census = _sub_census()
+    assert median(census["gaps"]) == pytest.approx(1.0, abs=0.25)
+    assert median(census["lengths"]) == pytest.approx(0.60, abs=0.12)
+    assert max(census["lengths"]) <= 4.0
+    assert min(census["lengths"]) >= 0.15       # reference: no short note under about 0.15 beats
+
+
+def test_sub_changes_pitch_about_0_9_times_a_bar_by_repeats_and_steps():
+    """Reference: 0.90 changes a bar; repeats and 1-2 semitone steps are the two largest classes."""
+    census = _sub_census()
+    intervals = census["intervals"]
+    changes = sum(i != 0 for i in intervals)
+    assert changes / census["bars"] == pytest.approx(0.90, abs=0.25)
+    repeats = mean(i == 0 for i in intervals)
+    steps = mean(i in (1, 2) for i in intervals)
+    leaps = 1.0 - repeats - steps
+    assert repeats + steps >= 0.80
+    assert repeats > leaps and steps > leaps
+    assert 0 < mean(i == 12 for i in intervals) + 0.02 <= 0.04      # octaves stay rare (1.8%)
+
+
+def test_sub_is_a_riff_of_struck_notes_not_a_drone_and_not_a_run():
+    census = _sub_census()
+    assert 2.0 <= mean(census["per_bar"]) <= 3.5        # reference: about 2-3 a bar, median 4 detected
+    assert max(census["per_bar"]) < 8                   # 8+ onsets in 1.6% of reference bars
+    assert all(slot % 2 == 0 for slot in census["slots"])       # on the 8th grid
+    # attacks at the front of the bar (reference: 57% of sub onsets in the first half)
+    assert mean(slot < 8 for slot in census["slots"]) == pytest.approx(0.60, abs=0.10)
+    first = max(set(census["slots"]), key=census["slots"].count)
+    assert first == 0
+
+
+def test_sub_lives_above_its_fundamental_and_below_the_hooks():
+    for seed in _SUB_SEEDS:
+        notes = [n for _, n, _, _ in _layer_notes(seed, _SUB_BANKS, "sub")]
+        assert min(notes) == _FUNDAMENTAL               # it does fall to the fundamental
+        assert max(notes) <= _FUNDAMENTAL + 10          # and stays within a seventh of it
+        assert max(notes) < 58                          # hooks start at 233 Hz
+
+
+def test_about_one_phrase_in_two_or_three_falls_to_the_fundamental_and_leaves_a_gap():
+    census = _sub_census()
+    assert 1 / 3 - 0.06 <= census["falls"] / census["phrases"] <= 1 / 2 + 0.06
+    for seed in (1, 2, 3):
+        notes = _layer_notes(seed, _SUB_BANKS, "sub")
+        for bar in {step // 16 for step, _, _, reason in notes if reason == "jungle_fall"}:
+            assert bar % 4 == 3                                         # the phrase's last bar
+            in_bar = [n for n in notes if n[0] // 16 == bar]
+            step, note, beats, reason = in_bar[-1]
+            assert reason == "jungle_fall" and note == _FUNDAMENTAL     # the low "dum"
+            assert all(n[1] > _FUNDAMENTAL for n in in_bar[:-1])        # reached from above
+            assert (step % 16) / 4.0 + beats <= 3.0 + 0.01             # then at least a beat of gap
+
+
+def _bar_signature(notes, bar):
+    return tuple((s % 16, n, round(b, 3)) for s, n, b, r in notes if s // 16 == bar and r != "jungle_fall")
+
+
+def test_riffs_are_4_or_8_bars_and_are_held_about_11_bars():
+    """Reference: 4-bar or 8-bar riffs; runs of median 11 bars, interquartile 7-15."""
+    held, periods = [], []
+    for seed in _SUB_SEEDS:
+        riff, bar = jungle.riff_at(seed, 0), 0
+        while bar < 2000:
+            riff = jungle.riff_at(seed, bar)
+            assert riff.start_bar == bar and riff.start_bar % 4 == 0    # changes on the phrase grid
+            held.append(riff.held_bars)
+            periods.append(riff.period)
+            bar += riff.held_bars
+    assert set(periods) == {4, 8}
+    assert mean(p == 4 for p in periods) == pytest.approx(0.56, abs=0.08)    # 39% : 31%
+    assert 8 <= median(held) <= 12 and mean(held) == pytest.approx(11.0, abs=1.5)
+    assert min(held) >= 7 and max(held) <= 16
+
+
+def test_a_riff_repeats_as_written_then_changes():
+    """Inside a riff the bar one period back is the same bar; across a change it is not."""
+    for seed in (1, 2, 3, 4):
+        notes = _layer_notes(seed, _SUB_BANKS, "sub")
+        fall_bars = {s // 16 for s, _, _, r in notes if r == "jungle_fall"}
+        same = changed = different = 0
+        for bar in range(_SUB_BANKS * 16):
+            riff = jungle.riff_at(seed, bar)
+            back = bar - riff.period
+            if bar in fall_bars or back in fall_bars or bar + 1 in fall_bars or back + 1 in fall_bars:
+                continue        # a fall rewrites its bar and trims the bar before's last note
+            if back >= riff.start_bar:
+                assert _bar_signature(notes, bar) == _bar_signature(notes, back), (seed, bar)
+                same += 1
+            elif back >= 0 and bar - riff.start_bar < 4 and bar % 4 == 0:
+                changed += 1
+                different += _bar_signature(notes, bar) != _bar_signature(notes, back)
+        assert same > 60
+        assert different / changed >= 0.7       # a new riff is nearly always a different first bar
+
+
+def test_the_engine_says_what_the_sub_instrument_must_do():
+    """Sound the engine cannot make: published for the instrument, numbers from bass.md."""
+    voice = jungle.SUB_VOICE
+    assert voice["waveform"] == "sine"
+    assert voice["pitch_drop_semitones"] == 30 and voice["pitch_drop_tau_ms"] == 12
+    assert voice["sidechain_db"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# J7 - hooks
+# ---------------------------------------------------------------------------
+
+_HOOK_SEEDS, _HOOK_BANKS = range(1, 13), 16
+
+
+@lru_cache(maxsize=None)
+def _hook_events(seed: int) -> dict:
+    """bar -> ((slot, note, beats), ...): one hook event per bar that has one."""
+    events = defaultdict(list)
+    for step, note, beats, _ in _layer_notes(seed, _HOOK_BANKS, "hook"):
+        events[step // 16].append((step % 16, note, round(beats, 3)))
+    return {bar: tuple(sorted(notes)) for bar, notes in events.items()}
+
+
+def _hook_length(notes) -> float:
+    return max(slot / 4.0 + beats for slot, _, beats in notes) - min(slot for slot, _, _ in notes) / 4.0
+
+
+def test_a_hook_sounds_in_about_3_bars_of_every_8():
+    """Reference: 39% of bars, 3.1 in every 8; per section 21% to 58%."""
+    share = mean(len(_hook_events(seed)) / (_HOOK_BANKS * 16) for seed in _HOOK_SEEDS)
+    assert share == pytest.approx(0.39, abs=0.05)
+    for seed in _HOOK_SEEDS:
+        assert 0.21 <= len(_hook_events(seed)) / (_HOOK_BANKS * 16) <= 0.58
+    # and the old window (bars 1, 2, 5, 13 of 16) is gone: hooks reach most positions
+    positions = {bar % 16 for seed in _HOOK_SEEDS for bar in _hook_events(seed)}
+    assert len(positions) >= 12
+
+
+def test_hooks_are_fragments():
+    """Reference: median 1.2 beats, 81% under 2 beats, 3% as long as a bar."""
+    lengths = [_hook_length(notes) for seed in _HOOK_SEEDS for notes in _hook_events(seed).values()]
+    assert median(lengths) == pytest.approx(1.2, abs=0.3)
+    assert mean(length < 2.0 for length in lengths) == pytest.approx(0.81, abs=0.08)
+    assert max(lengths) <= 4.0
+
+
+def test_hooks_sit_at_233_to_392_hz_above_the_sub():
+    notes = [n for seed in _HOOK_SEEDS for event in _hook_events(seed).values() for _, n, _ in event]
+    assert min(notes) >= 58 and max(notes) <= 67            # A#3 233 Hz .. G4 392 Hz
+    for root in (24, 29, 30, 35, 41, 47):                   # whatever the key
+        bank = generate_bank(0, _dims(), signature_rhythm=_sr(1, root), archetype="jungle")
+        hook = [e.note for e in bank.all_events() if e.layer == "hook"]
+        assert hook and min(hook) >= 58 and max(hook) <= 67
+        # the 5th, the minor 3rd, the root and the 4th of the key
+        assert {(n - root) % 12 for n in hook} <= {7, 3, 0, 5}
+
+
+def test_a_hook_shape_comes_back_about_three_times_at_4_or_8_bars_then_is_replaced():
+    """Reference: recurring shapes return a median of 3 times, at 4-8 bar spacing; most never return."""
+    appearances, spacings, one_offs, shapes = [], [], 0, 0
+    for seed in _HOOK_SEEDS:
+        seen = defaultdict(list)
+        for bar, notes in sorted(_hook_events(seed).items()):
+            seen[notes].append(bar)
+        for bars in seen.values():
+            shapes += 1
+            if len(bars) == 1:
+                one_offs += 1
+                continue
+            appearances.append(len(bars))
+            spacings.extend(b - a for a, b in zip(bars, bars[1:]))
+    assert median(appearances) == 3
+    assert mean(count <= 4 for count in appearances) >= 0.90    # nothing plays every bar for 16
+    assert mean(s in (4, 8) for s in spacings) >= 0.80
+    assert one_offs / shapes >= 0.25                # reference: 61% of shapes never return
+
+
+def test_the_kick_pattern_thins_under_a_hook():
+    """Reference: low-band flux -2.1 dB while a hook sounds; the sub is not turned down."""
+    under, clear, sub_under, sub_clear = [], [], [], []
+    for seed in _HOOK_SEEDS:
+        hook_bars = set(_hook_events(seed))
+        sub = _layer_notes(seed, _HOOK_BANKS, "sub")
+        velocity = defaultdict(list)
+        for index in range(_HOOK_BANKS):
+            for e in _bank(index, seed).all_events():
+                if e.layer == "sub":
+                    velocity[index * 16 + _bar(e)].append(e.velocity)
+        for bar, bar_events in enumerate(_dealt_bars(seed, _HOOK_BANKS)):
+            if _is_fill(bar_events):
+                continue
+            kicks = sum(e.layer == "kick" for e in bar_events)
+            (under if bar in hook_bars else clear).append(kicks)
+            (sub_under if bar in hook_bars else sub_clear).extend(velocity[bar])
+        assert sub
+    assert mean(under) < mean(clear) - 0.1
+    assert min(under) >= 2                                      # the spine kicks stay
+    assert mean(sub_under) == pytest.approx(mean(sub_clear), abs=3)
+
+
+def test_no_hook_and_no_sub_when_sparsity_takes_them_out():
+    layers = lambda sparsity: {e.layer for e in _bank(0, 1, sparsity).all_events()}
+    assert {"hook", "sub"} <= layers(0.2)
+    assert "hook" not in layers(0.55) and "sub" in layers(0.55)         # the hook leaves first
+    assert not {"hook", "sub"} & layers(0.70)

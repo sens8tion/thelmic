@@ -12,12 +12,18 @@ Lanes and layers:
   low   kick
   mid   snare (spine, signature and fill hits), ghost_snare (the in-between hits)
   high  hat (the 16th carrier), open_hat (a signature accent)
+
+The sub plays a riff written once and repeated (layer "sub"); the hook plays
+short shapes in the low mids in about 3 bars of every 8 (layer "hook").
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from thelmic import jungle
 from thelmic.bank_generator import CLOSED_HAT_NOTE, KICK_NOTE, OPEN_HAT_NOTE, SNARE_NOTE
+from thelmic.dimensions import Dimensions
 from thelmic.landscape_map import SignatureRhythm
 from thelmic.stream_engine import STEPS_PER_BAR, Intent, StructureFrame
 from thelmic.voices import make_intent
@@ -28,6 +34,13 @@ _SNARE_DUR    = 0.06
 _GHOST_DUR    = 0.03
 _HAT_DUR      = 0.035
 _OPEN_HAT_DUR = 0.12
+_BEAT          = 60.0 / 174.0
+_SIXTEENTH     = _BEAT / 4.0
+
+# The sub leaves at the sparsity the other archetypes' sub leaves at; the hook
+# leaves before it (removal order: hook, then sub; the break never).
+SUB_SPARSITY_GATE  = 0.65
+HOOK_SPARSITY_GATE = 0.50
 
 
 def global_bar(frame: StructureFrame) -> int:
@@ -38,11 +51,64 @@ def global_bar(frame: StructureFrame) -> int:
 class JungleBreakStream:
     """Kick, snare, ghost snare and hat for one frame of a JUNGLE phrase."""
 
-    def intents_for_frame(self, frame: StructureFrame, sr: SignatureRhythm) -> tuple[Intent, ...]:
-        deal = jungle.deal_bar(sr.base_pattern_seed, global_bar(frame))
+    def intents_for_frame(
+        self, frame: StructureFrame, dims: Dimensions, sr: SignatureRhythm,
+    ) -> tuple[Intent, ...]:
+        bar = global_bar(frame)
+        under_hook = hook_sounds(dims) and jungle.has_hook(sr.base_pattern_seed, bar)
+        deal = jungle.deal_bar(sr.base_pattern_seed, bar, under_hook)
         return tuple(
             _intent(frame, hit) for hit in deal.hits if hit.slot == frame.step_in_bar
         )
+
+
+def hook_sounds(dims: Dimensions) -> bool:
+    return dims.sparsity < HOOK_SPARSITY_GATE
+
+
+def fundamental(sr: SignatureRhythm) -> int:
+    """The sub's lowest note: an octave under the bass root, as for every archetype."""
+    return max(0, min(127, sr.root_note - 12))
+
+
+class JungleSubStream:
+    """The sub: a riff of struck notes above the fundamental, falling to it."""
+
+    def intents_for_frame(
+        self, frame: StructureFrame, dims: Dimensions, sr: SignatureRhythm,
+    ) -> tuple[Intent, ...]:
+        if dims.sparsity >= SUB_SPARSITY_GATE:
+            return ()
+        return tuple(
+            make_intent(frame, "sub", f"sub_{note.kind}", note.velocity,
+                        round(note.beats * _BEAT, 3), f"jungle_{note.kind}",
+                        fundamental(sr) + note.offset, 8)
+            for note in jungle.sub_bar(sr.base_pattern_seed, global_bar(frame))
+            if note.slot == frame.step_in_bar
+        )
+
+
+class JungleHookStream:
+    """Hooks: fragments of a beat or so, 233-392 Hz, in about 3 bars of every 8."""
+
+    def intents_for_frame(
+        self, frame: StructureFrame, dims: Dimensions, sr: SignatureRhythm,
+    ) -> tuple[Intent, ...]:
+        if not hook_sounds(dims):
+            return ()
+        intents = []
+        for n, note in enumerate(jungle.hook_bar(sr.base_pattern_seed, global_bar(frame), sr.root_note)):
+            if note.slot != frame.step_in_bar:
+                continue
+            intent = make_intent(frame, "hook", "hook", note.velocity,
+                                 round(note.steps * _SIXTEENTH - 0.01, 3), "jungle_hook", note.note, 7)
+            intents.append(_distinct(intent, n))
+        return tuple(intents)
+
+
+def _distinct(intent: Intent, n: int) -> Intent:
+    """A dyad is two intents on one step; each needs its own id."""
+    return replace(intent, intent_id=f"{intent.intent_id}:{n}")
 
 
 def _intent(frame: StructureFrame, hit: jungle.Hit) -> Intent:
